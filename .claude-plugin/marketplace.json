@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "vnext-ai-toolkit",
-      "source": ".",
+      "source": "./",
       "description": "AI tooling for the vNext platform: analyze, design, author, validate, security-review and document vNext workflow-domain components (workflow/view/schema/task/function/extension). Schema-first against @burgan-tech/vnext-schema.",
       "category": "development",
       "keywords": ["vnext", "workflow", "scaffolding", "burgan-tech"],
