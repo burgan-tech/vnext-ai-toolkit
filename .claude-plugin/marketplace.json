@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "burgan-tech",
+  "owner": {
+    "name": "Burgan Tech vNext Team",
+    "url": "https://github.com/burgan-tech"
+  },
+  "description": "Burgan Tech Claude Code plugins for the vNext workflow platform.",
+  "plugins": [
+    {
+      "name": "vnext-ai-toolkit",
+      "source": "./",
+      "description": "AI tooling for the vNext platform: analyze, design, author, validate, security-review and document vNext workflow-domain components (workflow/view/schema/task/function/extension). Schema-first against @burgan-tech/vnext-schema.",
+      "category": "development",
+      "keywords": ["vnext", "workflow", "scaffolding", "burgan-tech"],
+      "homepage": "https://github.com/burgan-tech/vnext-ai-toolkit",
+      "repository": "https://github.com/burgan-tech/vnext-ai-toolkit",
+      "license": "MIT"
+    }
+  ]
+}
