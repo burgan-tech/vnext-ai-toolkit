@@ -14,8 +14,8 @@ name: Publish Plugin
 # - release-vX.Y auto-increments the patch to the first free vX.Y.Z tag.
 # - release-vX.Y.Z publishes that exact version.
 # - workflow_dispatch can also pass an explicit X.Y.Z version.
-# The version bump is pushed back to the release branch using GITHUB_TOKEN.
-# Branch protection/rulesets must allow GitHub Actions to push for this to work.
+# The version bump is pushed back to the (PR-protected) branch using a GitHub App token
+# whose identity is on the branch ruleset's bypass list — GITHUB_TOKEN cannot bypass it.
 
 on:
   push:
@@ -44,10 +44,19 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Generate GitHub App token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: vnext-ai-toolkit
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # need full tag history to compute the next patch
+          token: ${{ steps.generate_token.outputs.token }} # App token so the bump push bypasses the PR-only rule
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -126,7 +135,7 @@ jobs:
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
