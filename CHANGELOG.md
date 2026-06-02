@@ -4,6 +4,25 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
 ## [Unreleased]
 
+### Changed
+
+- **Restructured around a multi-agent pipeline.** Replaced the single `vnext-architect`
+  orchestrator with seven specialized agents — `analyst`, `architect`, `component-author`,
+  `validator`, `security-reviewer`, `doc-writer`, and `reviewer` — wired together by the
+  commands (analyst → architect → component-author → validator → security-reviewer +
+  doc-writer in parallel).
+- **New command set.** Replaced `/vnext-design-process`, `/vnext-init`, `/vnext-validate`
+  with `/new-domain`, `/new-component`, `/validate`, and `/build`, aligned to the
+  `@burgan-tech/vnext-template` project lifecycle (`npm run setup` / `validate` / `build`).
+- **Added the `authoring-vnext-components` skill** as the core reference (component
+  envelope, type-specific `attributes`, `.csx` `scriptCode` shape, transition triggers,
+  validate-fix loop), alongside the eight focused authoring skills.
+- **Schema source is now the pinned npm package.** Components are authored against
+  `node_modules/@burgan-tech/vnext-schema/schemas/*.json` (the version pinned in the
+  project's `package.json`), with Context7 MCP / `WebFetch` for docs — replacing the
+  raw-GitHub-tag fetch chain.
+- Rewrote `README.md` to match the new structure.
+
 ## [0.1.0] — initial release
 
 ### Added
