@@ -1,11 +1,11 @@
 {
   "name": "vnext-ai-toolkit",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "AI tooling for the vNext platform: process designer (multi-turn architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration test scaffolding. Canonical schema-first — every component is generated from the official JSON Schema at the workspace's schemaVersion tag, never from hardcoded assumptions.",
   "author": {
     "name": "Burgan Tech vNext Team",
     "url": "https://github.com/burgan-tech"
-    },
+  },
   "homepage": "https://github.com/burgan-tech/vnext-ai-toolkit",
   "repository": "https://github.com/burgan-tech/vnext-ai-toolkit",
   "license": "MIT",
@@ -17,7 +17,10 @@
     "claude-code",
     "burgan-tech"
   ],
-  "compatibleAgents": ["claude-code", "codex"],
+  "compatibleAgents": [
+    "claude-code",
+    "codex"
+  ],
   "agents": [
     "./agents/analyst.md",
     "./agents/architect.md",
@@ -59,7 +62,18 @@
   ],
   "vnext": {
     "canonicalSchemaSource": "https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}.json",
-    "fallbackChain": ["v{schemaVersion}", "master", "references/concepts/component-schemas.md snapshot"],
-    "componentTypes": ["workflow", "view", "task", "schema", "function", "extension"]
+    "fallbackChain": [
+      "v{schemaVersion}",
+      "master",
+      "references/concepts/component-schemas.md snapshot"
+    ],
+    "componentTypes": [
+      "workflow",
+      "view",
+      "task",
+      "schema",
+      "function",
+      "extension"
+    ]
   }
 }
