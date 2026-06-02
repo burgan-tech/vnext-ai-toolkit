@@ -1,0 +1,45 @@
+### vNext Runtime API — {{workflowKey}}
+### REST Client (.http) — for manual exploration. The xUnit integration tests are CI's source of truth.
+
+@baseUrl = http://localhost:4201
+@apiVersion = 1
+@domain = {{domain}}
+@workflowKey = {{workflowKey}}
+
+### Start a new instance
+# @name start
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/start
+Content-Type: application/json
+
+{
+  /* Initial payload — match the workflow's master schema required fields */
+}
+
+###
+@instanceId = {{start.response.body.$.id}}
+
+### Get current state (long-poll for view + data)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/state
+
+### Execute a manual transition
+PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{transition-key}
+Content-Type: application/json
+
+{
+  /* Transition payload — match the transition's input schema */
+}
+
+### Call a function on this instance
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/{function-key}
+Content-Type: application/json
+
+{}
+
+### Retry a failed transition
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/retry
+
+### Query instances (list)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances?state={state-key}
+
+### List all instances
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances

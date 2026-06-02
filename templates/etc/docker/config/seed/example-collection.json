@@ -1,0 +1,53 @@
+{
+  "collection": {
+    "name": "{{domain}}",
+    "description": "MockLab seed for the {{domain}} domain. One collection per domain — append new mocks to this file, do NOT create parallel collections.",
+    "color": "#6366f1"
+  },
+  "folders": [],
+  "mocks": [
+    {
+      "httpMethod": "GET",
+      "route": "api/{{domain}}/health",
+      "queryString": null,
+      "requestBody": "",
+      "statusCode": 200,
+      "responseBody": "{ \"status\": \"ok\", \"domain\": \"{{domain}}\", \"timestamp\": \"{{ helpers.now() }}\" }",
+      "contentType": "application/json",
+      "description": "Health probe — proves the seed is loaded.",
+      "delayMs": 0,
+      "isActive": true,
+      "isSequential": false,
+      "folderIndex": null,
+      "rules": [],
+      "sequenceItems": []
+    },
+    {
+      "httpMethod": "POST",
+      "route": "api/{{domain}}/example/create",
+      "queryString": null,
+      "requestBody": "",
+      "statusCode": 200,
+      "responseBody": "{ \"id\": \"{{ helpers.guid() }}\", \"createdAt\": \"{{ helpers.now() }}\" }",
+      "contentType": "application/json",
+      "description": "Example POST endpoint. Replace with your real upstream contracts as you build out the domain.",
+      "delayMs": 500,
+      "isActive": true,
+      "isSequential": false,
+      "folderIndex": null,
+      "rules": [
+        {
+          "conditionField": "body.invalid",
+          "conditionOperator": "equals",
+          "conditionValue": "true",
+          "statusCode": 400,
+          "responseBody": "{ \"error\": \"bad request\", \"reason\": \"invalid flag was set\" }",
+          "contentType": "application/json",
+          "priority": 0,
+          "responseHeaders": []
+        }
+      ],
+      "sequenceItems": []
+    }
+  ]
+}

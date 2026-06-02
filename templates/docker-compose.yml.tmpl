@@ -1,0 +1,52 @@
+networks:
+  bbt-development:
+    external: true
+
+services:
+  mocklab:
+    image: ghcr.io/burgan-tech/mocklab:latest
+    container_name: mocklab
+    ports:
+      - "3001:5000"
+    environment:
+      Mocklab__SeedDirectory: /app/seed
+    volumes:
+      - ./etc/docker/config/seed:/app/seed
+    networks:
+      - bbt-development
+
+  mocklab-dapr:
+    image: daprio/daprd:latest
+    container_name: mocklab-dapr
+    command:
+      - ./daprd
+      - --app-id
+      - mocklab
+      - --app-port
+      - "5000"
+      - --dapr-http-port
+      - "3500"
+      - --dapr-grpc-port
+      - "50001"
+      - --config
+      - /etc/dapr/config.yaml
+      - --resources-path
+      - /etc/dapr/components
+      - --log-level
+      - info
+    volumes:
+      - ./etc/dapr:/etc/dapr
+    network_mode: "service:mocklab"
+    depends_on:
+      - mocklab
+
+# Notes
+# -----
+# - The `bbt-development` network is shared with the vNext runtime container.
+#   Create it once with: docker network create bbt-development
+# - MockLab seed files live in etc/docker/config/seed/{{domain}}-collection.json
+#   (one collection per domain — never split).
+# - After editing seed files, force re-import:
+#     docker compose down -v && docker compose up -d mocklab
+# - The mocklab-dapr sidecar exposes Dapr service invocation:
+#     http://localhost:3500/v1.0/invoke/mocklab/method/api/{{domain}}/{resource}/{action}
