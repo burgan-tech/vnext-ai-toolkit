@@ -19,22 +19,30 @@
   ],
   "compatibleAgents": ["claude-code", "codex"],
   "agents": [
-    "agents/analyst.md",
-    "agents/architect.md",
-    "agents/component-author.md",
-    "agents/validator.md",
-    "agents/reviewer.md",
-    "agents/security-reviewer.md",
-    "agents/doc-writer.md"
-  ],
-  "skills": [
-    "skills/authoring-vnext-components/SKILL.md"
+    "./agents/analyst.md",
+    "./agents/architect.md",
+    "./agents/component-author.md",
+    "./agents/validator.md",
+    "./agents/reviewer.md",
+    "./agents/security-reviewer.md",
+    "./agents/doc-writer.md"
   ],
   "commands": [
-    "commands/new-domain.md",
-    "commands/new-component.md",
-    "commands/validate.md",
-    "commands/build.md"
+    "./commands/new-domain.md",
+    "./commands/new-component.md",
+    "./commands/validate.md",
+    "./commands/build.md"
+  ],
+  "skills": [
+    "./skills/authoring-vnext-components",
+    "./skills/workflow-scaffold",
+    "./skills/view-design",
+    "./skills/schema-design",
+    "./skills/component-task",
+    "./skills/component-function",
+    "./skills/component-extension",
+    "./skills/integration-test",
+    "./skills/validate-and-fix"
   ],
   "references": [
     "references/decision-tree.md",
