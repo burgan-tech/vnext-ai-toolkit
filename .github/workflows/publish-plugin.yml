@@ -1,0 +1,152 @@
+name: Publish Plugin
+
+# Publishes the Claude Code plugin on every push to a release branch.
+#
+# Claude Code plugins are NOT uploaded to a central registry — they are installed
+# from git via a marketplace manifest (.claude-plugin/marketplace.json). "Publishing"
+# therefore means: validate the plugin, bump the version, commit it back, tag, and cut
+# a GitHub Release. Users then install with:
+#
+#   claude plugin marketplace add burgan-tech/vnext-ai-toolkit
+#   claude plugin install vnext-ai-toolkit@burgan-tech
+#
+# Versioning: major.minor comes from .claude-plugin/plugin.json; the patch auto-bumps
+# past the latest matching git tag (e.g. 0.1.0 -> 0.1.1 -> ...). A manual run can pin an
+# explicit version.
+
+on:
+  push:
+    branches:
+      - "release-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Explicit version X.Y.Z (leave blank to auto-increment patch)"
+        required: false
+        type: string
+      dry_run:
+        description: "Validate and compute the version, but do not commit/tag/release"
+        required: false
+        default: false
+        type: boolean
+
+# One release at a time per branch; don't cancel an in-flight release.
+concurrency:
+  group: publish-plugin-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full tag history to compute the next patch
+          persist-credentials: true # allow pushing the version bump + tag back
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate plugin and marketplace
+        # Non-strict on purpose: the manifest carries custom fields (compatibleAgents,
+        # references, vnext) that are valid-but-unrecognized; --strict would fail on them.
+        run: claude plugin validate .
+
+      - name: Compute version
+        id: version
+        run: |
+          set -euo pipefail
+          CUR=$(node -p "require('./.claude-plugin/plugin.json').version")
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            if ! echo "$INPUT" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Provided version '$INPUT' is not X.Y.Z"; exit 1
+            fi
+            NEW_VERSION="$INPUT"
+          else
+            MAJOR_MINOR="${CUR%.*}"
+            LATEST=$(git tag -l "v${MAJOR_MINOR}.*" | sed 's/^v//' | sort -V | tail -n1)
+            if [ -z "$LATEST" ]; then
+              NEXT="$CUR"            # first release on this major.minor: publish as-is
+            else
+              NEXT="${MAJOR_MINOR}.$(( ${LATEST##*.} + 1 ))"
+            fi
+            # publish the higher of (committed version, latest-tag + 1)
+            NEW_VERSION=$(printf '%s\n%s\n' "$CUR" "$NEXT" | sort -V | tail -n1)
+          fi
+          echo "Current: $CUR  ->  New: $NEW_VERSION"
+          echo "current=$CUR" >> "$GITHUB_OUTPUT"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v${NEW_VERSION}" >/dev/null; then
+            echo "::error::Tag v${NEW_VERSION} already exists"; exit 1
+          fi
+
+      - name: Bump version in plugin.json
+        if: steps.version.outputs.version != steps.version.outputs.current
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const p = ".claude-plugin/plugin.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.version = process.env.NEW_VERSION;
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          '
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Commit, tag and release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Commit the version bump if plugin.json changed. Pushing with GITHUB_TOKEN
+          # does not re-trigger this workflow; [skip ci] is belt-and-suspenders.
+          if ! git diff --quiet -- .claude-plugin/plugin.json; then
+            git add .claude-plugin/plugin.json
+            git commit -m "chore(release): v${VERSION} [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+          git tag -a "v${VERSION}" -m "vnext-ai-toolkit v${VERSION}"
+          git push origin "v${VERSION}"
+
+          gh release create "v${VERSION}" \
+            --title "vnext-ai-toolkit v${VERSION}" \
+            --target "${GITHUB_SHA}" \
+            --notes "$(cat <<EOF
+          Claude Code plugin **vnext-ai-toolkit v${VERSION}**.
+
+          ### Install
+          \`\`\`bash
+          claude plugin marketplace add burgan-tech/vnext-ai-toolkit
+          claude plugin install vnext-ai-toolkit@burgan-tech
+          \`\`\`
+
+          ### Update an existing install
+          \`\`\`bash
+          claude plugin marketplace update burgan-tech
+          \`\`\`
+
+          See [CHANGELOG.md](https://github.com/burgan-tech/vnext-ai-toolkit/blob/v${VERSION}/CHANGELOG.md) for details.
+          EOF
+          )"
+
+      - name: Dry-run summary
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "Dry run — would publish v${{ steps.version.outputs.version }} (no commit/tag/release made)." >> "$GITHUB_STEP_SUMMARY"

@@ -15,7 +15,14 @@ It ships three kinds of capability:
 ## Install
 
 ```bash
-claude plugin install github:burgan-tech/vnext-ai-toolkit
+claude plugin marketplace add burgan-tech/vnext-ai-toolkit
+claude plugin install vnext-ai-toolkit@burgan-tech
+```
+
+To update later:
+
+```bash
+claude plugin marketplace update burgan-tech
 ```
 
 Or, for development:

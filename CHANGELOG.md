@@ -4,6 +4,16 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
 ## [Unreleased]
 
+### Added
+
+- **`.claude-plugin/marketplace.json`** — makes the repo installable as the `burgan-tech`
+  marketplace (`claude plugin marketplace add burgan-tech/vnext-ai-toolkit` →
+  `claude plugin install vnext-ai-toolkit@burgan-tech`).
+- **`.github/workflows/publish-plugin.yml`** — on push to a `release-v*` branch, validates
+  the plugin (`claude plugin validate`), auto-increments the patch version, commits the
+  bump, tags, and cuts a GitHub Release. Manual `workflow_dispatch` supports an explicit
+  version and a dry run.
+
 ### Changed
 
 - **Restructured around a multi-agent pipeline.** Replaced the single `vnext-architect`
