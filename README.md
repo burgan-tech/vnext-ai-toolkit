@@ -10,7 +10,7 @@ It ships three kinds of capability:
 
 1. **Seven specialized agents** that form a build pipeline — `analyst` → `architect` → `component-author` → `validator` → (`security-reviewer` + `doc-writer`), with `reviewer` for PR-style checks.
 2. **Nine skills** — one umbrella reference skill (`authoring-vnext-components`) plus eight focused authoring skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `integration-test`, `validate-and-fix`).
-3. **Four slash commands** — `/new-domain`, `/new-component`, `/validate`, `/build` — as entry points.
+3. **Four slash commands** — `/vnext-ai-toolkit:new-domain`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:build` — as entry points.
 
 ## Install
 
@@ -37,22 +37,22 @@ The plugin is meant to run **inside a vNext domain project** (a checkout of `@bu
 
 ```bash
 # 1. Turn the template into a concrete domain (replaces the {{DOMAIN_NAME}} placeholder)
-claude /new-domain payments
+claude /vnext-ai-toolkit:new-domain payments
 
 # 2. Scaffold a component — runs analyst → architect → component-author → validator,
 #    then security-reviewer + doc-writer
-claude /new-component workflow account-opening "Open a new current account"
+claude /vnext-ai-toolkit:new-component workflow account-opening "Open a new current account"
 
 # 3. Validate everything (and offer to fix failures)
-claude /validate
+claude /vnext-ai-toolkit:validate
 
 # 4. Build the domain package
-claude /build
+claude /vnext-ai-toolkit:build
 ```
 
 ## The agent pipeline
 
-`/new-component` orchestrates the agents in order; you can also invoke any of them directly.
+`/vnext-ai-toolkit:new-component` orchestrates the agents in order; you can also invoke any of them directly.
 
 | Agent | Role | Writes JSON? |
 |-------|------|:---:|
@@ -82,10 +82,10 @@ After the `validator` passes, `security-reviewer` and `doc-writer` run in parall
 
 | Command | What it does |
 |---------|--------------|
-| `/new-domain <name>` | Initializes the template into a concrete domain (`npm run setup`), then `sync-schema` + `validate`. |
-| `/new-component <type> <key> [desc]` | Scaffolds a component end-to-end through the agent pipeline. `<type>` ∈ `schema\|workflow\|task\|view\|function\|extension`. |
-| `/validate` | Runs `npm run validate`, summarizes failures by file with the violated schema rule, and offers to fix. |
-| `/build [runtime\|reference] [flags]` | Builds the domain package via `npm run build` / `build:reference`. |
+| `/vnext-ai-toolkit:new-domain <name>` | Initializes the template into a concrete domain (`npm run setup`), then `sync-schema` + `validate`. |
+| `/vnext-ai-toolkit:new-component <type> <key> [desc]` | Scaffolds a component end-to-end through the agent pipeline. `<type>` ∈ `schema\|workflow\|task\|view\|function\|extension`. |
+| `/vnext-ai-toolkit:validate` | Runs `npm run validate`, summarizes failures by file with the violated schema rule, and offers to fix. |
+| `/vnext-ai-toolkit:build [runtime\|reference] [flags]` | Builds the domain package via `npm run build` / `build:reference`. |
 
 ## Design philosophy
 
@@ -107,7 +107,7 @@ The plugin doesn't assume a domain name. It reads `domain` and `paths.*` from `v
 
 Components are authored to pass `npm run validate` on the first try — because the author and the validator share one source of truth, the pinned `@burgan-tech/vnext-schema`.
 
-## What you'll have after `/new-component workflow <key>`
+## What you'll have after `/vnext-ai-toolkit:new-component workflow <key>`
 
 For a typical workflow (paths resolved from `vnext.config.json`):
 
