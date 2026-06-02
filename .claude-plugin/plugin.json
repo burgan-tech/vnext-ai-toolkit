@@ -63,3 +63,4 @@
     "componentTypes": ["workflow", "view", "task", "schema", "function", "extension"]
   }
 }
+
