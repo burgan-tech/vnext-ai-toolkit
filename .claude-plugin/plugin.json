@@ -5,7 +5,7 @@
   "author": {
     "name": "Burgan Tech vNext Team",
     "url": "https://github.com/burgan-tech"
-    },
+  },
   "homepage": "https://github.com/burgan-tech/vnext-ai-toolkit",
   "repository": "https://github.com/burgan-tech/vnext-ai-toolkit",
   "license": "MIT",
@@ -17,7 +17,10 @@
     "claude-code",
     "burgan-tech"
   ],
-  "compatibleAgents": ["claude-code", "codex"],
+  "compatibleAgents": [
+    "claude-code",
+    "codex"
+  ],
   "agents": [
     "./agents/analyst.md",
     "./agents/architect.md",
@@ -59,8 +62,18 @@
   ],
   "vnext": {
     "canonicalSchemaSource": "https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}.json",
-    "fallbackChain": ["v{schemaVersion}", "master", "references/concepts/component-schemas.md snapshot"],
-    "componentTypes": ["workflow", "view", "task", "schema", "function", "extension"]
+    "fallbackChain": [
+      "v{schemaVersion}",
+      "master",
+      "references/concepts/component-schemas.md snapshot"
+    ],
+    "componentTypes": [
+      "workflow",
+      "view",
+      "task",
+      "schema",
+      "function",
+      "extension"
+    ]
   }
 }
-
