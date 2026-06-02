@@ -10,10 +10,12 @@ name: Publish Plugin
 #   claude plugin marketplace add burgan-tech/vnext-ai-toolkit
 #   claude plugin install vnext-ai-toolkit@burgan-tech
 #
-# Versioning mirrors the burgan-tech/vnext flow: BASE_VERSION (X.Y) is taken from the
-# branch name (release-vX.Y) and the patch is auto-incremented to the first free tag.
-# The version bump is pushed back to the (PR-protected) branch using a GitHub App token
-# whose identity is on the branch ruleset's bypass list — GITHUB_TOKEN cannot bypass it.
+# Versioning mirrors the burgan-tech/vnext flow:
+# - release-vX.Y auto-increments the patch to the first free vX.Y.Z tag.
+# - release-vX.Y.Z publishes that exact version.
+# - workflow_dispatch can also pass an explicit X.Y.Z version.
+# The version bump is pushed back to the release branch using GITHUB_TOKEN.
+# Branch protection/rulesets must allow GitHub Actions to push for this to work.
 
 on:
   push:
@@ -42,19 +44,10 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - name: Generate GitHub App token
-        id: generate_token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.APP_ID }}
-          private-key: ${{ secrets.APP_PRIVATE_KEY }}
-          repositories: vnext-ai-toolkit
-
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0 # need full tag history to compute the next patch
-          token: ${{ steps.generate_token.outputs.token }} # App token so the bump push bypasses the PR-only rule
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -75,31 +68,43 @@ jobs:
           INPUT_VERSION: ${{ github.event.inputs.version }}
         run: |
           set -euo pipefail
+
+          assert_free_tag() {
+            local version="$1"
+            if git tag -l "v${version}" | grep -q "^v${version}$"; then
+              echo "::error::Tag v${version} already exists"; exit 1
+            fi
+          }
+
           if [ -n "${INPUT_VERSION:-}" ]; then
             if ! echo "$INPUT_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
               echo "::error::Provided version '$INPUT_VERSION' is not X.Y.Z"; exit 1
             fi
             NEW_VERSION="$INPUT_VERSION"
+            assert_free_tag "$NEW_VERSION"
           else
             BRANCH="${GITHUB_REF_NAME}"
-            if [[ "$BRANCH" =~ ^release-v([0-9]+\.[0-9]+)$ ]]; then
+            if [[ "$BRANCH" =~ ^release-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              NEW_VERSION="${BASH_REMATCH[1]}"
+              assert_free_tag "$NEW_VERSION"
+            elif [[ "$BRANCH" =~ ^release-v([0-9]+\.[0-9]+)$ ]]; then
               BASE_VERSION="${BASH_REMATCH[1]}"
+              # Auto-increment the patch to the first tag that doesn't exist yet.
+              PATCH=0
+              while true; do
+                NEW_VERSION="${BASE_VERSION}.${PATCH}"
+                if git tag -l "v${NEW_VERSION}" | grep -q "^v${NEW_VERSION}$"; then
+                  PATCH=$((PATCH + 1))
+                else
+                  break
+                fi
+                if [ "$PATCH" -gt 100 ]; then
+                  echo "::error::Could not find a free patch version after 100 attempts"; exit 1
+                fi
+              done
             else
-              echo "::error::Branch '$BRANCH' does not match release-vX.Y; pass an explicit version via workflow_dispatch."; exit 1
+              echo "::error::Branch '$BRANCH' does not match release-vX.Y or release-vX.Y.Z; pass an explicit version via workflow_dispatch."; exit 1
             fi
-            # Auto-increment the patch to the first tag that doesn't exist yet.
-            PATCH=0
-            while true; do
-              NEW_VERSION="${BASE_VERSION}.${PATCH}"
-              if git tag -l "v${NEW_VERSION}" | grep -q "^v${NEW_VERSION}$"; then
-                PATCH=$((PATCH + 1))
-              else
-                break
-              fi
-              if [ "$PATCH" -gt 100 ]; then
-                echo "::error::Could not find a free patch version after 100 attempts"; exit 1
-              fi
-            done
           fi
           echo "Resolved version: $NEW_VERSION"
           echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
@@ -121,7 +126,7 @@ jobs:
         if: ${{ github.event.inputs.dry_run != 'true' }}
         env:
           VERSION: ${{ steps.version.outputs.version }}
-          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
