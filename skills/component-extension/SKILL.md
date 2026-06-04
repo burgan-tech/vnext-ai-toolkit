@@ -11,6 +11,12 @@ An Extension automatically enriches workflow instance data on read operations. U
 - Join customer profile, branch info, or other related data
 - Cross-cutting metadata (audit, permissions, computed fields)
 
+The goal is to **cut client / BFF round-trips** — the consumer gets enriched instance data in one
+read. An extension can normalize/denormalize or compute over existing instance data, and/or call
+remote tasks for additional data. **Boundary:** for `x-lov` / `x-lookup` inputs (dropdown sources,
+per-key lookups), use a **Function** instead — those are request-time, input-bound, not read-time
+whole-instance enrichment. See `references/concepts/function-vs-extension-vs-task.md`.
+
 ## Canonical schema-first (mandatory pre-step)
 
 > **Before asking about type or scope, fetch `extension.json` for the workspace's `schemaVersion`.** The `type` × `scope` matrix and the task composition rules come from the schema.

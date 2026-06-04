@@ -30,7 +30,16 @@ Three vNext components all run code, but their roles are distinct. Picking the w
 
 ## 2. Extension
 
-**Role.** Automatic instance data enrichment that runs on workflow read operations.
+**Role.** Automatic instance data enrichment that runs on workflow read operations. The point is to
+**reduce client / BFF round-trips**: when the runtime returns instance data, an extension augments it
+inline so the consumer (a client, or whatever renders a view) gets enriched data in one read instead
+of issuing follow-up calls. An extension can normalize/denormalize or compute over the existing
+instance data, *and/or* call remote tasks to fetch additional data.
+
+**When to use vs a Function.** If a view at a given state needs enriched or remote data rendered
+inline, an extension fits. But for **`x-lov` / `x-lookup`-style inputs** (dropdown sources, per-key
+lookups), use a **Function** — those are request-time, input-bound resolutions, not read-time
+enrichment of the whole instance.
 
 **Type × Scope matrix** (from the `extension.json` schema):
 

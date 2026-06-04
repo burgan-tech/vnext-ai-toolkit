@@ -83,16 +83,20 @@ Rules are evaluated in `priority` order (lower = first); first match wins. The d
 `responseBody` supports Scriban expressions:
 
 ```
-{{ helpers.guid() }}                         # new GUID
-{{ helpers.now() }}                          # current timestamp ISO 8601
-{{ random.alphabetic 8 }}                    # random letters
-{{ random.integer 1000 9999 }}               # random integer
-{{ request.json.amount }}                    # value from request JSON body
-{{ request.query.userId }}                   # query parameter
-{{ request.header['Authorization'] }}        # header
+{{ guid }}                                   # new GUID (or {{ helpers.guid }})
+{{ iso_timestamp }}                          # current timestamp ISO 8601 ({{ timestamp }} = Unix)
+{{ random_string 8 }}                        # random string ({{ random_alpha_numeric 8 }} = alphanumeric)
+{{ random_int 1000 9999 }}                   # random integer in range
+{{ request.body.amount }}                    # value from request JSON body
+{{ request.query["userId"] }}                # query parameter (bracket syntax)
+{{ request.headers["Authorization"] }}       # header
+{{ request.route.id }}                       # route parameter
 ```
 
-The exact helper set depends on the MockLab version — fetch the README for the current list.
+Helpers take **space-separated args, no parentheses**. The exact helper set depends on the MockLab
+version — verify the current list at `https://github.com/burgan-tech/mocklab/blob/master/docs/user-guide.md`
+(or via Context7). Invalid forms from older docs: `helpers.guid()`, `helpers.now()`,
+`random.integer`, `request.json.X`, `request.header['X']`.
 
 ## Sequential responses (`isSequential: true`)
 

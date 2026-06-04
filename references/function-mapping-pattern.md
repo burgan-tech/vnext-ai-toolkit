@@ -184,6 +184,79 @@ This matches the MockLab seed convention (`{"data": [...] }` for LOV, `{"data": 
 
 ---
 
+## 5. `rawResponse: true` — required for view-bound functions
+
+When a function's output is **bound directly into a view** (via `dataSchema`, `x-lov.source`, `x-lookup.source`, or any expression like `$lov.{functionKey}.X` / `$lookup.{property}.X`), the function definition MUST set `attributes.rawResponse: true`.
+
+### What `rawResponse` controls
+
+`rawResponse` lives at `attributes.rawResponse` on the function (same level as `scope`). It tells the runtime whether to wrap the function's `ScriptResponse.Data` under the function's key or expose it directly.
+
+| Setting | Response shape returned to the caller | When to use |
+|---------|--------------------------------------|-------------|
+| `false` (default) | `{ "{functionKey}": { ...your Data... } }` — wrapped under the function name | Programmatic callers (workflow-internal, BFF-style) that explicitly know the function name |
+| `true` | `{ ...your Data... }` — raw, no wrapper | **View bindings**, LOV/lookup `source` fields, anything that uses JsonPath like `$.data[*]` to read the result |
+
+### The failure mode (silent)
+
+A view declares:
+
+```jsonc
+"x-lov": {
+  "source": {
+    "function": { "key": "get-branches", ... },
+    "responsePath": "$.data[*]",
+    "valueField": "code"
+  }
+}
+```
+
+If `get-branches.attributes.rawResponse` is missing (or `false`):
+- Runtime envelope: `{ "get-branches": { "data": [ ... ] } }`
+- `$.data[*]` resolves against the wrapper → finds nothing → **dropdown silently empty**
+- No error logged; the user sees an empty list and assumes the upstream returned nothing.
+
+With `rawResponse: true`:
+- Runtime envelope: `{ "data": [ ... ] }`
+- `$.data[*]` resolves correctly → dropdown populated.
+
+### The function shape
+
+```jsonc
+{
+  "key": "get-branches",
+  "version": "1.0.0",
+  "domain": "{{domain}}",
+  "flow": "sys-functions",
+  "flowVersion": "1.0.0",
+  "tags": ["lov"],
+  "attributes": {
+    "scope": "D",
+    "rawResponse": true,             // ← required for view-bound functions
+    "task": {
+      "order": 1,
+      "task": { "key": "get-branches-http-task", "domain": "{{domain}}", "flow": "sys-tasks", "version": "1.0.0" },
+      "mapping": { "location": "./src/GetBranchesLovMapping.csx", "code": "" }
+    }
+  }
+}
+```
+
+### Decision rule
+
+When creating a function, ask: **"Will any view bind to this function's output directly (dataSchema / x-lov / x-lookup / $lov / $lookup)?"**
+
+- **Yes** → `rawResponse: true`. The skill should set this automatically and confirm with the user.
+- **No** (consumed only by workflow logic or another function) → `rawResponse: false` (omit; default).
+
+When in doubt, set `rawResponse: true` — programmatic callers that need the wrapper can still unwrap one level by reading `{functionKey}` themselves. The reverse (`false` for a view-bound function) creates the silent-empty bug above.
+
+### Reference
+
+Working examples in `core/Functions/account-opening/get-branches.json` and `get-branch-detail.json` (both `rawResponse: true`).
+
+---
+
 ## 5. Tags + error semantics
 
 Use `ScriptResponse.Tags` for downstream filtering (`success`, `failure`, `exception`, `not-found`). Match on HTTP `statusCode` from `context.Body?.statusCode`:

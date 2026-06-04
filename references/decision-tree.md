@@ -16,7 +16,7 @@ graph TD
   C4 --> D
   D --> D1{Single actor or multi-actor?}
   D1 -->|Single| E
-  D1 -->|Multi| D2[Add queryRoles<br/>$PreviousUser / $CurrentUser]
+  D1 -->|Multi| D2[Add queryRoles<br/>$InstanceStarter / $PreviousUser]
   D2 --> E[Complexity / nesting]
   E --> E1{Parallel branches or nested sequences?}
   E1 -->|None| F

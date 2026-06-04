@@ -47,7 +47,7 @@ Target write path: `{componentsRoot}/{paths.schemas}/{domain-subfolder}/{key}.js
 
 Ask the user which category — this shapes `attributes.type` and the surrounding usage:
 
-- **`workflow`** — the master data shape for a workflow instance
+- **`workflow`** — the master data shape for a workflow instance. **Must use no `required` and `additionalProperties: true`** — the runtime validates it on every instance-data merge, and data expands across states, so a strict master schema rejects valid intermediate data. Keep `pattern`, the backbone shape, and `x-*` vocab (these drive filtering, `x-lookup`, `x-encrypt`). See `references/concepts/workflow-types.md` § Master schema.
 - **`transition`** — the payload required to execute a specific transition
 - **`task-input`** / **`task-output`** — bound to a task's mapping
 - **`view-data`** — drives a view's `dataSchema`
@@ -89,11 +89,13 @@ Does any field need restricted visibility? If yes, add `roles[]`:
 }
 ```
 
-Built-in roles include `$PreviousUser`, `$CurrentUser`. Confirm exact role tokens with Context7 (`"schema roles field access"`) if uncertain.
+Built-in system roles: `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`,
+`$PreviousBehalfOfUser` (there is **no** `$CurrentUser`). JSONPath grants (`$user.<path>`,
+`$role.<path>`, `$userBehalfOf.<path>`) are also valid. Full model: `references/concepts/roles-and-authorization.md`.
 
 ### 6. Look at a sibling example
 
-Read one existing schema in the same domain folder for envelope reference (e.g. `core/Schemas/account-opening/account-opening-master.json`). Confirm the `$id` URN pattern used in this repo (this project uses `urn:amorphie:res:schema:{domain}:{key}`).
+Read one existing schema in the same domain folder for envelope reference (e.g. `core/Schemas/account-opening/account-opening-master.json`). Confirm the `$id` URN pattern used in this repo (current scheme: `urn:vnext:res:schema:{domain}:{key}` — e.g. `urn:vnext:res:schema:core:input-schema`).
 
 ### 7. Generate the schema JSON
 
@@ -111,7 +113,7 @@ Envelope:
     "type": "{workflow|transition|...}",
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "$id": "urn:amorphie:res:schema:{domain}:{key}",
+      "$id": "urn:vnext:res:schema:{domain}:{key}",
       "type": "object",
       "required": [ /* names */ ],
       "properties": { /* fields from step 3-5 */ }
@@ -135,6 +137,6 @@ If the user wants the schema referenced from a view's `dataSchema` or a workflow
 ## Notes
 
 - JSON Schema draft used is **2020-12** — confirm the `$schema` URL matches.
-- `$id` is a **URN** (`urn:amorphie:res:schema:{domain}:{key}`), not an HTTP URL — the runtime resolves it against the registered schema set, never via fetch. The URN must match the value used by any view's `dataSchema` or workflow transition payload reference. Keep it stable across versions.
+- `$id` is a **URN** (`urn:vnext:res:schema:{domain}:{key}`), not an HTTP URL — the runtime resolves it against the registered schema set, never via fetch. The URN must match the value used by any view's `dataSchema` or workflow transition payload reference. Keep it stable across versions. (The `res-key` segment is `schema`; the same `urn:vnext:res:<res-key>:<domain>:<key>` form covers `flow`/`view`/`function`/`extension`/`task` resources.)
 - `x-labels` and `roles[]` are vNext extensions to JSON Schema, not standard keywords — they're consumed by the runtime and view layer.
 - Never hardcode `core/Schemas/...` — always resolve from `vnext.config.json`.

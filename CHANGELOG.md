@@ -4,6 +4,34 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
 ## [Unreleased]
 
+### Changed
+
+- **`/vnext-init` now delegates base scaffolding to the official `@burgan-tech/vnext-template` CLI.**
+  When no `vnext.config.json` exists, it runs `npx @burgan-tech/vnext-template <domain>` to create the
+  base project (config, `package.json`, component folders) instead of re-implementing it. In an
+  existing workspace it skips the CLI and only layers the toolkit's value-add files.
+- **Revise-with-diff**: toolkit-owned files (CLAUDE.md, AGENTS.md, docker-compose + mocklab, dapr
+  config, `.claude/references`, `.http`/api-tests, integration tests) are now diffed against the
+  latest templates and confirmed per file before overwriting — no longer skip-only.
+- **Version bump prompt**: `/vnext-init` checks `runtimeVersion`/`schemaVersion` against the latest
+  published releases and offers to update `vnext.config.json` (the one CLI-owned file it may edit).
+- **Integration tests now use the official `VNext.Testing.Template`.** `/vnext-init` and the
+  `integration-test` skill scaffold the test project with `dotnet new vnext-integration-test`
+  (`--DomainName`/`--AppDomain`) instead of copying hand-rolled templates. The generated test surface
+  is corrected to the real SDK API (`RunTransitionAsync`, `VNextApiResponse.Body`, `GetCurrentState`,
+  `[Collection("VNextIntegration")]`, env overrides `Domain`/`DatabaseName`/`VNextImage`, target
+  `net10.0`) — the previously documented `ExecuteTransitionAsync`/`WaitForStateAsync`/`GetStateAsync`
+  and per-domain collections were inaccurate and have been removed.
+- **Removed `urn:amorphie` legacy framing** from the URN docs. vNext is pre-release, so there is no
+  legacy scheme — the docs now present `urn:vnext` / `urn:client` directly.
+
+### Removed
+
+- `templates/vnext.config.json.tmpl` and `templates/package.json.tmpl` — produced by
+  `@burgan-tech/vnext-template`. The config/package/component-folder scaffolding steps are dropped.
+- `templates/tests/*` — the integration test project is now scaffolded by the official
+  `VNext.Testing.Template` (`dotnet new vnext-integration-test`).
+
 ### Added
 
 - **`.claude-plugin/marketplace.json`** — makes the repo installable as the `burgan-tech`
