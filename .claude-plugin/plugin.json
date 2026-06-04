@@ -1,7 +1,7 @@
 {
   "name": "vnext-ai-toolkit",
-  "version": "0.0.0",
-  "description": "AI tooling for the vNext platform: a multi-agent build pipeline (analyst → architect → component-author → validator → security-reviewer + doc-writer, with reviewer for PR checks) plus a multi-turn end-to-end design orchestrator (vnext-architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, and integration test scaffolding. Schema-first — every component is authored against the pinned @burgan-tech/vnext-schema package, never from hardcoded assumptions.",
+  "version": "0.0.1",
+  "description": "AI tooling for the vNext platform: process designer (multi-turn architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration test scaffolding. Canonical schema-first — every component is generated from the official JSON Schema at the workspace's schemaVersion tag, never from hardcoded assumptions.",
   "author": {
     "name": "Burgan Tech vNext Team",
     "url": "https://github.com/burgan-tech"
