@@ -96,15 +96,15 @@ pseudo-ui views use `$schema: https://amorphie.io/meta/view-vocabulary/1.0` and 
 
 **Auto transition view ban.** Transitions with `triggerType: 1` (auto, rule-evaluated) and `triggerType: 2` (timer) must have `view: null` — the runtime fires them without user interaction. By extension, an Intermediate state (`stateType: 2`) whose only outgoing transitions are auto/timer typically needs `state.view = null` too; passive processing states are not user-facing and don't render. Only manual transitions (`triggerType: 0`) can carry a view.
 
-**Button action model.** `Button.action` is a `ButtonAction` enum — only `submit`, `cancel`, or `back`. The actual workflow/function target goes in `command` as a URN: `urn:amorphie:wf:{flow-key}:transition:{transition-key}` for workflow transitions, `urn:forge:nav:/path` for navigation, `urn:amorphie:func:{domain}:{function}` for BFF functions. `submit` runs validation; `cancel`/`back` skip validation. For `Card.onTap` (vocabulary's preferred name; legacy `action` alias still works), use `{ "action": "dispatch", "command": "urn:..." }` or the `select` form `{ "action": "select", "bind": "...", "value": "..." }`. Never use ad-hoc verbs like `"transition"` — the SDK has no built-in semantics for them.
+**Button action model.** Reserved verbs: `submit` (validates by default), `select` (inline set, host NOT called), `reset` (clears formData, runs hooks), `dispatch` (domain dispatch; optional `validate`). The actual workflow/function target goes in `command` as a URN: `urn:vnext:flow:transition:{domain}:{flow}:{transition}` for workflow transitions, `urn:vnext:fn:{cmd}:{domain}:{function}` for functions (`cmd` defaults to `get`), `urn:client:nav:/path` for client-local navigation. `submit` runs validation; `dispatch` exposes an explicit `validate` flag. For `Card.onTap` (vocabulary's preferred name; legacy `action` alias still works), use `{ "action": "dispatch", "command": "urn:vnext:..." }` or the `select` form `{ "action": "select", "bind": "...", "value": "..." }`. Attach `preHooks`/`postHooks` arrays for audit/telemetry side-effects (see `.claude/references/view-author-guide.md` §4). Never use ad-hoc verbs like `"transition"` — the SDK has no built-in semantics for them.
 
 **Stepper is not a progress bar.** vocabulary requires `Stepper.steps[].title` (string/multi-lang) **and** `steps[].content` (componentNode[]) — it renders a true multi-step form on a single screen. Don't use Stepper as a wizard progress indicator across separate state views; for that, show a small `Text` ("Adım 2 / 4") at the top of each view instead.
 
 **View `dataSchema` selection.** A view's `dataSchema` URN must match the **role** of the view:
-- **Transition / input views** (user fills a form): bind to the **transition payload schema** (e.g. `urn:amorphie:res:schema:{{domain}}:account-type-selection`, `:demand-deposit-input`). These schemas carry `enum`/`x-lov`/`x-validation`/`x-conditional` for the input field set.
-- **Display / summary / status views** (read-only from `$instance`): bind to the **master / instance schema** (e.g. `urn:amorphie:res:schema:{{domain}}:account-opening-master`). The master schema covers the full instance shape so `$schema.<field>.label` and `$instance.<field>` paths resolve everywhere.
+- **Transition / input views** (user fills a form): bind to the **transition payload schema** (e.g. `urn:vnext:res:schema:{{domain}}:account-type-selection`, `:demand-deposit-input`). These schemas carry `enum`/`x-lov`/`x-validation`/`x-conditional` for the input field set.
+- **Display / summary / status views** (read-only from `$instance`): bind to the **master / instance schema** (e.g. `urn:vnext:res:schema:{{domain}}:account-opening-master`). The master schema covers the full instance shape so `$schema.<field>.label` and `$instance.<field>` paths resolve everywhere.
 
-Don't point a transition view at the master schema "just to keep things uniform" — the master typically lacks the `required`/`x-lov`/`x-validation` semantics the transition needs.
+Don't point a transition view at the master schema "just to keep things uniform" — the master deliberately uses **no `required`** and **`additionalProperties: true`** (instance data expands across states), so it lacks the input-side `required`/`x-lov`/`x-validation` semantics the transition needs.
 
 **`x-lov` / `x-lookup` are for field-input, not navigation.** SDK intent: `x-lov` provides dropdown options for a bound input (typically `Dropdown.bind` — a `TextField` will NOT render LOV options, use `Dropdown`), and `x-lookup` enriches a field with read-only detail (`$lookup.X.field`). A **navigation Card grid** (each card dispatches its own workflow transition) is not a form-input — encoding transition URNs into LOV item data (`$item.transitionCommand`) blurs UI semantics with data and adds mock dependencies for no gain. Use a **static Card grid with hardcoded `onTap.command` URNs** for navigation; reserve LOV/lookup for actual `bind`-driven dropdowns and field-bound enrichment.
 
@@ -145,10 +145,10 @@ When a user wants a new schema, **do not produce JSON before gathering inputs.**
 - Fields, types, required vs optional
 - Validation rules (regex, min/max, format)
 - Localization needs (`x-labels.tr`, `x-labels.en` on properties)
-- Role-based field access (`roles[]` with `$PreviousUser`, `$CurrentUser`, etc.)
+- Role-based field access (`roles[]` with system roles `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`, or JSONPath grants — there is **no** `$CurrentUser`)
 - Whether the schema is workflow data, a transition payload, or task input/output
 
-Output: JSON Schema draft 2020-12 with `$id` set to a **URN** of the form `urn:amorphie:res:schema:{domain}:{key}` (e.g. `urn:amorphie:res:schema:{{domain}}:account-opening-master`). Views reference the same URN in their `dataSchema` field — never use HTTP URLs for schema identifiers, the runtime resolves URNs against the registered schema set.
+Output: JSON Schema draft 2020-12 with `$id` set to a **URN** of the form `urn:vnext:res:schema:{domain}:{key}` (e.g. `urn:vnext:res:schema:{{domain}}:account-opening-master`). Views reference the same URN in their `dataSchema` field — never use HTTP URLs for schema identifiers, the runtime resolves URNs against the registered schema set.
 
 ### Knowledge access strategy
 
@@ -237,7 +237,7 @@ For the full Runtime API reference (request/response schemas, error codes), see 
       "queryString": null,
       "requestBody": "",
       "statusCode": 200,
-      "responseBody": "<JSON string; supports Scriban: {{helpers.guid()}}, {{request.body.X}}>",
+      "responseBody": "<JSON string; supports Scriban: {{ guid }}, {{ request.body.X }}>",
       "contentType": "application/json",
       "description": "...",
       "delayMs": null,

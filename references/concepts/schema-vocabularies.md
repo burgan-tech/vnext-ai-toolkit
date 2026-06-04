@@ -146,16 +146,21 @@ Shows or requires the field based on another form value.
 "branchCode": {
   "type": "string",
   "roles": [
-    { "role": "$PreviousUser", "grant": "allow" },
-    { "role": "$CurrentUser", "grant": "deny" }
+    { "role": "$InstanceStarter", "grant": "allow" },
+    { "role": "$PreviousUser", "grant": "allow" }
   ]
 }
 ```
 
-Built-in role tokens (verify the full set in vocabularies/):
-- `$PreviousUser` — the user who initiated the previous step
-- `$CurrentUser` — the user executing the current step
-- (Custom roles defined in the workflow)
+Built-in system role tokens:
+- `$InstanceStarter` — the actor who started the instance
+- `$PreviousUser` — the actor who triggered the previous transition
+- `$InstanceBehalfOfStarter` — the subject (on-behalf) the instance was started for
+- `$PreviousBehalfOfUser` — the subject of the previous transition
+- (Custom roles defined in the workflow; JSONPath grants like `$user.<path>`)
+
+There is **no `$CurrentUser`**. The full model — token claims (`sub` / `act_sub`) and JSONPath
+grants — is documented in `roles-and-authorization.md`.
 
 `grant: "allow"` / `"deny"` controls read/write visibility on this field for matched roles.
 

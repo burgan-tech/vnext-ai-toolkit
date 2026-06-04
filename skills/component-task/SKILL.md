@@ -115,7 +115,7 @@ Mock entry pattern (see `references/concepts/mocklab-spec.md` for the full refer
   "httpMethod": "POST",
   "route": "api/{domain}/{resource}/{action}",
   "statusCode": 200,
-  "responseBody": "{ \"id\": \"{{ helpers.guid() }}\" }",
+  "responseBody": "{ \"id\": \"{{ guid }}\" }",
   "contentType": "application/json",
   "delayMs": 500,
   "rules": [

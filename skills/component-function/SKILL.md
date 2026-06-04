@@ -47,7 +47,20 @@ Ask:
 - **Who calls it?** (Client/BFF, another workflow, a view's `x-lov`/`x-lookup`?)
 - **Does it need the workflow instance's data?** (If yes → scope `I`. If no → scope `D`.)
 
-### 3. Choose scope (from schema)
+### 3. Will any view bind to this function's output? (controls `rawResponse`)
+
+Ask the user:
+
+> "Will any view bind to this function's output directly — through `dataSchema`, `x-lov.source`, `x-lookup.source`, or `$lov.X` / `$lookup.X` expressions?"
+
+- **Yes** → set `attributes.rawResponse: true` in the function JSON. This is REQUIRED. Without it, the runtime wraps the response under the function key (`{ "{functionKey}": {...} }`) and JsonPath bindings like `$.data[*]` silently miss the data → empty dropdowns / null lookups with no error.
+- **No** (consumed only by workflow logic, another function, or a programmatic caller that knows the function name) → leave it off (default `false`).
+
+When in doubt, set `true`. Programmatic callers can unwrap one extra level themselves; the reverse breaks views invisibly.
+
+Full reference: `references/function-mapping-pattern.md` § 5.
+
+### 4. Choose scope (from schema)
 
 Render the `scope` enum from `function.json`. Annotate:
 - `D` — Domain-scoped. Stateless. URL: `/api/v{ver}/{domain}/functions/{key}`. Use for cross-workflow utilities and LOV/lookup endpoints.

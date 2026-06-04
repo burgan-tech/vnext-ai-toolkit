@@ -31,6 +31,43 @@ Each state in `attributes.states[]` carries a `stateType`. Conceptual mapping:
 
 **Pattern: passive intermediate.** When an Intermediate state's only outgoing transitions are auto (1) or timer (2), set `state.view = null` — the state is not user-facing.
 
+**Pattern: Initial state input.** When the Initial state (`stateType: 1`) gathers input from the user before anything happens, the **default placement is `state.view`** (on the state itself), not on the outgoing transition. Reason: the runtime serves the state view immediately on instance start — the user sees the form right away and submits via a `view: null` transition. The reverse (form on the transition) requires the client to discover the transition and trigger it before any UI appears — an extra step with no UX benefit. The skill should propose this placement and confirm with the user (some flows want an intentional "intro → tap → form" two-step; `AskUserQuestion` with state-view marked Recommended). Wizard states (`stateType: 5`) are the exception — their form lives on the single outgoing transition by design.
+
+## 2.1 State alias (role-aware state labels)
+
+By default a state's **state function** returns `state.key`. A state can also carry an `alias`
+definition so that different actors see different, role-appropriate labels instead of the raw key.
+
+**Why.** A client starts a process that later proceeds in the backoffice. While Fraud / Limit / KPS
+checks run, returning the literal state key to the client leaks internal process detail (a security
+concern). An alias lets the client see "Değerlendirme Aşamasında" / "Under Operational Review"
+while backoffice actors see their own role-appropriate label.
+
+**Resolution order** (in the state function):
+1. State has an `alias` **and** the actor's role matches an alias entry → return that entry's
+   localized `label`.
+2. State has an `alias` but no role matches → return `alias.name`.
+3. No `alias` at all → return `state.key` (unchanged legacy behavior).
+
+**Shape** — `alias[]`, each entry `{ name, roles[], labels[] }`:
+
+```json
+{
+  "alias": [
+    {
+      "name": "Değerlendirme Aşamasında",
+      "roles": [ { "role": "backoffice.operator", "grant": "allow" } ],
+      "labels": [
+        { "label": "Operasyon İncelemesinde",   "language": "tr" },
+        { "label": "Under Operational Review",   "language": "en" }
+      ]
+    }
+  ]
+}
+```
+
+The `roles[]` use the same role model as everywhere else — see `roles-and-authorization.md`.
+
 ## 3. Transition `triggerType`
 
 How the transition fires.
@@ -82,6 +119,29 @@ Decision: reusable nested sequence with shared data → `S`. Independent paralle
 ## 6. Start transition
 
 Every workflow has exactly one `attributes.startTransition`. Its `target` must be the Initial (`stateType: 1`) state. The runtime fires this transition automatically when the instance is created.
+
+## 7. Master schema
+
+A flow defines a **master schema** (its `attributes.schema` / workflow-type schema). It derives the
+InstanceData template and powers vNext features — `x-lookup`, `x-encrypt`, and instance filtering.
+
+**Merge validation.** On every instance-data merge, the runtime validates the merged data against
+the master schema and **rejects** the request if it doesn't fit. Because data **expands across
+states** (each state merges more in), the master schema must be permissive:
+
+- **No `required`** — early states don't yet have later fields.
+- **`additionalProperties: true`** — data grows at different levels over the instance's life.
+
+What still matters: `pattern`, the backbone object shape, vocabulary definitions (`x-*`), and the
+field types — these drive filtering and the `x-*` features.
+
+**Filtering.** The **data function** uses the master schema actively when responding: it resolves
+the types of dynamic instance-data fields *from the schema*, which is what gives advanced instance
+filtering its flexibility.
+
+**Views.** A read-only view may use the master schema as its `dataSchema` (the full instance shape
+so `$instance.X` resolves everywhere). Input/transition views need a transition-specific schema
+that carries `required` / `enum` / `x-lov` / `x-validation` for the input set — see `view-roles.md`.
 
 ## Sources
 

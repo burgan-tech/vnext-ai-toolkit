@@ -19,6 +19,15 @@ Approximate mapping (verify against the schema):
 
 Renderer options (for `type: 1`): `pseudo-ui` (recommended — official SDK), `react`, `vue`, `angular`, `flutter`, `react-native`, `native-ios`, `native-android`.
 
+**Content shapes for `http` / `deeplink` / `urn`** — each is a small object (not a bare string), so
+the format can be extended later. All support `${param}` runtime binding:
+
+```jsonc
+// http     → { "href": "https://google.com?s=${param}" }
+// deeplink → { "href": "on-burgan//onboarding/${param}" }   // full-path only for now
+// urn      → { "urn": "urn:vnext:flow:transition:core:account-opening:${param}:approved" }
+```
+
 ## 2. `display` modes
 
 How the view is presented on screen:
@@ -36,7 +45,11 @@ How the view is presented on screen:
 | **State view** (`state.view`) | Shows the user where they are; read-only summary | No | `full-page` | Master / instance schema (covers full instance shape so `$instance.X` resolves everywhere) |
 | **Transition view** (`transition.view`) | Form for input, or confirmation dialog | Yes | `popup` (confirmation) or `full-page` (complex form) | Transition payload schema (carries `enum`/`x-lov`/`x-validation`/`x-conditional` for the input set) |
 
-**Pattern: don't point a transition view at the master schema** "just to keep things uniform." You lose the input-side semantics — required fields, LOV options, validation rules — because those live on the transition payload schema.
+**Pattern: don't point a transition view at the master schema** "just to keep things uniform." You lose the input-side semantics — required fields, LOV options, validation rules — because those live on the transition payload schema. (The master schema deliberately uses **no `required`** and **`additionalProperties: true`** so instance data can expand across states — see `workflow-types.md` § Master schema.)
+
+**Pattern: input on the initial state goes on the STATE view (default).** When the workflow's Initial state (`stateType: 1`) needs the user to provide data before doing anything else, the convention is to put the input form on `state.view`, NOT on the outgoing transition. The runtime exposes the state view immediately when the instance starts; the user fills it, then a manual transition (with `view: null`) executes the submission. Putting the form on the transition forces an extra hop: instance starts → state has no view → user has to discover the transition → form appears. Bad UX, more clicks.
+
+This is a **default with confirmation**: the skill should propose state-view placement when it detects input on the initial state, and ask the user to confirm (some flows legitimately want a "intro screen → tap to start → form" two-step). Use `AskUserQuestion` with state-view as Recommended.
 
 **Pattern: Wizard fast-path.** When the parent state is `stateType: 5` (Wizard), the runtime's view function returns the transition's view directly on state entry. Keep `state.view = null` and put the form on the single outgoing transition's `view`.
 
@@ -79,20 +92,23 @@ These `x-*` keywords live on schema properties and are consumed by the view laye
 - **`x-validation`** — Runtime validation rules beyond standard JSON Schema (e.g. cross-field)
 - **`x-conditional`** — Field visibility/requirement conditions (`if X then required Y`)
 - **`x-enum`** — Enum values with display metadata
-- **`roles`** — Field-level access (`{ "role": "$PreviousUser", "grant": "allow" }`)
+- **`roles`** — Field-level access (`{ "role": "$PreviousUser", "grant": "allow" }`). System role tokens (`$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`) and JSONPath grants are documented in `roles-and-authorization.md`.
 
 `$lookup.{propertyName}` access uses **property name** — to expose `$lookup.branchDetail.X`, the `x-lookup` must sit on a schema property literally named `branchDetail` (a dedicated read-only object property, separate from the input field).
 
 ## 7. Action model (Buttons and Cards)
 
-- `Button.action` ∈ `{ submit, cancel, back }`. Only `submit` validates the form.
-- The actual target lives in `command` as a URN:
-  - Workflow transition: `urn:amorphie:wf:{flow}:transition:{key}`
-  - Navigation: `urn:forge:nav:/path`
-  - BFF function: `urn:amorphie:func:{domain}:{fn}`
+- Reserved verbs: `submit` (validates by default), `select` (inline set, host NOT called),
+  `reset` (clears formData, *does* go to host), `dispatch` (domain dispatch; optional `validate`).
+- The actual target lives in `command` as a URN (current `urn:vnext` scheme):
+  - Flow transition: `urn:vnext:flow:transition:{domain}:{flow}:{transition}`
+  - Function: `urn:vnext:fn:{cmd}:{domain}:{fn}` (`cmd` defaults to `get`)
+  - Client-local (navigation, etc.): `urn:client:nav:/path`
 - `Card.onTap` (preferred over legacy `action`):
-  - Dispatch: `{ "action": "dispatch", "command": "urn:..." }`
+  - Dispatch: `{ "action": "dispatch", "command": "urn:vnext:..." }`
   - Select-in-form: `{ "action": "select", "bind": "...", "value": "..." }`
+- **Pre/post hooks**: `preHooks` / `postHooks` arrays fire audit/telemetry commands around the
+  main action. See `view-author-guide.md` §4 for the full behavior rules.
 - **No invented verbs** like `"transition"`. The SDK has no built-in semantics for them.
 
 ## 8. Icons — Material Symbols only

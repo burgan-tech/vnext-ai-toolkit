@@ -58,9 +58,12 @@ Verify the current set against Context7 (`"workflow attributes type values"`) if
 Walk through the flow with the user. For each state capture:
 
 - **Key** (kebab-case)
+- **stateType** (Initial / Intermediate / Final / SubFlow / Wizard — values from the fetched schema)
 - **Is it final?** (`isFinal: true` ends the instance)
 - **Has a view?** (if yes, note the view key — will resolve in step 6)
 - **`onEntry` tasks?** (anything that must run when entering the state)
+
+**Initial state input pattern** — if the Initial state needs user input before anything happens, **propose placing the form on `state.view`** (not on the outgoing transition) and confirm with the user via `AskUserQuestion`. Reason: the runtime serves the state view immediately on instance start; the user fills it and submits via a `view: null` transition. The reverse (form on transition) forces an extra discovery step with no UX benefit. Make state-view the Recommended option; only switch if the user wants an intentional "intro screen → tap → form" two-step. See `references/concepts/workflow-types.md` for the pattern note.
 
 Visualize back to the user as a list before moving on.
 

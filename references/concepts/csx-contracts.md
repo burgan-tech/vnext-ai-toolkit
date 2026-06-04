@@ -202,6 +202,19 @@ Common concrete types: `HttpTask`, `ScriptTask`, `NotificationTask`, `SoapTask`,
 
 When inheriting `ScriptBase` (typical for lookup/function mappings), helpers like `ResolveParam(context, "key")` traverse QueryString → Headers → Body in one call. Use this for GET-mode functions.
 
+## Function envelope: `rawResponse`
+
+Functions have a top-level `attributes.rawResponse` boolean (separate from the `.csx` mapping):
+
+| Value | Effect |
+|-------|--------|
+| `false` (default) | Runtime wraps `ScriptResponse.Data` under the function key: `{ "{functionKey}": { ...Data... } }` |
+| `true` | Runtime returns `Data` raw: `{ ...Data... }` |
+
+**Required `true`** for any function whose output a view binds directly (`dataSchema`, `x-lov.source`, `x-lookup.source`, `$lov.X` / `$lookup.X` expressions). With `false`, JsonPath like `$.data[*]` silently misses the array under the function-name wrapper and the view shows an empty result with no error.
+
+Full failure-mode walkthrough in `references/function-mapping-pattern.md` § 5. Working examples: `core/Functions/account-opening/get-branches.json` (LOV) and `get-branch-detail.json` (lookup).
+
 ## Class naming
 
 - File name: `kebab-case.csx`
