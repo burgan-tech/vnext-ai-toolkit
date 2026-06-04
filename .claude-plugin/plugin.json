@@ -36,6 +36,7 @@
     "./commands/new-component.md",
     "./commands/vnext-design-process.md",
     "./commands/validate.md",
+    "./commands/review-components.md",
     "./commands/build.md"
   ],
   "skills": [
