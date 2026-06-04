@@ -1,0 +1,180 @@
+name: Publish Plugin
+
+# Publishes the Claude Code plugin on every push to a release-v* branch.
+#
+# Claude Code plugins are NOT uploaded to a central registry — they are installed
+# from git via a marketplace manifest (.claude-plugin/marketplace.json). "Publishing"
+# therefore means: validate, bump the version, commit it back, tag, and cut a GitHub
+# Release. Users install with:
+#
+#   claude plugin marketplace add burgan-tech/vnext-ai-toolkit
+#   claude plugin install vnext-ai-toolkit@burgan-tech
+#
+# Versioning mirrors the burgan-tech/vnext flow:
+# - release-vX.Y auto-increments the patch to the first free vX.Y.Z tag.
+# - release-vX.Y.Z publishes that exact version.
+# - workflow_dispatch can also pass an explicit X.Y.Z version.
+# The version bump is pushed back to the (PR-protected) branch using a GitHub App token
+# whose identity is on the branch ruleset's bypass list — GITHUB_TOKEN cannot bypass it.
+
+on:
+  push:
+    branches:
+      - "release-v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Explicit version X.Y.Z (leave blank to auto-increment patch from the branch)"
+        required: false
+        type: string
+      dry_run:
+        description: "Validate and compute the version, but do not commit/tag/release"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: publish-plugin-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate GitHub App token
+        id: generate_token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          repositories: vnext-ai-toolkit
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full tag history to compute the next patch
+          token: ${{ steps.generate_token.outputs.token }} # App token so the bump push bypasses the PR-only rule
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate plugin and marketplace
+        # Non-strict on purpose: the manifest carries custom fields (compatibleAgents,
+        # references, vnext) that are valid-but-unrecognized; --strict would fail on them.
+        run: claude plugin validate .
+
+      - name: Compute version
+        id: version
+        env:
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          set -euo pipefail
+
+          assert_free_tag() {
+            local version="$1"
+            if git tag -l "v${version}" | grep -q "^v${version}$"; then
+              echo "::error::Tag v${version} already exists"; exit 1
+            fi
+          }
+
+          if [ -n "${INPUT_VERSION:-}" ]; then
+            if ! echo "$INPUT_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Provided version '$INPUT_VERSION' is not X.Y.Z"; exit 1
+            fi
+            NEW_VERSION="$INPUT_VERSION"
+            assert_free_tag "$NEW_VERSION"
+          else
+            BRANCH="${GITHUB_REF_NAME}"
+            if [[ "$BRANCH" =~ ^release-v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+              NEW_VERSION="${BASH_REMATCH[1]}"
+              assert_free_tag "$NEW_VERSION"
+            elif [[ "$BRANCH" =~ ^release-v([0-9]+\.[0-9]+)$ ]]; then
+              BASE_VERSION="${BASH_REMATCH[1]}"
+              # Auto-increment the patch to the first tag that doesn't exist yet.
+              PATCH=0
+              while true; do
+                NEW_VERSION="${BASE_VERSION}.${PATCH}"
+                if git tag -l "v${NEW_VERSION}" | grep -q "^v${NEW_VERSION}$"; then
+                  PATCH=$((PATCH + 1))
+                else
+                  break
+                fi
+                if [ "$PATCH" -gt 100 ]; then
+                  echo "::error::Could not find a free patch version after 100 attempts"; exit 1
+                fi
+              done
+            else
+              echo "::error::Branch '$BRANCH' does not match release-vX.Y or release-vX.Y.Z; pass an explicit version via workflow_dispatch."; exit 1
+            fi
+          fi
+          echo "Resolved version: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version in plugin.json
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const p = ".claude-plugin/plugin.json";
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            j.version = process.env.NEW_VERSION;
+            fs.writeFileSync(p, JSON.stringify(j, null, 2) + "\n");
+          '
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.version }}
+
+      - name: Commit, tag and release
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          GH_TOKEN: ${{ steps.generate_token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Commit the version bump if plugin.json changed, then push it back to the
+          # release branch using the App token (persisted by checkout). [skip ci] avoids
+          # a redundant re-run.
+          if ! git diff --quiet -- .claude-plugin/plugin.json; then
+            git add .claude-plugin/plugin.json
+            git commit -m "chore(release): v${VERSION} [skip ci]"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
+          fi
+
+          # Tag the (bumped) commit and publish the GitHub Release.
+          git tag -a "v${VERSION}" -m "vnext-ai-toolkit v${VERSION}"
+          git push origin "v${VERSION}"
+
+          gh release create "v${VERSION}" \
+            --title "vnext-ai-toolkit v${VERSION}" \
+            --notes "$(cat <<EOF
+          Claude Code plugin **vnext-ai-toolkit v${VERSION}**.
+
+          ### Install
+          \`\`\`bash
+          claude plugin marketplace add burgan-tech/vnext-ai-toolkit
+          claude plugin install vnext-ai-toolkit@burgan-tech
+          \`\`\`
+
+          ### Update an existing install
+          \`\`\`bash
+          claude plugin marketplace update burgan-tech
+          \`\`\`
+
+          See [CHANGELOG.md](https://github.com/burgan-tech/vnext-ai-toolkit/blob/v${VERSION}/CHANGELOG.md) for details.
+          EOF
+          )"
+
+      - name: Dry-run summary
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        run: |
+          echo "Dry run — would publish v${{ steps.version.outputs.version }} (no commit/tag/release made)." >> "$GITHUB_STEP_SUMMARY"
