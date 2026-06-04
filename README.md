@@ -94,7 +94,7 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 | `/vnext-ai-toolkit:new-component <type> <key> [desc]` | Scaffolds a component end-to-end through the agent pipeline. `<type>` ∈ `schema\|workflow\|task\|view\|function\|extension`. |
 | `/vnext-ai-toolkit:vnext-design-process [name]` | Multi-turn, end-to-end workflow design via the `vnext-architect` orchestrator (discovery → states → components → tests). |
 | `/vnext-ai-toolkit:validate` | Runs `npm run validate`, summarizes failures by file with the violated schema rule, and offers to fix. |
-| `/vnext-ai-toolkit:review-components [type\|key]` | Full audit of the components already created in the domain: inventory + schema validation + `reviewer` (conventions, reference integrity, dead components) + `security-reviewer`, reported by severity. Scope to one type, or to a single `key` to audit that component **plus every sub-component it references, transitively** (e.g. a workflow pulls in its tasks/views/schemas/functions/extensions). |
+| `/vnext-ai-toolkit:review-components [type\|key]` | Full audit with hierarchical sub-agents: dispatches main `reviewer` & `security-reviewer` per workflow/function, each spawning sub-agents for sub-components. Empty = all workflows & functions; `workflow`/`function` = that type only; `key` = that component + closure. |
 | `/vnext-ai-toolkit:build [runtime\|reference] [flags]` | Builds the domain package via `npm run build` / `build:reference`. |
 
 ## Design philosophy
