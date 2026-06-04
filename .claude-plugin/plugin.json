@@ -1,7 +1,7 @@
 {
   "name": "vnext-ai-toolkit",
   "version": "0.0.0",
-  "description": "AI tooling for the vNext platform: process designer (multi-turn architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration test scaffolding. Canonical schema-first — every component is generated from the official JSON Schema at the workspace's schemaVersion tag, never from hardcoded assumptions.",
+  "description": "AI tooling for the vNext platform: a multi-agent build pipeline (analyst → architect → component-author → validator → security-reviewer + doc-writer, with reviewer for PR checks) plus a multi-turn end-to-end design orchestrator (vnext-architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, and integration test scaffolding. Schema-first — every component is authored against the pinned @burgan-tech/vnext-schema package, never from hardcoded assumptions.",
   "author": {
     "name": "Burgan Tech vNext Team",
     "url": "https://github.com/burgan-tech"
@@ -28,11 +28,13 @@
     "./agents/validator.md",
     "./agents/reviewer.md",
     "./agents/security-reviewer.md",
-    "./agents/doc-writer.md"
+    "./agents/doc-writer.md",
+    "./agents/vnext-architect.md"
   ],
   "commands": [
-    "./commands/new-domain.md",
+    "./commands/vnext-init.md",
     "./commands/new-component.md",
+    "./commands/vnext-design-process.md",
     "./commands/validate.md",
     "./commands/build.md"
   ],
@@ -52,6 +54,7 @@
     "references/external-sources.md",
     "references/concepts/workflow-types.md",
     "references/concepts/view-roles.md",
+    "references/concepts/roles-and-authorization.md",
     "references/concepts/function-vs-extension-vs-task.md",
     "references/concepts/mapping-types.md",
     "references/concepts/csx-contracts.md",
@@ -61,11 +64,11 @@
     "references/concepts/integration-test-patterns.md"
   ],
   "vnext": {
-    "canonicalSchemaSource": "https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}.json",
-    "fallbackChain": [
-      "v{schemaVersion}",
-      "master",
-      "references/concepts/component-schemas.md snapshot"
+    "schemaSource": "node_modules/@burgan-tech/vnext-schema/schemas/{componentType}-definition.schema.json",
+    "knowledgeOrder": [
+      "pinned @burgan-tech/vnext-schema (node_modules)",
+      "Context7 MCP (/burgan-tech/vnext-docs, /burgan-tech/vnext-example)",
+      "WebFetch https://burgan-tech.github.io/vnext-docs"
     ],
     "componentTypes": [
       "workflow",

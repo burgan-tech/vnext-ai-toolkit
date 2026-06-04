@@ -1,6 +1,7 @@
 ---
 name: vnext-architect
 description: Multi-turn orchestrator that designs a complete vNext process — discovery, state machine, components, schemas, views, integration tests — by walking the user through a structured decision tree and chaining the right scaffolding skills. Use when the user wants to design a new workflow end-to-end or significantly extend an existing one. Do NOT use for single-component edits — call the matching skill directly.
+tools: Read, Grep, Glob, WebFetch
 ---
 
 # vNext Architect

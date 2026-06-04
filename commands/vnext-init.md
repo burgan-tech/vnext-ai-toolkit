@@ -1,6 +1,7 @@
 ---
 name: vnext-init
 description: Set up or refresh a vNext workspace. If none exists, scaffolds the base project with the official @burgan-tech/vnext-template CLI (via npx); then checks & revises the toolkit's value-add layer (CLAUDE.md, AGENTS.md, docker-compose + mocklab, .claude/references, .http API tests, integration tests) and offers to bump runtimeVersion/schemaVersion. Diffs before overwriting — nothing happens silently.
+allowed-tools: Bash(npm install *), Bash(npm run *), Bash(npm run setup:*), Bash(node setup.js:*), Bash(npm run sync-schema), Bash(npm run validate), Read, Write, WebFetch
 ---
 
 # /vnext-init
