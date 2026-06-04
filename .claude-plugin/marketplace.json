@@ -1,0 +1,15 @@
+{
+  "name": "vnext-toolkit",
+  "owner": {
+    "name": "Burgan Tech vNext Team",
+    "url": "https://github.com/burgan-tech"
+    },
+  "plugins": [
+    {
+      "name": "vnext-ai-toolkit",
+      "source": "./",
+      "description": "AI tooling for the vNext platform — process designer subagent, component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration test scaffolding. Canonical schema-first: every component is generated from the official JSON Schema at the workspace's schemaVersion tag.",
+      "version": "0.1.0"
+    }
+  ]
+}

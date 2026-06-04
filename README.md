@@ -29,7 +29,10 @@ git clone https://github.com/burgan-tech/vnext-ai-toolkit.git ~/.claude/plugins/
 In a new (or existing) vNext domain workspace:
 
 ```bash
-# 1. Bootstrap the workspace (vnext.config.json, docker-compose, CLAUDE.md, tests/, ...)
+# 1. Set up the workspace. If there's no vnext.config.json yet, this scaffolds the base
+#    project with the official @burgan-tech/vnext-template CLI (npx), then layers on the
+#    toolkit files (docker-compose, CLAUDE.md, tests/, ...). In an existing workspace it
+#    checks & revises those toolkit files and offers to bump runtimeVersion/schemaVersion.
 claude /vnext-init
 
 # 2. Design your first workflow
@@ -39,7 +42,9 @@ claude /vnext-design-process "Account opening"
 claude /vnext-validate
 ```
 
-`/vnext-init` asks before each file is created — you can skip steps that don't apply (no Docker, no integration tests, etc.).
+`/vnext-init` delegates the base scaffold (`vnext.config.json`, `package.json`, component folders) to
+`@burgan-tech/vnext-template` and diffs before overwriting any toolkit-owned file — you can skip steps
+that don't apply (no Docker, no integration tests, etc.).
 
 ## Design philosophy
 
@@ -91,7 +96,7 @@ For a typical workflow:
 - `{domain}/Functions/{key}/{key}.json` (+ `src/*.csx`) — REST endpoints (LOV, lookup, BFF)
 - `{domain}/Extensions/{key}/{key}.json` (+ `src/*.csx`) — instance enrichment
 - `etc/docker/config/seed/{domain}-collection.json` — MockLab mock entries
-- `tests/{Domain}/{Workflow}Tests.cs` — xUnit integration test (lifecycle assertion)
+- `tests/{Domain}.IntegrationTests/Tests/{Workflow}Tests.cs` — xUnit integration test (lifecycle assertion); the project is scaffolded by the official `VNext.Testing.Template`
 - `api-tests/{key}.http` — companion REST Client file
 
 All passing `npm run validate` and `dotnet test`.
@@ -122,9 +127,8 @@ vnext-ai-toolkit/
 │   ├── view-author-guide.md          # pseudo-UI patterns
 │   ├── function-mapping-pattern.md   # .csx mapping recipes
 │   └── mocklab-seed-format.md        # MockLab seed reference
-├── templates/                        # Workspace bootstrap files ({{domain}} placeholder)
-│   ├── vnext.config.json.tmpl
-│   ├── package.json.tmpl
+├── templates/                        # Toolkit value-add layer ({{domain}} placeholder)
+│   │                                 #   (base project comes from @burgan-tech/vnext-template)
 │   ├── docker-compose.yml.tmpl
 │   ├── CLAUDE.md.tmpl / AGENTS.md.tmpl
 │   ├── .http.tmpl
@@ -153,7 +157,7 @@ vnext-ai-toolkit/
 - [`burgan-tech/vnext-docs`](https://github.com/burgan-tech/vnext-docs) — Official documentation portal ([browse online](https://burgan-tech.github.io/vnext-docs/)).
 - [`burgan-tech/vnext-schema`](https://github.com/burgan-tech/vnext-schema) — Canonical JSON Schemas + vocabularies (this plugin's contract source).
 - [`burgan-tech/mocklab`](https://github.com/burgan-tech/mocklab) — Mock API used for HTTP task development.
-- [`burgan-tech/vnext-integration-test`](https://github.com/burgan-tech/vnext-integration-test) — Integration testing SDK.
+- [`burgan-tech/vnext-integration-test`](https://github.com/burgan-tech/vnext-integration-test) — Integration testing SDK + `dotnet new vnext-integration-test` project template ([Getting Started](https://github.com/burgan-tech/vnext-integration-test/blob/master/GETTING_STARTED.md)).
 
 ## License
 

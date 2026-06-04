@@ -73,11 +73,24 @@ Confirm with the user the available component types (`ScrollView`, `Column`, `Ro
 
 **Icons — Material Symbols / MD3 only.** pseudo-ui's `Icon` (and `Button.icon`) consumes the Material Symbols icon set. Use lowercase `snake_case` names exactly as listed at https://fonts.google.com/icons (e.g. `home`, `schedule`, `show_chart`, `check_circle`, `credit_card`, `location_on`, `arrow_forward`, `notifications`, `settings`, `badge`, `smartphone`, `bar_chart`, `check_box`). Never use kebab-case, Font Awesome names, or invented tokens. If unsure, verify the symbol exists in the Material Symbols catalog before placing it in the JSON.
 
-### 4. Gather view requirements
+### 4. Verify `rawResponse: true` on every function this view will bind
+
+For each function referenced in the view's `dataSchema`, `x-lov.source`, `x-lookup.source`, or `$lov`/`$lookup` expressions:
+
+1. Read the function JSON.
+2. Confirm `attributes.rawResponse: true` is set.
+3. If missing or `false` → fix it (or hand off to `component-function` skill). Without it, the runtime wraps the function output under the function key and JsonPath bindings like `$.data[*]` silently return nothing — empty dropdowns and null lookups with no error logged.
+
+This is the most common cause of "the view looks right but no data shows up". Always check.
+
+Full reference: `references/function-mapping-pattern.md` § 5.
+
+### 5. Gather view requirements
 
 Ask the user:
 - **`display`** — `full-page`, `popup`, `inline`, etc.
 - **State binding** — which workflow + state will reference this view?
+- **Placement (state vs transition)** — if this view collects user input AND the target state is the workflow's Initial state (`stateType: 1`), the **Recommended placement is `state.view`** (not on the outgoing transition). Reason: the runtime serves the state view immediately on instance start, so the user sees the form right away. Confirm with `AskUserQuestion` — let the user override if they want an intentional "intro → tap → form" two-step. Wizard states (`stateType: 5`) are the exception — their form belongs on the single transition. See `references/concepts/view-roles.md` and `references/concepts/workflow-types.md`.
 - **`dataSchema`** — which schema drives the data shape? **Choose by role**:
   - *Transition / input view* (user fills a form) → bind to the **transition payload schema** (carries `enum`/`x-lov`/`x-validation`/`x-conditional` for the input set).
   - *Display / summary / status view* (read-only from `$instance`) → bind to the **master / instance schema** (covers the full instance shape so `$schema.X.label` and `$instance.X` paths resolve everywhere).
@@ -86,11 +99,11 @@ Ask the user:
 - **Localization** — Turkish + English labels?
 - **Interactions** — which buttons / transitions does it trigger?
 
-### 5. Look at a sibling example (cheap context)
+### 6. Look at a sibling example (cheap context)
 
 Before writing, read one nearby view of the same renderer for shape reference (e.g. `core/Views/account-opening/account-confirmation-view.json` for pseudo-ui). Do not copy blindly — use it to confirm field order and reference style.
 
-### 6. Generate the view JSON
+### 7. Generate the view JSON
 
 Standard envelope:
 
@@ -110,29 +123,41 @@ Standard envelope:
 }
 ```
 
-For `pseudo-ui`, `content` looks like:
+**`renderer` lives at `attributes.renderer`** — a sibling of `attributes.content`, never inside
+`content`. For pseudo-ui the value is `"pseudo-ui"` at `attributes.renderer`; the component tree
+goes in `attributes.content.view`.
+
+For `pseudo-ui`, `content` (i.e. `attributes.content`) looks like:
 
 ```json
 {
   "$schema": "https://amorphie.io/meta/view-vocabulary/1.0",
-  "dataSchema": "urn:amorphie:res:schema:{domain}:{schema-key}",
+  "dataSchema": "urn:vnext:res:schema:{domain}:{schema-key}",
   "view": { "type": "ScrollView", "children": [ /* components */ ] }
 }
 ```
 
 Data binding uses `$instance.fieldName` and `$schema.fieldName.label`.
 
-**`dataSchema` must be a URN, not an HTTP URL** — exact form `urn:amorphie:res:schema:{domain}:{schema-key}` matching the target schema's `$id`. URLs (`https://schemas.vnext.com/...`) won't resolve at runtime.
+**`dataSchema` must be a URN, not an HTTP URL** — exact form `urn:vnext:res:schema:{domain}:{schema-key}` matching the target schema's `$id`. URLs (`https://schemas.vnext.com/...`) won't resolve at runtime.
 
-### 7. Write the file
+For non-pseudo-ui renderers, `content` is a small object (extensible later), with `${param}` runtime binding:
+
+```jsonc
+// http     → { "href": "https://google.com?s=${param}" }
+// deeplink → { "href": "on-burgan//onboarding/${param}" }   // full-path only for now
+// urn      → { "urn": "urn:vnext:flow:transition:{domain}:{flow}:${param}:approved" }
+```
+
+### 8. Write the file
 
 Write to `{componentsRoot}/{paths.views}/{domain-subfolder}/{key}-view.json` (path from step 1).
 
-### 8. Validate
+### 9. Validate
 
 Run `npm run validate`. If errors surface, hand off to the `validate-and-fix` skill.
 
-### 9. Wire into the workflow (if requested)
+### 10. Wire into the workflow (if requested)
 
 If the user wants the view bound now, edit the target workflow JSON's state to add the `view` reference:
 
@@ -149,7 +174,7 @@ Then re-run `npm run validate`.
 - For non-pseudo-ui renderers, `content` shape varies — verify against `/docs/components/view` before drafting.
 - `Icon.name` and `Button.icon` values are Material Symbols (MD3) tokens — lowercase `snake_case`. Never kebab-case (`check-circle`), Font Awesome (`fa-check`), or invented names.
 - When the parent state is a Wizard (`stateType: 5`), keep `state.view = null`; the view belongs on that state's (single) transition.
-- **Action model.** `Button.action` ∈ `{ "submit", "cancel", "back" }`. `submit` validates; `cancel`/`back` don't. The target lives in `command` as a URN — workflow transitions: `urn:amorphie:wf:{flow}:transition:{key}`; navigation: `urn:forge:nav:/path`; BFF functions: `urn:amorphie:func:{domain}:{fn}`. For `Card.onTap`, use `{ "action": "dispatch", "command": "urn:..." }` or the inline `{ "action": "select", "bind": "...", "value": "..." }`. Don't invent verbs like `"transition"`.
+- **Action model.** Reserved verbs: `submit` (validates by default), `select` (inline set, host NOT called), `reset` (clears formData, runs hooks), `dispatch` (domain dispatch; optional `validate`). The target lives in `command` as a URN (`urn:vnext` scheme) — flow transitions: `urn:vnext:flow:transition:{domain}:{flow}:{transition}`; functions: `urn:vnext:fn:{cmd}:{domain}:{fn}`; client-local nav: `urn:client:nav:/path`. For `Card.onTap`, use `{ "action": "dispatch", "command": "urn:vnext:..." }` or the inline `{ "action": "select", "bind": "...", "value": "..." }`. Attach `preHooks`/`postHooks` for audit/telemetry side-effects (see `view-author-guide.md` §4). Don't invent verbs like `"transition"`.
 - **Auto transitions never carry a view.** `triggerType: 1` (auto/rule) and `triggerType: 2` (timer) must have `transition.view = null`. Auto-state (`stateType: 2`) whose only outgoing transitions are auto/timer should also have `state.view = null` — these states aren't user-facing.
 - **Stepper is for true multi-step forms on one screen** (`steps[].title` + `steps[].content` both required). Don't use it as a wizard progress indicator across separate state views; a simple `Text` "Adım X / N" at the top of each view is the right pattern.
 - **Input `bind`** = schema property path (`"firstName"`, `"address.city"`). Never prefix with `$form.` — that's only for expression contexts (Text content, showIf rule values, LOV filters).

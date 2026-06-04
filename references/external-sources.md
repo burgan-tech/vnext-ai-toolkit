@@ -12,7 +12,8 @@ This is the plugin's address book for "live" knowledge — everything an agent m
 | **vnext-docs repo** | https://github.com/burgan-tech/vnext-docs | Markdown source for the portal (sidebar config, both locales) | GitHub raw / `gh` CLI |
 | **vnext-example repo** | https://github.com/burgan-tech/vnext-example | The reference workspace — working examples of every component type, MockLab seeds, integration tests | GitHub raw / local clone |
 | **mocklab repo** | https://github.com/burgan-tech/mocklab | Authoritative MockLab seed format, rule operators, sequence behavior | GitHub raw / WebFetch |
-| **vnext-integration-test SDK** | https://github.com/burgan-tech/vnext-integration-test | Source for `VNext.Testing.Sdk`, `IntegrationTestBase`, `VNextApiClient` | GitHub raw / WebFetch |
+| **vnext-integration-test SDK** | https://github.com/burgan-tech/vnext-integration-test | Source for `VNext.Testing.Sdk`, `VNext.Testing.Template` (`dotnet new vnext-integration-test`), `IntegrationTestBase`, `VNextApiClient` | GitHub raw / WebFetch |
+| **vnext-integration-test — Getting Started** | https://github.com/burgan-tech/vnext-integration-test/blob/master/GETTING_STARTED.md | Authoritative setup: package/template install, csproj, config files, fixtures, API surface, example tests | `https://raw.githubusercontent.com/burgan-tech/vnext-integration-test/master/GETTING_STARTED.md` (WebFetch) |
 | **BBT.Workflow.Domain NuGet** | https://www.nuget.org/packages/BBT.Workflow.Domain/ | Domain primitives consumed by `.csx` mappings | NuGet API; pin to closest `runtimeVersion` |
 | **BBT.Workflow.Scripting NuGet** | https://www.nuget.org/packages/BBT.Workflow.Scripting/ | Mapping interfaces (`IMapping`, `IOutputHandler`, `IConditionMapping`, `ITimerMapping`, `ISubFlowMapping`, `INotificationMapping`), `ScriptContext`, `ScriptResponse`, `ScriptBase` | NuGet API |
 | **BBT.Workflow.Definitions NuGet** | Companion to `BBT.Workflow.Domain` (same release cadence) | Concrete task types (`HttpTask`, `NotificationTask`, `SoapTask`, ...), `TimerSchedule`, `StandardTaskResponse` | NuGet API |
@@ -42,7 +43,7 @@ If the exact tag is missing:
 | "How does pseudo-UI bind LOV options?" | Context7 (`"pseudo-ui x-lov source"`) | WebFetch `/docs/how-to/view-consept/view-yapisi` |
 | "What's the exact `ScriptContext.Body` shape?" | `csx-contracts.md` (this repo) | NuGet symbol package for `BBT.Workflow.Scripting` |
 | "Does this MockLab rule operator exist?" | `mocklab-spec.md` (this repo) | GitHub raw on `burgan-tech/mocklab` README |
-| "How does the integration SDK's `WaitForStateAsync` work?" | `integration-test-patterns.md` (this repo) | GitHub raw on `vnext-integration-test` |
+| "How do I scaffold/run an integration test (template, API surface)?" | `integration-test-patterns.md` (this repo) | `GETTING_STARTED.md` raw on `vnext-integration-test` |
 | "Is there a doc about SubFlow vs SubProcess runtime callback?" | Context7 (`"subflow subprocess runtime callback"`) | WebFetch `/docs/components/workflow` |
 
 Prefer in-repo references for shape and rules of thumb; fall back to live sources for specifics or evolving topics.

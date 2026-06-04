@@ -56,7 +56,7 @@ Capture: `workflowKey`, `businessGoal`, `actorModel` (single/multi), `workflowTy
 
 Goal: lay out the state machine.
 
-5. **Multi-actor?** If yes, plan `queryRoles[]` (the canonical schema and `view-roles.md` describe the available role tokens). For most flows the answer is "no" — skip if the user said single actor in Phase 1.
+5. **Multi-actor?** If yes, plan `queryRoles[]` (the canonical schema and `roles-and-authorization.md` describe the system role tokens — `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` — and JSONPath grants). For most flows the answer is "no" — skip if the user said single actor in Phase 1.
 
 6. **Are there reusable sub-procedures or parallel branches?**
    - Reusable nested → SubFlow (S) — note the child workflow keys.
@@ -67,6 +67,7 @@ Goal: lay out the state machine.
    - State key (kebab-case)
    - State kind — render `stateType.enum` from the schema. Annotations: "Initial — the starting point (exactly one per workflow)"; "Wizard — step-by-step form (single transition with the form on it)"; "Intermediate — most states"; "Final — workflow ends here".
    - Does this state show the user something (a view)? What kind — an input form, or read-only summary?
+   - **Initial-state input convention** — if this is the Initial state AND it gathers input, default to placing the form on `state.view` (not on the outgoing transition). Confirm with `AskUserQuestion`; mark state-view as Recommended. The runtime serves state views immediately on instance start — putting the form on the transition forces an extra discovery hop. Wizard states (5) are the exception: their form belongs on the single transition by design.
 
 8. **Map the transitions.** For each state, ask what happens to leave it:
    - Target state
@@ -109,7 +110,7 @@ Once components are designed (or stubbed), delegate to `workflow-scaffold`. Pass
 
 ### Phase 5 — Test & Validate
 
-10. **Integration test?** Default: yes (vNext best practice). Delegate to `integration-test`. If `tests/{Domain}/` is missing, ask the user to run `/vnext-init` first.
+10. **Integration test?** Default: yes (vNext best practice). Delegate to `integration-test`. If no `*.IntegrationTests.csproj` exists, the skill scaffolds one via the official `VNext.Testing.Template` (or hand off to `/vnext-init`).
 
 11. **Validate everything.** Delegate to `validate-and-fix`. If errors surface, the skill loops up to 3 times before handing back to you.
 
@@ -127,7 +128,7 @@ End-state summary: list what was created (workflow + N views + M schemas + ... +
 
 - The user asks for a single-component change (e.g. "add a field to this schema"). Hand off directly to the matching skill — don't run the full architect flow.
 - The user is debugging an existing workflow. Hand off to `validate-and-fix` or read the workflow JSON directly with the user.
-- The user hasn't run `/vnext-init` and there's no `vnext.config.json`. Halt and ask the user to initialize the workspace first.
+- There's no `vnext.config.json`. Halt and ask the user to run `/vnext-init` first — it scaffolds the base project via the official `@burgan-tech/vnext-template` CLI and layers on the toolkit files.
 
 ## Recovery from interruption
 
@@ -142,6 +143,7 @@ If the conversation is interrupted mid-flow and resumed later:
 - `references/concepts/component-schemas.md` — the canonical schema-first fetch flow
 - `references/concepts/workflow-types.md` — workflow / state / transition mental model
 - `references/concepts/view-roles.md` — state view vs transition view, pseudo-UI binding
+- `references/concepts/roles-and-authorization.md` — system role tokens, token claims, JSONPath grants
 - `references/concepts/function-vs-extension-vs-task.md` — picking the right component
 - `references/concepts/mapping-types.md` — when to write which `.csx` interface
 - `references/concepts/csx-contracts.md` — `.csx` type signatures and standard `using`s
