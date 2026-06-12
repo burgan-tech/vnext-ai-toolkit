@@ -30,6 +30,7 @@ map 1:1 to component types via `paths` in [vnext.config.json](vnext.config.json)
 | `Views/`      | view           | `sys-views`      | `view-definition.schema.json`      |
 | `Functions/`  | function       | `sys-functions`  | `function-definition.schema.json`  |
 | `Extensions/` | extension      | `sys-extensions` | `extension-definition.schema.json` |
+| `Mappings/`   | mapping        | `sys-mappings`   | `mapping-definition.schema.json`   |
 
 **Always read the authoritative schema before writing or editing a component.**
 They are the source of truth and may change with the schema version pinned in
@@ -135,6 +136,10 @@ Confirm the exact shape against the schema each time; this is the gist:
 - **extension** — required `type` (integer), `scope` (integer), `task`; optional `labels`.
 - **schema** — required `type` (enum `workflow`/`task`/`function`/`view`/`schema`/
   `extension`/`headers`) and `schema`; optional `labels`.
+- **mapping** (`sys-mappings`) — a reusable C# class shared via `scripts.helpers` / `REF`. Required
+  `name` (the C# class name, e.g. `RsaCryptoHelper`), `code`, `encoding`; optional `location`.
+  `encoding` is **`B64` or `NAT` only** — a mapping can't be `REF` (it's the ref target). See
+  `references/concepts/mappings-and-scripts.md` and the `component-mapping` skill.
 
 ## C# scripts (`.csx`) — the `scriptCode` shape
 
@@ -147,7 +152,14 @@ kept in a `src/` folder next to the workflow JSON. Every script reference (`mapp
 ```
 
 - `type`: `"L"` Local (default) or `"G"` Global. `location`: path to the `.csx`.
-  `encoding`: `"B64"` (default) or `"NAT"`. `code`: the encoded script body.
+  `encoding`: `"B64"` (default), `"NAT"`, or `"REF"`. `code`: the encoded script body — **except** when
+  `encoding` is `"REF"`, where `code` is a `sys-mappings` reference
+  `{ "key", "version", "domain", "flow": "sys-mappings" }` instead of an inline string.
+- **`scripts` block (optional)** — any mapping object, and the workflow `attributes.scripts`, may carry
+  `{ "helpers": [sys-mappings refs], "allowedAssemblies": ["Newtonsoft.Json", ...] }`. `helpers` makes a
+  shared helper's static class callable in the script (e.g. `JsonHelper.Serialize(x)`);
+  `allowedAssemblies` whitelists the .NET assemblies the script may use. See
+  `references/concepts/mappings-and-scripts.md`.
 - **Validation rule (verified):** if `type` is `"L"` *or set explicitly*, `code` is
   **required**. If you **omit `type`**, a `location`-only object validates (`code` may be
   empty). So a freshly hand-authored script is `{ "location": "./src/X.csx" }` — valid,

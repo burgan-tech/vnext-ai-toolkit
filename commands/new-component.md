@@ -1,5 +1,5 @@
 ---
-description: Scaffold a new vNext domain component (workflow/task/view/function/extension/schema)
+description: Scaffold a new vNext domain component (workflow/task/view/function/extension/schema/mapping)
 argument-hint: "<type> <key> [short description]"
 ---
 
@@ -7,7 +7,7 @@ Scaffold a new vNext component. Use the **authoring-vnext-components** skill for
 component structure, field rules, and validation workflow.
 
 Parse `$ARGUMENTS` as: `<type> <key> [description]`, where `<type>` is one of
-`schema | workflow | task | view | function | extension`.
+`schema | workflow | task | view | function | extension | mapping`.
 
 **Gathering missing inputs — ask before generating anything, prefer popups:**
 - If `<type>` is missing or not one of the six, ask via `AskUserQuestion` with the six

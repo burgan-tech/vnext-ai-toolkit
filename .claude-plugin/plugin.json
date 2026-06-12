@@ -1,6 +1,6 @@
 {
   "name": "vnext-ai-toolkit",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "AI tooling for the vNext platform: process designer (multi-turn architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration test scaffolding. Canonical schema-first — every component is generated from the official JSON Schema at the workspace's schemaVersion tag, never from hardcoded assumptions.",
   "author": {
     "name": "Burgan Tech vNext Team",
@@ -47,6 +47,7 @@
     "./skills/component-task",
     "./skills/component-function",
     "./skills/component-extension",
+    "./skills/component-mapping",
     "./skills/integration-test",
     "./skills/validate-and-fix"
   ],
@@ -57,6 +58,7 @@
     "references/concepts/view-roles.md",
     "references/concepts/roles-and-authorization.md",
     "references/concepts/function-vs-extension-vs-task.md",
+    "references/concepts/mappings-and-scripts.md",
     "references/concepts/mapping-types.md",
     "references/concepts/csx-contracts.md",
     "references/concepts/schema-vocabularies.md",
@@ -77,7 +79,8 @@
       "task",
       "schema",
       "function",
-      "extension"
+      "extension",
+      "mapping"
     ]
   }
 }

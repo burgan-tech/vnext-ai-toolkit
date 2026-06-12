@@ -55,6 +55,11 @@ This is a **default with confirmation**: the skill should propose state-view pla
 
 **Pattern: auto/timer transitions never carry a view.** `triggerType` 1, 2, 3 → `transition.view = null`.
 
+**Pattern: the start transition never carries a view.** `startTransition.view` is always `null` — it
+fires automatically on instance creation. It *can* carry a `schema` to validate the initial payload
+(service-to-service flows). Client flows start with base info and collect input on the initial-state
+view. See `workflow-types.md` § Start transition.
+
 ## 4. pseudo-UI vocabulary (high-level)
 
 pseudo-UI views set `content.$schema: "https://amorphie.io/meta/view-vocabulary/1.0"` and reference a `content.dataSchema` URN. The `content.view` is a component tree.
@@ -78,7 +83,7 @@ pseudo-UI expressions reference data through namespaces:
 | `$form` | Client-side form state | `$form.errors`, `$form.isDirty` |
 | `$ui` | UI runtime state | `$ui.isLoading` |
 | `$lov` | List-of-values lookups (resolved via Function) | `$lov.branches[]` |
-| `$lookup` | Per-key lookup (resolved via Function) | `$lookup.branchDetail.address` |
+| `$lookup` | Lookup data — object **or** array — resolved via Function | `$lookup.branchDetail.address` ; array: `ForEach source: "$lookup.branchList"`, element `$item.*` |
 
 **`bind` is the schema property path**, NOT a `$form.X` expression: `"bind": "firstName"` or `"bind": "address.city"`.
 
@@ -87,14 +92,14 @@ pseudo-UI expressions reference data through namespaces:
 These `x-*` keywords live on schema properties and are consumed by the view layer:
 
 - **`x-labels`** — `{ "tr": "…", "en": "…" }` localized field labels
-- **`x-lov`** — LOV (dropdown) datasource: static list or function reference + JsonPath
-- **`x-lookup`** — Read-only enrichment: function reference + key field + JsonPath
+- **`x-lov`** — LOV datasource for a **selectable dropdown** bound to an input: static list or function reference + JsonPath
+- **`x-lookup`** — read-time enrichment used to **render**: function reference + `resultField` (JsonPath). Resolves to a **single object** (`$lookup.{name}.{field}`) **or an array** (iterate with `ForEach` over `$lookup.{name}`, element via `$item.*`). A `filter` that references a binding makes it **reactive** — it re-loads when that bound value changes (cascade)
 - **`x-validation`** — Runtime validation rules beyond standard JSON Schema (e.g. cross-field)
 - **`x-conditional`** — Field visibility/requirement conditions (`if X then required Y`)
 - **`x-enum`** — Enum values with display metadata
-- **`roles`** — Field-level access (`{ "role": "$PreviousUser", "grant": "allow" }`). System role tokens (`$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`) and JSONPath grants are documented in `roles-and-authorization.md`.
+- **`x-roles`** — Field-level access (`{ "role": "$PreviousUser", "grant": "allow" }`). System role tokens (`$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`) and JSONPath grants are documented in `roles-and-authorization.md`.
 
-`$lookup.{propertyName}` access uses **property name** — to expose `$lookup.branchDetail.X`, the `x-lookup` must sit on a schema property literally named `branchDetail` (a dedicated read-only object property, separate from the input field).
+`$lookup.{propertyName}` access uses **property name** — to expose `$lookup.branchDetail.X`, the `x-lookup` must sit on a schema property literally named `branchDetail`, and that name must be listed in the view's root `lookups` array. Multiple lookups are disambiguated by property name (`$lookup.branchDetail.*` vs `$lookup.customerDetail.*`).
 
 ## 7. Action model (Buttons and Cards)
 

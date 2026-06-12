@@ -111,7 +111,7 @@ Envelope:
   "key": "{workflow-key}",
   "version": "1.0.0",
   "domain": "{domain}",
-  "flow": "sys-workflows",
+  "flow": "sys-flows",
   "flowVersion": "1.0.0",
   "tags": [],
   "attributes": {

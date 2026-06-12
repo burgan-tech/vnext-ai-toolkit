@@ -43,14 +43,14 @@ Every component, regardless of type, follows this shape:
   "key": "kebab-case-name",
   "version": "1.0.0",
   "domain": "{{domain}}",
-  "flow": "sys-workflows",
+  "flow": "sys-flows",
   "flowVersion": "1.0.0",
   "tags": ["searchable", "tags"],
   "attributes": { /* type-specific content */ }
 }
 ```
 
-**`flow` values per component type**: `sys-workflows`, `sys-tasks`, `sys-schemas`, `sys-views`, `sys-functions`, `sys-extensions`.
+**`flow` values per component type**: `sys-flows` (workflows), `sys-tasks`, `sys-schemas`, `sys-views`, `sys-functions`, `sys-extensions`, `sys-mappings`.
 
 **Cross-component references** use this nested shape:
 
@@ -68,9 +68,10 @@ Use this as the first lookup when a user asks to create or modify a component. F
 | View | `paths.views` | `display`, `renderer`, `content` | `/docs/components/view` + `/docs/how-to/view-consept/` |
 | Task | `paths.tasks` | `type` (numeric, see below), `config` | `/docs/components/tasks/{subtype}` |
 | Schema | `paths.schemas` | `type`, `schema` (JSON Schema draft 2020-12) | `/docs/components/schema` |
-| Function | `paths.functions` | `scope` (I/D), `onExecutionTasks[]`, `output` | `/docs/components/functions/{built-in\|custom}` |
+| Function | `paths.functions` | `scope` (D/F/I), `onExecutionTasks[]`, `output` | `/docs/components/functions/{built-in\|custom}` |
 | Extension | `paths.extensions` | `type`, `scope`, `task` / `tasks` | `/docs/components/extension` |
-| Mapping (`.csx`) | workflow folder `src/` | C# class (PascalCase) | `/docs/components/mappings` |
+| Mapping | `paths.mappings` | `name` (C# class), `location`, `code`, `encoding` (`B64`/`NAT` only) — reusable `sys-mappings` helper | `/docs/components/mappings` |
+| Inline `.csx` | workflow folder `src/` | C# class (PascalCase) inside a `mapping`/`rule`/`timer` | `/docs/components/mappings` |
 
 **Task `type` quick map** (verify against docs before using): `6` = HTTP, `7` = Script, `15` = GetInstances. Other types: trigger, notification, dapr-service, dapr-pubsub, dapr-binding, dapr-http-endpoint, soap — see `/docs/components/tasks/{subtype}`.
 
@@ -106,9 +107,9 @@ pseudo-ui views use `$schema: https://amorphie.io/meta/view-vocabulary/1.0` and 
 
 Don't point a transition view at the master schema "just to keep things uniform" — the master deliberately uses **no `required`** and **`additionalProperties: true`** (instance data expands across states), so it lacks the input-side `required`/`x-lov`/`x-validation` semantics the transition needs.
 
-**`x-lov` / `x-lookup` are for field-input, not navigation.** SDK intent: `x-lov` provides dropdown options for a bound input (typically `Dropdown.bind` — a `TextField` will NOT render LOV options, use `Dropdown`), and `x-lookup` enriches a field with read-only detail (`$lookup.X.field`). A **navigation Card grid** (each card dispatches its own workflow transition) is not a form-input — encoding transition URNs into LOV item data (`$item.transitionCommand`) blurs UI semantics with data and adds mock dependencies for no gain. Use a **static Card grid with hardcoded `onTap.command` URNs** for navigation; reserve LOV/lookup for actual `bind`-driven dropdowns and field-bound enrichment.
+**`x-lov` = dropdown; `x-lookup` = rendering — don't fake navigation with either.** `x-lov` provides options for a bound input (typically `Dropdown.bind` — a `TextField` will NOT render LOV options, use `Dropdown`). `x-lookup` fetches data at read time to **render** it: a **single object** (`$lookup.X.field`) **or an array** iterated with `ForEach` (`source: "$lookup.X"`, element `$item.*`). A `filter` that references a binding makes it **reactive** — it re-loads when that bound value changes (cascade). What neither is for: a **navigation Card grid** where each card dispatches a workflow transition — encoding transition URNs into LOV/lookup item data (`$item.transitionCommand`) blurs UI semantics with data and adds mock dependencies for no gain. Use a **static Card grid with hardcoded `onTap.command` URNs** for navigation.
 
-**`x-lookup` access is by property name.** Per `view-model-vocabulary.json`, lookup results resolve as `$lookup.{propertyName}.{field}` where `{propertyName}` is the schema property that owns the `x-lookup`. To read `$lookup.branchDetail.*`, the `x-lookup` must live on a property literally named `branchDetail` — define it as a dedicated read-only object property (not in `required`, no `bind`), **separate from** the input field it enriches (e.g. `branchCode`). Activate in the view with `lookups: ["branchDetail"]`. Filter value scope: input/transition views use `$form.X`, display/summary views (master schema) use `$instance.X`.
+**`x-lookup` access is by property name.** Per `view-model-vocabulary.json`, lookup results resolve as `$lookup.{propertyName}.{field}` where `{propertyName}` is the schema property that owns the `x-lookup`. To read `$lookup.branchDetail.*`, the `x-lookup` must live on a property literally named `branchDetail` — define it as a dedicated property (not in `required`, no `bind`), **separate from** the input field it enriches (e.g. `branchCode`). Activate in the view with `lookups: ["branchDetail"]`. **Multiple lookups** are disambiguated by property name — list each in `lookups: [...]` and read them apart (`$lookup.branchDetail.*` vs `$lookup.customerDetail.*`); an **array** lookup is iterated with `ForEach` over `$lookup.{propertyName}` (element `$item.*`). Filter value scope: input/transition views use `$form.X`, display/summary views (master schema) use `$instance.X`.
 
 ### Functions — script mapping pattern (`.csx`)
 
@@ -131,8 +132,8 @@ Full template, examples, and the `IMapping` vs. `IOutputHandler` (multi-task) di
 
 How the vNext runtime executes a workflow — keep this in mind when designing states and transitions:
 
-1. **Instance start** — POST creates an instance; runtime fires `startTransition`, lands on its `target` state.
-2. **State entry** — if the state has a `view`, it renders; `onEntry` tasks fire (sequential by `order`, parallel when same order).
+1. **Instance start** — POST creates an instance; runtime fires `startTransition`, lands on its `target` state. The **start transition has no `view`** (`view: null`) but **may carry a `schema`** to validate the initial payload — service-to-service flows collect data here; client flows start with base info and gather input on the initial-state `view`.
+2. **State entry** — if the state has a `view`, it renders; `onEntry` tasks fire (sequential by `order`, parallel when same order). The built-in `state`/`view`/`schema`/`data` functions are gated by the current state's `queryRoles` — a caller not in the `allow` list gets **403**.
 3. **Transition triggers** — `triggerType: 0` (manual, user-driven), `1` (auto, condition-evaluated immediately), `2` (timer, after duration), `3` (event, external signal).
 4. **Auto transitions** must come in **complementary pairs** with mutually exclusive `rule` conditions, OR be a single transition with an unconditional rule (always true). A lone conditional auto transition is invalid.
 5. **`onExecutionTasks`** run during transition execution; each task has a `mapping` (`.csx`) that transforms instance data into task input and back.
@@ -145,7 +146,8 @@ When a user wants a new schema, **do not produce JSON before gathering inputs.**
 - Fields, types, required vs optional
 - Validation rules (regex, min/max, format)
 - Localization needs (`x-labels.tr`, `x-labels.en` on properties)
-- Role-based field access (`roles[]` with system roles `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`, or JSONPath grants — there is **no** `$CurrentUser`)
+- Field-level access (`x-roles` — the `x-` prefix is required — with system roles `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`, or JSONPath grants — there is **no** `$CurrentUser`)
+- Query metadata, esp. on the master schema: `x-filterOperators` (allowed filter operators; empty/absent ⇒ not filterable), `x-sortable` (boolean), `x-displayFormat` (UI format hint)
 - Whether the schema is workflow data, a transition payload, or task input/output
 
 Output: JSON Schema draft 2020-12 with `$id` set to a **URN** of the form `urn:vnext:res:schema:{domain}:{key}` (e.g. `urn:vnext:res:schema:{{domain}}:account-opening-master`). Views reference the same URN in their `dataSchema` field — never use HTTP URLs for schema identifiers, the runtime resolves URNs against the registered schema set.
@@ -173,6 +175,15 @@ Prefer Context7 for vocabulary lookups and "how does X work" questions; prefer W
 ### C# mapping files (`.csx`)
 
 Workflows reference C# script files in `src/` folders next to the workflow JSON. The vNext VS Code extension auto-encodes them as base64 in the JSON's `mapping.code` field when saving. **Never manually base64-encode `.csx` files.** Class names are PascalCase; file names are kebab-case.
+
+**Reusable code (`sys-mappings`), `scripts`, and `REF`.** Extract shared logic into a `sys-mappings`
+component (folder `Mappings/`, `paths.mappings`) — a reusable `public static class` helper. A mapping
+(or the workflow `attributes.scripts`) wires helpers in via a `scripts` block:
+`{ "helpers": [ { "key", "version", "domain", "flow": "sys-mappings" } ], "allowedAssemblies": ["Newtonsoft.Json", ...] }`
+— the helper's static class is then callable by name, and `allowedAssemblies` whitelists the .NET
+assemblies the script may use. A mapping's `encoding` may be `"B64"`, `"NAT"`, or `"REF"`; with `"REF"`
+the `code` is a `sys-mappings` reference instead of an inline string (a `sys-mappings` component itself
+can't be `REF`). See `/docs/components/mappings` for the script sandbox / helper-linking model.
 
 ### Build outputs
 
