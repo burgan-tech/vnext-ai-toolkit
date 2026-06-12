@@ -1,6 +1,6 @@
 ---
 name: schema-design
-description: Use when the user wants to create or modify a vNext Schema component. Interactively gathers fields, types, validation rules, localization (x-labels), and role-based access (roles[]) before producing JSON Schema draft 2020-12 at the path resolved from vnext.config.json.
+description: Use when the user wants to create or modify a vNext Schema component. Interactively gathers fields, types, validation rules, localization (x-labels), field-level access (x-roles), and query metadata (x-filterOperators/x-sortable/x-displayFormat) before producing JSON Schema draft 2020-12 at the path resolved from vnext.config.json.
 ---
 
 # Schema Design
@@ -21,7 +21,7 @@ Schemas drive view rendering, transition validation, and task I/O. **Never** pro
 2. Fetch
    a) https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/schema.json
    b) https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/vocabularies/
-      (one file per vocab: x-labels, x-lov, x-lookup, x-conditional, x-validation, x-enum, roles)
+      (one file per vocab: x-labels, x-lov, x-lookup, x-conditional, x-validation, x-enum, x-roles, x-filterOperators, x-sortable, x-displayFormat)
    ├─ Fail → master branch → references/concepts/component-schemas.md + schema-vocabularies.md
    └─ No snapshot → halt; never guess.
 3. Parse:
@@ -47,7 +47,7 @@ Target write path: `{componentsRoot}/{paths.schemas}/{domain-subfolder}/{key}.js
 
 Ask the user which category — this shapes `attributes.type` and the surrounding usage:
 
-- **`workflow`** — the master data shape for a workflow instance. **Must use no `required` and `additionalProperties: true`** — the runtime validates it on every instance-data merge, and data expands across states, so a strict master schema rejects valid intermediate data. Keep `pattern`, the backbone shape, and `x-*` vocab (these drive filtering, `x-lookup`, `x-encrypt`). See `references/concepts/workflow-types.md` § Master schema.
+- **`workflow`** — the master data shape for a workflow instance. **Must use no `required` and `additionalProperties: true`** — the runtime validates it on every instance-data merge, and data expands across states, so a strict master schema rejects valid intermediate data. Keep `pattern`, the backbone shape, and `x-*` vocab (these drive filtering, `x-lookup`, `x-encrypt`). The master schema is where `x-roles` (field visibility) and `x-filterOperators`/`x-sortable`/`x-displayFormat` (query metadata for the built-in `data` function) matter most. See `references/concepts/workflow-types.md` § Master schema.
 - **`transition`** — the payload required to execute a specific transition
 - **`task-input`** / **`task-output`** — bound to a task's mapping
 - **`view-data`** — drives a view's `dataSchema`
@@ -78,14 +78,14 @@ Does each field need bilingual labels? If yes, add `x-labels`:
 }
 ```
 
-### 5. Ask about role-based access
+### 5. Ask about field-level access (`x-roles`)
 
-Does any field need restricted visibility? If yes, add `roles[]`:
+Does any field need restricted visibility? If yes, add `x-roles` (the `x-` prefix is required — not bare `roles`):
 
 ```json
 "branchCode": {
   "type": "string",
-  "roles": [ { "role": "$PreviousUser", "grant": "allow" } ]
+  "x-roles": [ { "role": "$PreviousUser", "grant": "allow" } ]
 }
 ```
 
@@ -93,11 +93,28 @@ Built-in system roles: `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfSt
 `$PreviousBehalfOfUser` (there is **no** `$CurrentUser`). JSONPath grants (`$user.<path>`,
 `$role.<path>`, `$userBehalfOf.<path>`) are also valid. Full model: `references/concepts/roles-and-authorization.md`.
 
-### 6. Look at a sibling example
+### 6. Ask about query metadata (mostly for the master schema)
+
+If the instance data will be **queried/filtered/sorted** (via the built-in `data` function), capture per field:
+- **`x-filterOperators`** — allowed operators, e.g. `["eq", "gt", "ge", "lt", "le", "between"]`. Empty/absent ⇒ not filterable. Operator semantics depend on the field type (see `references/concepts/schema-vocabularies.md`).
+- **`x-sortable`** — `true` if the field can be sorted on.
+- **`x-displayFormat`** — UI format hint, e.g. `"yyyy-MM-dd'T'HH:mm:ssXXX"`.
+
+```json
+"startDateTime": {
+  "type": "string",
+  "format": "date-time",
+  "x-filterOperators": ["eq", "gt", "ge", "lt", "le", "between"],
+  "x-sortable": true,
+  "x-displayFormat": "yyyy-MM-dd'T'HH:mm:ssXXX"
+}
+```
+
+### 7. Look at a sibling example
 
 Read one existing schema in the same domain folder for envelope reference (e.g. `core/Schemas/account-opening/account-opening-master.json`). Confirm the `$id` URN pattern used in this repo (current scheme: `urn:vnext:res:schema:{domain}:{key}` — e.g. `urn:vnext:res:schema:core:input-schema`).
 
-### 7. Generate the schema JSON
+### 8. Generate the schema JSON
 
 Envelope:
 
@@ -116,21 +133,21 @@ Envelope:
       "$id": "urn:vnext:res:schema:{domain}:{key}",
       "type": "object",
       "required": [ /* names */ ],
-      "properties": { /* fields from step 3-5 */ }
+      "properties": { /* fields from steps 3-6 */ }
     }
   }
 }
 ```
 
-### 8. Write the file
+### 9. Write the file
 
 Write to `{componentsRoot}/{paths.schemas}/{domain-subfolder}/{key}.json`.
 
-### 9. Validate
+### 10. Validate
 
 Run `npm run validate`. Hand off failures to the `validate-and-fix` skill.
 
-### 10. Wire references (if requested)
+### 11. Wire references (if requested)
 
 If the user wants the schema referenced from a view's `dataSchema` or a workflow's transition payload, edit the target JSON and re-validate.
 
@@ -138,5 +155,5 @@ If the user wants the schema referenced from a view's `dataSchema` or a workflow
 
 - JSON Schema draft used is **2020-12** — confirm the `$schema` URL matches.
 - `$id` is a **URN** (`urn:vnext:res:schema:{domain}:{key}`), not an HTTP URL — the runtime resolves it against the registered schema set, never via fetch. The URN must match the value used by any view's `dataSchema` or workflow transition payload reference. Keep it stable across versions. (The `res-key` segment is `schema`; the same `urn:vnext:res:<res-key>:<domain>:<key>` form covers `flow`/`view`/`function`/`extension`/`task` resources.)
-- `x-labels` and `roles[]` are vNext extensions to JSON Schema, not standard keywords — they're consumed by the runtime and view layer.
+- `x-labels`, `x-roles`, `x-filterOperators`, `x-sortable`, `x-displayFormat` are vNext extensions to JSON Schema, not standard keywords — they're consumed by the runtime and view layer.
 - Never hardcode `core/Schemas/...` — always resolve from `vnext.config.json`.

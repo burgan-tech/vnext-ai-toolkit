@@ -15,6 +15,7 @@ Repo layout (one file per component type):
 - `schemas/schema.json`
 - `schemas/function.json`
 - `schemas/extension.json`
+- `schemas/mapping-definition.schema.json` (the `sys-mappings` component)
 
 The repo is **tagged per `schemaVersion`** — release `v0.0.42` matches `schemaVersion: "0.0.42"` in `vnext.config.json`. This pinning means every workspace gets the exact schema its runtime expects.
 
@@ -24,7 +25,7 @@ The repo is **tagged per `schemaVersion`** — release `v0.0.42` matches `schema
 https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}.json
 ```
 
-Where `{componentType}` is one of: `workflow`, `view`, `task`, `schema`, `function`, `extension`.
+Where `{componentType}` is one of: `workflow`, `view`, `task`, `schema`, `function`, `extension`, `mapping`.
 
 ## Mandatory fetch flow (every scaffolding skill)
 
@@ -84,7 +85,7 @@ Most vNext component schemas follow this top-level shape:
     "key": { "type": "string", "pattern": "^[a-z0-9-]+$" },
     "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
     "domain": { "type": "string" },
-    "flow": { "const": "sys-workflows" },
+    "flow": { "const": "sys-flows" },
     "attributes": {
       "type": "object",
       "required": [ /* component-specific */ ],

@@ -13,7 +13,7 @@ description: Use when the user asks to validate components or fix validation err
 
 ```
 1. Read vnext.config.json → schemaVersion.
-2. For each failing file, identify its component type (from `flow` field: sys-workflows / sys-views / ...).
+2. For each failing file, identify its component type (from `flow` field: sys-flows / sys-views / sys-mappings / ...).
 3. Fetch the matching schema:
    https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}.json
 4. Compare the failing field against the schema clause.

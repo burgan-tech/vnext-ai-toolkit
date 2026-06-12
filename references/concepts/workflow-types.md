@@ -68,6 +68,26 @@ while backoffice actors see their own role-appropriate label.
 
 The `roles[]` use the same role model as everywhere else — see `roles-and-authorization.md`.
 
+## 2.2 Built-in instance functions & `queryRoles`
+
+The runtime exposes four **built-in functions** on every instance:
+
+| Function | Returns |
+|----------|---------|
+| `state` | the instance's current state (role-aware — applies the state alias, see §2.1) |
+| `view` | the view to render for the current state/transition |
+| `schema` | the data schema for the current context (field visibility filtered by `x-roles`) |
+| `data` | the instance data (supports advanced filtering/sorting — see §7 Master schema) |
+
+Each call **authorizes against the current state's `queryRoles`**: if the caller's resolved roles
+(see `roles-and-authorization.md`) aren't `allow`-listed, the function returns **403**. So
+`queryRoles` on a state is what gates who can read that state, its view, its schema, and its data.
+
+**Precedence: state, then flow.** `queryRoles` can be defined at **two levels** — on the **flow**
+(`attributes.queryRoles`) and on a **state**. The **current state's `queryRoles` takes priority**; if
+the current state defines none, the runtime falls back to the **flow-level `queryRoles`**. Use the
+flow level for a workflow-wide default and override it per state only where access differs.
+
 ## 3. Transition `triggerType`
 
 How the transition fires.
@@ -120,6 +140,17 @@ Decision: reusable nested sequence with shared data → `S`. Independent paralle
 
 Every workflow has exactly one `attributes.startTransition`. Its `target` must be the Initial (`stateType: 1`) state. The runtime fires this transition automatically when the instance is created.
 
+**No view, but a schema.** The start transition **cannot carry a `view`** (`view` must be `null`) —
+it fires automatically on creation, so there's no UI surface for it. It **can carry a `schema`** to
+validate the **initial payload** sent to instance-start.
+
+**Service-to-service vs client pattern.** In **service-to-service** flows it's natural to collect the
+initial data *at start* (the caller already has it) — set `startTransition.schema` to the payload it
+sends. In **client-facing** flows the instance usually starts with only base info, and the user
+provides input on the **initial-state view** (not at start). Design for this explicitly: put the
+input form on the Initial state's `view`, not on the start transition (which has none). See
+`view-roles.md` § State view vs Transition view.
+
 ## 7. Master schema
 
 A flow defines a **master schema** (its `attributes.schema` / workflow-type schema). It derives the
@@ -133,7 +164,10 @@ states** (each state merges more in), the master schema must be permissive:
 - **`additionalProperties: true`** — data grows at different levels over the instance's life.
 
 What still matters: `pattern`, the backbone object shape, vocabulary definitions (`x-*`), and the
-field types — these drive filtering and the `x-*` features.
+field types — these drive filtering and the `x-*` features. In particular, master-schema properties
+carry **`x-roles`** (field visibility in the `schema`/`data` functions) and
+**`x-filterOperators` / `x-sortable` / `x-displayFormat`** (which the `data` function uses for
+advanced filtering, sorting, and display). See `schema-vocabularies.md`.
 
 **Filtering.** The **data function** uses the master schema actively when responding: it resolves
 the types of dynamic instance-data fields *from the schema*, which is what gives advanced instance

@@ -86,9 +86,11 @@ The SDK auto-binds when rendering a Dropdown. In the view just write: `{ "type":
 
 Cascade: when `country` changes, the `city` LOV is auto-refreshed and the previous selection is reset.
 
-### 2.4 Read-only enrichment (Lookup)
+### 2.4 Lookup — read-time enrichment (object **or** array)
 
-**Critical naming rule** (`view-model-vocabulary.json`): lookup results are accessed via **`$lookup.{propertyName}.{field}`**, where `{propertyName}` is the **schema property that owns the `x-lookup`**. So to read `$lookup.branchDetail.*`, the `x-lookup` must live on a property literally named `branchDetail` — **not** on the `branchCode` input field. Define the lookup as its own read-only property; don't attach it to the input it enriches.
+Where `x-lov` feeds a *selectable dropdown* bound to an input, `x-lookup` fetches data at read time to **render** it. `resultField` (JsonPath into the function response) decides what `$lookup.{propertyName}` holds — it can be a **single object** *or* an **array**.
+
+**Critical naming rule** (`view-model-vocabulary.json`): lookup results are accessed via **`$lookup.{propertyName}.{field}`**, where `{propertyName}` is the **schema property that owns the `x-lookup`**. So to read `$lookup.branchDetail.*`, the `x-lookup` must live on a property literally named `branchDetail` — **not** on the `branchCode` input field. Define the lookup as its own property; don't attach it to the input it enriches.
 
 In schema — a dedicated read-only property (no `bind` target; not in `required`):
 ```json
@@ -115,7 +117,24 @@ In view JSON — activate by the **property name**:
 { "$schema": "...", "dataSchema": "...", "lookups": ["branchDetail"], "view": ... }
 ```
 
-In the view, read with `$lookup.branchDetail.address`, `$lookup.branchDetail.phone` — NOT an input bind target, display only.
+In the view, read with `$lookup.branchDetail.address`, `$lookup.branchDetail.phone` — not an input bind target.
+
+**Array lookups + ForEach.** Point `resultField` at an array and iterate it with `ForEach`. `$lookup.{propertyName}` is the **array container**; read each element with `$item.*` (NOT `$lookup.*`):
+
+```json
+{ "branchList": { "x-lookup": { "source": "urn:vnext:fn:get:core:list-branches", "resultField": "$.response.data.branches" } } }
+```
+```json
+{ "type": "ForEach", "source": "$lookup.branchList",
+  "template": { "type": "Card", "children": [
+    { "type": "Text", "content": "$item.name" },
+    { "type": "Text", "content": "$item.address" }
+  ] } }
+```
+
+**Multiple lookups** are disambiguated **by property name**: each property owns its own `x-lookup`, list every name in the view's root `lookups` array (`"lookups": ["branchDetail", "customerDetail"]`), and read them apart with `$lookup.branchDetail.*` / `$lookup.customerDetail.*`. (`$lookup` with no path returns the whole map, but in practice always use `$lookup.{name}`.)
+
+> **Binding-driven reload (cascade)**: when a `filter` value references a binding (e.g. `$form.branchCode`), the lookup **tracks that binding and re-loads itself** whenever the value changes — the rendered object/array refreshes as the user picks a different code. With no binding-referencing filter, it loads once on render. (Same reactivity as `x-lov` cascade.)
 
 > **filter value scope**: input/transition views use `$form.branchCode` (user is still picking); display/summary views (bound to the master schema) use `$instance.branchCode` (persisted value).
 

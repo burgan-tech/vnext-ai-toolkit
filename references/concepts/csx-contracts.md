@@ -215,6 +215,30 @@ Functions have a top-level `attributes.rawResponse` boolean (separate from the `
 
 Full failure-mode walkthrough in `references/function-mapping-pattern.md` § 5. Working examples: `core/Functions/account-opening/get-branches.json` (LOV) and `get-branch-detail.json` (lookup).
 
+## `sys-mappings` helpers (shared code)
+
+A `sys-mappings` component is **not** an `IMapping` — it's typically a plain **`public static class`**
+holding reusable methods:
+
+```csharp
+namespace Acme.Helpers;
+
+public static class RsaCryptoHelper
+{
+    public static string Encrypt(string plain, string publicKeyBase64) { /* ... */ }
+}
+```
+
+A consumer references it in its mapping's (or workflow's) `scripts.helpers` and lists any external
+assembly in `scripts.allowedAssemblies` (e.g. `System.Security.Cryptography`, `Newtonsoft.Json`); the
+helper's static class is then callable by name in the consumer's `.csx` (`RsaCryptoHelper.Encrypt(...)`,
+`JsonHelper.Serialize(...)`). A whole reusable mapping can also be referenced via `encoding: "REF"`.
+See `references/concepts/mappings-and-scripts.md`.
+
+> A reusable *mapping* (vs a static helper) may implement a mapping interface — the example
+> `initial-mapping` uses **`ITransitionMapping`** (`Handler(ScriptContext)` → `dynamic`). The full set
+> of mapping interfaces and the helper runtime-linking/sandbox model live in the vNext docs portal.
+
 ## Class naming
 
 - File name: `kebab-case.csx`

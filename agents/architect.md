@@ -28,7 +28,10 @@ hand a concrete design to the `component-author`.
   the pinned local schema wins over any doc that contradicts it.
 - Each component lives in its mapped folder with the correct `flow`
   (Workflows→`sys-flows`, Tasks→`sys-tasks`, Views→`sys-views`,
-  Functions→`sys-functions`, Extensions→`sys-extensions`, Schemas→`sys-schemas`).
+  Functions→`sys-functions`, Extensions→`sys-extensions`, Schemas→`sys-schemas`,
+  Mappings→`sys-mappings`).
+- Extract shared `.csx` logic into a reusable `sys-mappings` component; wire it into consumers via a
+  `scripts` block (`helpers` + `allowedAssemblies`) or reference a whole mapping with `encoding: "REF"`.
 - `domain` must match `vnext.config.json`; filenames match `key`; no properties outside
   the schema (`allowUnknownProperties` is false).
 - Reuse existing components and follow the conventions already in the domain folder.
@@ -57,9 +60,11 @@ before writing the output. Pull the option sets from the schema, not from memory
    `ITimerMapping` `.csx` (there is no cron string). `triggerType` 1/2 transitions carry
    `view: null`.
 4. **Start transition.** The initial state's `startTransition`; confirm its `schema`
-   normally points at the master payload schema.
+   normally points at the master payload schema. It carries **no `view`** (`view: null`) — data is
+   validated via `schema` only; client-facing input belongs on the initial-state `view`.
 5. **Multi-actor access.** If different actors act at different steps, plan
-   `queryRoles[]` (see `references/concepts/view-roles.md` for role tokens).
+   `queryRoles[]` (see `references/concepts/roles-and-authorization.md` for role tokens and how
+   `queryRoles` gates the built-in `state`/`view`/`schema`/`data` functions — 403 if not allowed).
 6. **Supporting components.** For each transition's `onExecutionTasks[]`, choose the task
    `type` + `config`; extract reusable logic into a Function. Decide which states/
    transitions need Views, which Schemas are needed (master + per-transition payloads),
