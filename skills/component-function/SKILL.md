@@ -1,6 +1,6 @@
 ---
 name: component-function
-description: Use when the user wants to create a vNext Function — a REST endpoint exposed by the runtime. Fetches function.json schema first, walks scope (D/I) and task composition (single-task vs multi-task), scaffolds the IMapping or IOutputHandler .csx using contracts from csx-contracts.md.
+description: Use when the user wants to create a vNext Function — a REST endpoint exposed by the runtime. Fetches function.json schema first, walks scope (D/F/I) and task composition (single-task vs multi-task), scaffolds the IMapping or IOutputHandler .csx using contracts from csx-contracts.md.
 ---
 
 # Component Function
@@ -45,7 +45,7 @@ Target folder: `{componentsRoot}/{paths.functions}/{function-key}/`. Inside: `{f
 Ask:
 - **What does this function do?** (One sentence — e.g. "List active branches for a given currency")
 - **Who calls it?** (Client/BFF, another workflow, a view's `x-lov`/`x-lookup`?)
-- **Does it need the workflow instance's data?** (If yes → scope `I`. If no → scope `D`.)
+- **Does it need the workflow instance's data?** (Instance data → scope `I`; flow-scoped → `F`; stateless/domain-wide → `D`.)
 
 ### 3. Will any view bind to this function's output? (controls `rawResponse`)
 
@@ -64,8 +64,9 @@ Full reference: `references/function-mapping-pattern.md` § 5.
 
 Render the `scope` enum from `function.json`. Annotate:
 - `D` — Domain-scoped. Stateless. URL: `/api/v{ver}/{domain}/functions/{key}`. Use for cross-workflow utilities and LOV/lookup endpoints.
+- `F` — Flow-scoped. Bound to a workflow definition (not a specific instance). Verify the URL/semantics against the docs portal.
 - `I` — Instance-scoped. Receives instance context. URL: `/api/v{ver}/{domain}/workflows/{wf}/instances/{instanceId}/functions/{key}`. Use when the function depends on the specific instance's data.
-- (Other scopes may exist in the schema — render them all.)
+- (Render whatever the schema's `scope` enum lists.)
 
 ### 4. Single-task or multi-task?
 

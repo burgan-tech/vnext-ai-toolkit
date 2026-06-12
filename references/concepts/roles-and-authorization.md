@@ -2,7 +2,7 @@
 
 vNext authorizes actions against **role tokens** resolved from the caller's JWT and the instance's
 lineage. This applies to transition `roles`, state/flow `queryRoles`, master-schema field
-visibility (`roles[]` on a schema property), and state-alias role grants (see
+visibility (`x-roles` on a schema property), and state-alias role grants (see
 `workflow-types.md` § State alias).
 
 ## Token claims
@@ -74,12 +74,16 @@ without hardcoding identities into the workflow definition.
 ## Where roles are used
 
 - **Transition `roles`** — who may fire a transition.
-- **State / flow `queryRoles`** — who may read the state / query instances (multi-actor flows).
-- **Schema field `roles[]`** — field-level read/write visibility on the master schema.
+- **State / flow `queryRoles`** — who may read the state / query instances (multi-actor flows). The
+  runtime's **built-in instance functions** (`state`, `view`, `schema`, `data`) authorize against the
+  **current state's `queryRoles`**, falling back to the **flow-level `queryRoles`**
+  (`attributes.queryRoles`) when the state defines none. If the caller's resolved roles aren't
+  `allow`-listed, the call returns **403**. See `workflow-types.md` § Built-in instance functions.
+- **Schema field `x-roles`** — field-level read/write visibility on the (master) schema.
 - **State alias `roles[]`** — which role sees which localized state label (`workflow-types.md`).
 
 ## Sources
 
 - Canonical schemas: `workflow.json`, `schema.json` at `vnext-schema/v{schemaVersion}/schemas/`
-- Related: `schema-vocabularies.md` (schema field `roles`), `view-roles.md`,
-  `workflow-types.md` (state alias)
+- Related: `schema-vocabularies.md` (schema field `x-roles`), `view-roles.md`,
+  `workflow-types.md` (state alias, built-in instance functions)

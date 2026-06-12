@@ -15,6 +15,14 @@ vNext runs C# scripts (`.csx` files) as "mappings" — input/output adapters bet
 | `ISubFlowMapping` | Adapt data flowing into/out of a SubFlow (S) invocation | `state.subFlow.mapping` when `stateType: 4` |
 | `INotificationMapping` | Produce per-channel notification payload (SMS/email/push…) | `task.mapping` for NotificationTask (type 10), keyed by channel |
 
+## Reuse: `sys-mappings` helpers + `REF`
+
+Don't duplicate `.csx` logic across components. Extract a reusable utility into a **`sys-mappings`**
+component (a plain `public static class`) and reference it from a consumer's `scripts.helpers` (listing
+any external assembly in `scripts.allowedAssemblies`); the helper's static methods are then callable by
+class name in the consumer's mapping. A whole reusable mapping can be referenced with `encoding: "REF"`
+instead of inlining it. See `references/concepts/mappings-and-scripts.md`.
+
 ## IMapping vs IOutputHandler
 
 These two confuse newcomers most often.

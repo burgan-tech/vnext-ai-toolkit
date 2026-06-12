@@ -4,13 +4,13 @@
 
 ## What it is
 
-The vNext platform defines a workflow domain as a set of JSON component files — `schema`, `workflow`, `task`, `view`, `function`, `extension` — each validated against a JSON Schema. Building a domain by hand means juggling cross-references, getting enum values right, writing `.csx` mapping files against the right C# interfaces, and keeping everything passing `npm run validate`. This plugin turns that work into a guided, agent-driven workflow inside your domain project.
+The vNext platform defines a workflow domain as a set of JSON component files — `schema`, `workflow`, `task`, `view`, `function`, `extension`, `mapping` — each validated against a JSON Schema. Building a domain by hand means juggling cross-references, getting enum values right, writing `.csx` mapping files against the right C# interfaces, and keeping everything passing `npm run validate`. This plugin turns that work into a guided, agent-driven workflow inside your domain project.
 
 It ships these capabilities:
 
 1. **Seven specialized agents** that form a build pipeline — `analyst` → `architect` → `component-author` → `validator` → (`security-reviewer` + `doc-writer`), with `reviewer` for PR-style checks.
 2. **A multi-turn design orchestrator** (`vnext-architect`) for designing a whole workflow end-to-end — discovery → state machine → components → tests — through a structured decision tree.
-3. **Nine skills** — one umbrella reference skill (`authoring-vnext-components`) plus eight focused authoring skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `integration-test`, `validate-and-fix`).
+3. **Ten skills** — one umbrella reference skill (`authoring-vnext-components`) plus nine focused authoring skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `validate-and-fix`).
 4. **Five slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:build` — as entry points.
 
 ## Install
@@ -81,8 +81,9 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 - **`view-design`** — renderer choice (pseudo-ui recommended), vocabulary loading, view-tree generation.
 - **`schema-design`** — interactive field gathering with localization (`x-labels`) and role-based access, producing JSON Schema draft 2020-12.
 - **`component-task`** — task `type` + per-type `config` driven from the schema enum, `.csx` mapping, MockLab seed suggestion.
-- **`component-function`** — scope `D`/`I`, single- vs multi-task composition, `IMapping`/`IOutputHandler` `.csx`.
+- **`component-function`** — scope `D`/`F`/`I`, single- vs multi-task composition, `IMapping`/`IOutputHandler` `.csx`.
 - **`component-extension`** — type × scope matrix with performance warnings.
+- **`component-mapping`** — reusable `sys-mappings` C# helper components, wired into consumers via `scripts.helpers` / `allowedAssemblies` or `encoding: "REF"`.
 - **`integration-test`** — xUnit class against `VNext.Testing.Sdk` (scaffolds the project via the official `VNext.Testing.Template`) asserting a workflow's lifecycle.
 - **`validate-and-fix`** — runs `npm run validate`, categorizes failures, proposes schema-cited fixes before applying.
 
@@ -141,10 +142,10 @@ vnext-ai-toolkit/
 │   ├── analyst.md  architect.md  component-author.md
 │   ├── validator.md  reviewer.md  security-reviewer.md  doc-writer.md
 │   └── vnext-architect.md            # multi-turn end-to-end design orchestrator
-├── skills/                           # 9 skills
+├── skills/                           # 10 skills
 │   ├── authoring-vnext-components/SKILL.md   # core reference skill
 │   ├── workflow-scaffold/  view-design/  schema-design/
-│   ├── component-task/  component-function/  component-extension/
+│   ├── component-task/  component-function/  component-extension/  component-mapping/
 │   └── integration-test/  validate-and-fix/
 ├── commands/                         # 5 slash commands
 │   └── vnext-init.md  new-component.md  vnext-design-process.md  validate.md  build.md
