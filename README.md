@@ -10,8 +10,8 @@ It ships these capabilities:
 
 1. **Seven specialized agents** that form a build pipeline — `analyst` → `architect` → `component-author` → `validator` → (`security-reviewer` + `doc-writer`), with `reviewer` for PR-style checks.
 2. **A multi-turn design orchestrator** (`vnext-architect`) for designing a whole workflow end-to-end — discovery → state machine → components → tests — through a structured decision tree.
-3. **Ten skills** — one umbrella reference skill (`authoring-vnext-components`) plus nine focused authoring skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `validate-and-fix`).
-4. **Five slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:build` — as entry points.
+3. **Eleven skills** — one umbrella reference skill (`authoring-vnext-components`) plus ten focused authoring and review skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `validate-and-fix`, `security-audit`).
+4. **Six slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:review-components`, `/vnext-ai-toolkit:build`, and `/vnext-ai-toolkit:security-audit` — as entry points.
 
 ## Install
 
@@ -86,6 +86,8 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 - **`component-mapping`** — reusable `sys-mappings` C# helper components, wired into consumers via `scripts.helpers` / `allowedAssemblies` or `encoding: "REF"`.
 - **`integration-test`** — xUnit class against `VNext.Testing.Sdk` (scaffolds the project via the official `VNext.Testing.Template`) asserting a workflow's lifecycle.
 - **`validate-and-fix`** — runs `npm run validate`, categorizes failures, proposes schema-cited fixes before applying.
+- **`security-audit`** — runs an OWASP-style security review for secrets, authz, injection, SSRF/path traversal, weak crypto, dependency issues, and misconfiguration, then writes a report to `security-report/SECURITY-REPORT.md`.
+- **Security checklist reference** — the new [references/concepts/security-review-checklist.md](references/concepts/security-review-checklist.md) guide provides a concrete OWASP-style checklist for the agents and skills to follow.
 
 ## Commands
 
@@ -97,6 +99,7 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 | `/vnext-ai-toolkit:validate` | Runs `npm run validate`, summarizes failures by file with the violated schema rule, and offers to fix. |
 | `/vnext-ai-toolkit:review-components [type\|key]` | Full audit with hierarchical sub-agents: dispatches main `reviewer` & `security-reviewer` per workflow/function, each spawning sub-agents for sub-components. Empty = all workflows & functions; `workflow`/`function` = that type only; `key` = that component + closure. |
 | `/vnext-ai-toolkit:build [runtime\|reference] [flags]` | Builds the domain package via `npm run build` / `build:reference`. |
+| `/vnext-ai-toolkit:security-audit [scope]` | Runs an OWASP-inspired security review and writes `security-report/SECURITY-REPORT.md` (full audit, `changed`/`diff` for delta review, or a specific component closure). |
 
 ## Design philosophy
 

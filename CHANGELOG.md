@@ -41,6 +41,9 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
   the plugin (`claude plugin validate`), auto-increments the patch version, commits the
   bump, tags, and cuts a GitHub Release. Manual `workflow_dispatch` supports an explicit
   version and a dry run.
+- **Security audit workflow** — new `security-audit` skill and `/security-audit` command for
+  OWASP-inspired reviews of secrets, authz, injection, SSRF/path traversal, weak crypto,
+  dependency issues, and configuration risk, with output written to `security-report/SECURITY-REPORT.md`.
 
 ### Changed
 
