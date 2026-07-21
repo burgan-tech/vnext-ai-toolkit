@@ -37,7 +37,8 @@
     "./commands/vnext-design-process.md",
     "./commands/validate.md",
     "./commands/review-components.md",
-    "./commands/build.md"
+    "./commands/build.md",
+    "./commands/security-audit.md"
   ],
   "skills": [
     "./skills/authoring-vnext-components",
@@ -49,7 +50,8 @@
     "./skills/component-extension",
     "./skills/component-mapping",
     "./skills/integration-test",
-    "./skills/validate-and-fix"
+    "./skills/validate-and-fix",
+    "./skills/security-audit"
   ],
   "references": [
     "references/decision-tree.md",
@@ -64,7 +66,8 @@
     "references/concepts/schema-vocabularies.md",
     "references/concepts/component-schemas.md",
     "references/concepts/mocklab-spec.md",
-    "references/concepts/integration-test-patterns.md"
+    "references/concepts/integration-test-patterns.md",
+    "references/concepts/security-review-checklist.md"
   ],
   "vnext": {
     "schemaSource": "node_modules/@burgan-tech/vnext-schema/schemas/{componentType}-definition.schema.json",
