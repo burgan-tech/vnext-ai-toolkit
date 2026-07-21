@@ -41,6 +41,17 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
   the plugin (`claude plugin validate`), auto-increments the patch version, commits the
   bump, tags, and cuts a GitHub Release. Manual `workflow_dispatch` supports an explicit
   version and a dry run.
+- **Security audit workflow** — new `security-audit` skill and `/security-audit` command for
+  OWASP-inspired reviews of secrets, authz, injection, SSRF/path traversal, weak crypto,
+  dependency issues, and configuration risk, with output written to `security-report/SECURITY-REPORT.md`.
+  The audit follows a four-phase pipeline (recon → hunt → verify → report): candidates are
+  checked for reachability, existing mitigations, and test/mock context, confidence-scored
+  (0–100) with severity capped by confidence, and reported with CWE / OWASP Top 10
+  references. The `security-review-checklist.md` reference carries vNext-specific hunt
+  patterns (`roles`/`queryRoles`/`x-roles`, `.csx` `ScriptContext` data flow, `allowedHosts`,
+  `REF`/`allowedAssemblies` supply chain) and false-positive rules; the `security-reviewer`
+  agent follows the same rubric. (Methodology informed by utkusen/sast-skills,
+  mfkocalar/OWASP-Security-Skills, and ersinkoc/security-check.)
 
 ### Changed
 
