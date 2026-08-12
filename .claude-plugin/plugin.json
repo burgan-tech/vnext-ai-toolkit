@@ -33,6 +33,7 @@
   ],
   "commands": [
     "./commands/vnext-init.md",
+    "./commands/vnext-update.md",
     "./commands/new-component.md",
     "./commands/vnext-design-process.md",
     "./commands/validate.md",

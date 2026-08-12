@@ -53,6 +53,8 @@ Target folder: `{componentsRoot}/{paths.workflows}/{workflow-key}/`. Inside it: 
 
 Verify the current set against Context7 (`"workflow attributes type values"`) if the user's case doesn't fit cleanly.
 
+**Roles gate (mandatory question).** Before designing any state or transition, **ask the user whether this flow should configure roles (`queryRoles`/`roles`) at all** — via `AskUserQuestion`, with "no roles" as the Recommended default. Roles add real complexity, especially for vNext newcomers; never add role configuration without explicit user confirmation. If confirmed, follow `references/concepts/roles-and-authorization.md`.
+
 ### 3. Map the states
 
 Walk through the flow with the user. For each state capture:
@@ -68,6 +70,13 @@ Walk through the flow with the user. For each state capture:
 Visualize back to the user as a list before moving on.
 
 ### 4. Map the transitions
+
+**Locking awareness (v0.0.79+).** Normal shared/state transitions **409 while the instance is Busy**
+(another execution in flight); `cancel`/`exit` bypass the busy check; **`updateData` bypasses all
+lock/busy checks** and is the only way to write data + advance under parallel requests (with an
+active subflow it updates the PARENT's data and does not forward). If the flow has parallel branches,
+fan-in states, loops, or clients that push data concurrently, ask whether an `updateData` definition
+is needed and design around the 409 behavior. Details: `references/concepts/workflow-types.md` § 3.1.
 
 For each transition capture:
 

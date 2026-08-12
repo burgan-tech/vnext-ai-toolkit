@@ -41,7 +41,12 @@ The `.csx` implements `IMapping` (both `InputHandler` and `OutputHandler` in one
 }
 ```
 
-Each task gets its own `IMapping` (`InputHandler` only — the per-task `OutputHandler` is bypassed in this shape). The final `output` mapping implements `IOutputHandler` and composes per-task responses via `context.OutputResponse["camelCaseTaskKey"].data`.
+Each task gets its own `IMapping`. The final `output` mapping implements `IOutputHandler` — the method is **`OutputHandler(ScriptContext context)`** — and composes per-task results from two dictionaries (see `concepts/csx-contracts.md` § "TaskResponse vs OutputResponse"):
+
+- `context.TaskResponse["camelCaseTaskKey"]` — each task's raw `StandardTaskResponse` (dynamic: `data`, `statusCode`, `isSuccess`, …).
+- `context.OutputResponse["camelCaseTaskKey"]` — what each task's own output mapping returned (already shaped), when the task has one.
+
+Both values are dynamic `ExpandoObject`s — probe with `HasProperty`/`GetPropertyValue`, and use `TryGetValue` on the dictionary itself (a task with no output has no entry).
 
 Reference: `core/Functions/account-opening/multi-task-function-test.json` + `src/FunctionOutputMapping.csx`.
 
@@ -53,48 +58,38 @@ vNext functions can be invoked two ways:
 
 | HTTP verb | Endpoint | Where parameters land in `ScriptContext` |
 |---|---|---|
-| `POST` | `/api/v1/{domain}/.../functions/{key}` + JSON body | `context.Body?.<field>` |
-| `GET` | `/api/v1/{domain}/.../functions/{key}?param=value` | `context.QueryString?["param"]` and/or `context.Headers?["param"]` |
+| `POST` | `/api/v1/{domain}/.../functions/{key}` + JSON body | `context.Body` |
+| `GET` | `/api/v1/{domain}/.../functions/{key}?param=value` | `context.QueryParameters` and/or `context.Headers` |
 
-**Renderer-initiated calls (x-lov, x-lookup, x-validation) typically use GET** — so reading from `context.Body?.<field>` alone is **wrong** for those functions; the body is empty and the parameter is silently null.
+There is **no `QueryString` property** on `ScriptContext` — the query string is `QueryParameters`.
+
+**Renderer-initiated calls (x-lov, x-lookup, x-validation) typically use GET** — so reading from `context.Body` alone is **wrong** for those functions; the body is empty and the parameter is silently null.
 
 ### Recommended resolver pattern
 
+Inherit `ScriptBase` and use `GetPropertyValue` — no reflection, no bare dynamic access:
+
 ```csharp
-private static string? ResolveParam(ScriptContext context, string name)
+private string? ResolveParam(ScriptContext context, string name)
 {
     // 1. GET function — query string (preferred for renderer-initiated calls)
-    try
-    {
-        var qs = context.GetType().GetProperty("QueryString")?.GetValue(context);
-        if (qs is IDictionary<string, string?> dict && dict.TryGetValue(name, out var v) && !string.IsNullOrEmpty(v))
-            return v;
-    }
-    catch { /* runtime may not expose QueryString — fall through */ }
+    var qv = GetPropertyValue<string>(context.QueryParameters, name, null);
+    if (!string.IsNullOrEmpty(qv)) return qv;
 
-    // 2. Header fallback (renderer can pass filters as headers)
-    try
-    {
-        var hv = context.Headers?[name]?.ToString();
-        if (!string.IsNullOrEmpty(hv)) return hv;
-    }
-    catch { }
+    // 2. Header fallback (renderer can pass filters as headers; keys are lowercased)
+    var hv = GetPropertyValue<string>(context.Headers, name, null);
+    if (!string.IsNullOrEmpty(hv)) return hv;
 
     // 3. POST function — invoke body (back-compat)
-    try
-    {
-        var bv = context.Body?[name]?.ToString();
-        if (!string.IsNullOrEmpty(bv)) return bv;
-    }
-    catch { }
-
-    return null;
+    return GetPropertyValue<string>(context.Body, name, null);
 }
 ```
 
 Use this helper inside `InputHandler` and feed the value into `httpTask.SetUrl(...)` (for query params) or `httpTask.SetBody(...)` (for POST tasks).
 
-**Anti-pattern**: `var code = context.Body?.code?.ToString();` — fails for GET-invoked functions.
+**Anti-patterns**:
+- `var code = context.Body?.code?.ToString();` — fails for GET-invoked functions, **and** throws `RuntimeBinderException` when `code` is absent (`?.` does not guard a missing ExpandoObject member).
+- `context.GetType().GetProperty("QueryString")` — the property doesn't exist; hand-rolled reflection is never needed, `ScriptBase` helpers cover it.
 
 ---
 
@@ -118,7 +113,9 @@ When a function call completes, vNext serialises the upstream task's result as a
 }
 ```
 
-Inside `OutputHandler`, **`context.Body` is the parsed HTTP response body** of the upstream task — not the StandardTaskResponse. So if MockLab returns `{"data":[...]}`, then `context.Body.data` is the array directly.
+Inside `OutputHandler`, the engine has **merged the task's `StandardTaskResponse` into `context.Body`** (camelCased). So `context.Body.statusCode`, `context.Body.isSuccess` and `context.Body.data` are all readable — and `context.Body.data` is the parsed HTTP response body. If MockLab returns `{"data":[...]}`, the items array sits at `context.Body.data.data`.
+
+Remember the runtime type: `context.Body` is an `ExpandoObject`, so probe with `HasProperty` before reading a level that may not exist.
 
 ### The double-wrap mistake
 
@@ -136,10 +133,13 @@ public Task<ScriptResponse> OutputHandler(ScriptContext context)
 {
     try
     {
-        var statusCode = (int?)(context.Body?.statusCode) ?? 200;
-        dynamic payload = context.Body?.data ?? context.Body;        // unwrap one HTTP body layer
-        dynamic items = null;
-        try { items = payload?.data ?? payload; } catch { items = payload; }
+        var statusCode = GetPropertyValue<int>(context.Body, "statusCode", 200);
+        var payload = HasProperty(context.Body, "data")               // unwrap the StandardTaskResponse layer
+            ? GetPropertyValue(context.Body, "data")
+            : context.Body;
+        var items = HasProperty(payload, "data")                      // some upstreams nest one more level
+            ? GetPropertyValue(payload, "data")
+            : payload;
 
         if (statusCode >= 200 && statusCode < 300 && items != null)
         {
@@ -257,9 +257,9 @@ Working examples in `core/Functions/account-opening/get-branches.json` and `get-
 
 ---
 
-## 5. Tags + error semantics
+## 6. Tags + error semantics
 
-Use `ScriptResponse.Tags` for downstream filtering (`success`, `failure`, `exception`, `not-found`). Match on HTTP `statusCode` from `context.Body?.statusCode`:
+Use `ScriptResponse.Tags` for downstream filtering (`success`, `failure`, `exception`, `not-found`). Match on HTTP status from `GetPropertyValue<int>(context.Body, "statusCode", 200)`:
 
 - `2xx` + non-null payload → success path
 - `4xx` (esp. 404) → not-found / failure path
@@ -269,7 +269,7 @@ Renderer doesn't currently branch on Tags, but log aggregators and downstream ta
 
 ---
 
-## 6. HTTP task helpers (`HttpTask` injection)
+## 7. HTTP task helpers (`HttpTask` injection)
 
 In `InputHandler`, cast the `WorkflowTask` to `HttpTask` and mutate before invocation:
 
@@ -283,16 +283,17 @@ Always wrap in `try/catch` and check for `null` on the cast — script tasks (no
 
 ---
 
-## 7. Minimal LOV function template
+## 8. Minimal LOV function template
 
 ```csharp
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using BBT.Workflow.Scripting;
+using BBT.Workflow.Scripting.Functions;
 using BBT.Workflow.Definitions;
 
-public class GetMyLovMapping : IMapping
+public class GetMyLovMapping : ScriptBase, IMapping
 {
     public Task<ScriptResponse> InputHandler(WorkflowTask task, ScriptContext context)
     {
@@ -312,7 +313,7 @@ public class GetMyLovMapping : IMapping
             httpTask.SetHeaders(new Dictionary<string, string?>
             {
                 ["Accept"] = "application/json",
-                ["X-Request-Id"] = context.Headers?["x-request-id"] ?? Guid.NewGuid().ToString()
+                ["X-Request-Id"] = GetPropertyValue<string>(context.Headers, "x-request-id", Guid.NewGuid().ToString())
             });
 
             return Task.FromResult(new ScriptResponse());
@@ -331,10 +332,13 @@ public class GetMyLovMapping : IMapping
     {
         try
         {
-            var statusCode = (int?)(context.Body?.statusCode) ?? 200;
-            dynamic payload = context.Body?.data ?? context.Body;
-            dynamic items = null;
-            try { items = payload?.data ?? payload; } catch { items = payload; }
+            var statusCode = GetPropertyValue<int>(context.Body, "statusCode", 200);
+            var payload = HasProperty(context.Body, "data")
+                ? GetPropertyValue(context.Body, "data")
+                : context.Body;
+            var items = HasProperty(payload, "data")
+                ? GetPropertyValue(payload, "data")
+                : payload;
 
             if (statusCode >= 200 && statusCode < 300 && items != null)
             {
@@ -364,20 +368,83 @@ public class GetMyLovMapping : IMapping
         }
     }
 
-    private static string? ResolveParam(ScriptContext context, string name)
+    private string? ResolveParam(ScriptContext context, string name)
     {
-        try
-        {
-            var qs = context.GetType().GetProperty("QueryString")?.GetValue(context);
-            if (qs is IDictionary<string, string?> dict && dict.TryGetValue(name, out var v) && !string.IsNullOrEmpty(v))
-                return v;
-        }
-        catch { }
-        try { var hv = context.Headers?[name]?.ToString(); if (!string.IsNullOrEmpty(hv)) return hv; } catch { }
-        try { var bv = context.Body?[name]?.ToString(); if (!string.IsNullOrEmpty(bv)) return bv; } catch { }
-        return null;
+        var qv = GetPropertyValue<string>(context.QueryParameters, name, null);
+        if (!string.IsNullOrEmpty(qv)) return qv;
+
+        var hv = GetPropertyValue<string>(context.Headers, name, null);
+        if (!string.IsNullOrEmpty(hv)) return hv;
+
+        return GetPropertyValue<string>(context.Body, name, null);
     }
 }
 ```
 
 Working examples in `core/Functions/account-opening/src/GetBranchesLovMapping.csx` (LOV cascade) and `GetBranchDetailLookupMapping.csx` (lookup).
+
+---
+
+## 9. Function BFF contract — verbs, inputSchema, outputSchema, inputView, outputView
+
+> Runtime support: added after v0.0.79 (vnext PRs #679, #858, #868). On older runtimes these fields are simply not enforced — check `vnext.config.json`'s `runtimeVersion` before relying on them.
+
+Functions are vNext's **BFF surface**, in two modes — settle the mode with the user before designing (`AskUserQuestion`):
+
+- **BFF API** (the original purpose): a pure programmatic endpoint. Design it **like an API** — verbs + optional schemas, **no `inputView`/`outputView`**. This is the default when no screen is mentioned; propose it and confirm.
+- **BFF View**: a whole single stateless page that needs no instance data (e.g. a loan-rate calculator) — the function declares the page's form and result views itself. Propose this when the user's stated purpose is a screen.
+
+The declarable client contract:
+
+| Field | Type | Runtime behavior |
+|-------|------|------------------|
+| `verbs` | `string[]` (e.g. `["POST"]`) | Whitelist of accepted HTTP verbs. Absent/empty = every verb accepted (back-compat). A non-matching verb → **405** with an `Allow` header listing the declared verbs. No `QUERY` verb — declaring it is a validation error; model body-carrying reads as `POST`. |
+| `inputSchema` | `sys-schemas` reference or rule-based entries | Request body is **validated** before any task runs; failure → **400** with field-level errors. Not validated when absent or when the request has no body. |
+| `outputSchema` | `sys-schemas` reference or rule-based entries | **Declarative only** — the runtime never validates responses against it. Documents the response shape for clients. |
+| `inputView` | `sys-views` reference or rule-based entries | The view a client renders to **collect** this function's input (the BFF View form). |
+| `outputView` | `sys-views` reference or rule-based entries | The view a client renders to **present** this function's output. |
+| `rawResponse` | `bool` | See § 5. |
+| `cache` | object | Optional read-through cache: response served from cache on hit (tasks skipped), written on miss. |
+
+Validation rule: declaring `inputSchema` alongside verbs that can never carry a body (e.g. `verbs: ["GET"]` only) is a definition-time **error**.
+
+### Rule-based contract slots
+
+Each of the four contract slots accepts either a single component reference or an **array of rule entries** — same concept as state/transition views: declaration order, **first match wins**, a trailing rule-less entry is the fallback. A rule that fails to evaluate is logged and skipped. A slot where nothing matches is "no contract", not an error (validation skips; content routes return 404).
+
+```jsonc
+"attributes": {
+  "scope": "D",
+  "verbs": ["POST"],
+  "inputSchema": { "key": "loan-calc-input", "domain": "core", "flow": "sys-schemas", "version": "1.0.0" },
+  "inputView":  { "key": "loan-calc-form",  "domain": "core", "flow": "sys-views",   "version": "1.0.0" },
+  "outputView": { "key": "loan-calc-result","domain": "core", "flow": "sys-views",   "version": "1.0.0" },
+  "task": { /* … */ }
+}
+```
+
+### Discovery endpoints
+
+Clients discover a function's contract without invoking it:
+
+```
+GET {domain}/functions/{fn}/info
+GET {domain}/functions/{fn}/view?target=input|output
+GET {domain}/functions/{fn}/schema?target=input|output
+GET {domain}/workflows/{wf}/instances/{id}/functions/{fn}/info      (+ view/schema variants)
+```
+
+`/info` answers "may I run this, with which verb, at which URL, and which view/schema applies right now" — scope and role checks apply (denial is **403**; an unauthorized caller learns nothing about the shape). Built-in system functions (`state`, `view`, `data`, …) have no component and 404 from `/info`. The instance **state response** also carries the workflow's function links (`functions` array / catalog href, version-dependent) so a polling client discovers them without an extra round trip.
+
+### Designing a BFF View
+
+For a stateless single page (rate calculator, eligibility check…):
+1. One `sys-functions` component, `scope: "D"`, `verbs: ["POST"]` (or `["GET"]` for parameterless reads).
+2. `inputView` → the form the client renders; `inputSchema` → server-side validation of the submitted body.
+3. `outputView` → the result presentation; `outputSchema` → documented response shape.
+4. `rawResponse: true` if any view binds the output directly.
+5. No workflow, no instance, no state — the function IS the page.
+
+When a user asks for such a page during workflow design, **propose the Function (BFF View) instead of
+a workflow** and get confirmation. And the mirror rule: a function with **no view need gets no view
+fields** — design it as a plain BFF API (verbs + schemas), confirmed with the user.

@@ -47,6 +47,19 @@ Ask, in order (one at a time unless answers are clearly orthogonal):
 2. **What is the business goal?** (One or two sentences — what success looks like.)
 3. **Who starts it, who finishes it?** (One actor, or different actors at different steps?)
 
+**Function gate — is this even a workflow?** If the described need is a **stateless single page or
+API call** — one input → one output, nothing to persist, no states to move through (a rate
+calculator, an eligibility check, a lookup/aggregation endpoint) — a workflow is the wrong
+component: **propose a Function instead** and confirm with `AskUserQuestion` (mark Function as
+Recommended). Two Function shapes to offer:
+- **BFF View** — the user needs a *page*: the function declares `inputView` (the form) and
+  `outputView` (the result), plus `inputSchema`/`outputSchema`.
+- **BFF API** — no view is needed: design it as a plain API (verbs + schemas only, **no**
+  `inputView`/`outputView`).
+
+If the user confirms Function, delegate to the `component-function` skill and skip the workflow
+phases entirely. Only continue below when the process genuinely has states/instance data.
+
 Fetch `vnext-schema/schemas/workflow.json` to populate the next question's enum options. Then ask:
 
 4. **What kind of workflow is this?** Render options from `workflow.json` `attributes.type.enum`. Annotate the most common choices ("F — top-level user flow (Recommended for most cases)"; "S — reusable sub-procedure"; "P — parallel background work").
@@ -57,7 +70,7 @@ Capture: `workflowKey`, `businessGoal`, `actorModel` (single/multi), `workflowTy
 
 Goal: lay out the state machine.
 
-5. **Multi-actor?** If yes, plan `queryRoles[]` (the canonical schema and `roles-and-authorization.md` describe the system role tokens — `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` — and JSONPath grants). For most flows the answer is "no" — skip if the user said single actor in Phase 1.
+5. **Multi-actor?** **Roles require explicit user confirmation: always ask the user whether this flow should configure roles at all before adding any** (roles add real complexity for vNext newcomers — make "no roles" the default/Recommended option). Only if the user confirms, plan `queryRoles[]` (the canonical schema and `roles-and-authorization.md` describe the system role tokens — `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` — and JSONPath grants). For most flows the answer is "no" — skip if the user said single actor in Phase 1.
 
 6. **Are there reusable sub-procedures or parallel branches?**
    - Reusable nested → SubFlow (S) — note the child workflow keys.
@@ -70,7 +83,13 @@ Goal: lay out the state machine.
    - Does this state show the user something (a view)? What kind — an input form, or read-only summary?
    - **Initial-state input convention** — if this is the Initial state AND it gathers input, default to placing the form on `state.view` (not on the outgoing transition). Confirm with `AskUserQuestion`; mark state-view as Recommended. The runtime serves state views immediately on instance start — putting the form on the transition forces an extra discovery hop. Wizard states (5) are the exception: their form belongs on the single transition by design.
 
-8. **Map the transitions.** For each state, ask what happens to leave it:
+8. **Map the transitions.** Keep the **admission model (v0.0.79+)** in mind while designing:
+   normal shared/state transitions get a **409 while the instance is Busy**; `cancel`/`exit`
+   bypass the busy check; **`updateData` bypasses all lock/busy checks** — it is the only way to
+   write data and advance under parallel requests, and with an active subflow it updates the
+   *parent's* data without forwarding. For flows with parallel branches, fan-in states, loops, or
+   concurrent client writes, ask the user whether an `updateData` definition is needed
+   (`workflow-types.md` § 3.1). For each state, ask what happens to leave it:
    - Target state
    - Trigger — render `triggerType.enum` from the schema. Annotate: "Manual — user clicks (Recommended for most)"; "Auto — engine evaluates a rule"; "Timer — fires after a duration"; "Event — external signal".
    - For auto transitions: warn that they must come in **complementary pairs** with mutually exclusive rules, OR be a single unconditional transition. Ask the user to specify both branches.
@@ -99,8 +118,10 @@ For each schema needed:
 For data enrichment needs (e.g. user profile, branch detail attached to every read):
 - Delegate to `component-extension`. The skill walks the type × scope matrix.
 
-For client-callable endpoints (LOV functions, BFF-style aggregation):
-- Delegate to `component-function`. The skill walks scope and task composition.
+For client-callable endpoints (LOV functions, BFF-style aggregation, stateless single-page needs):
+- Delegate to `component-function`. The skill walks scope, task composition, and the **BFF API vs
+  BFF View** decision (view need → `inputView`/`outputView`; no view need → plain API — proposed to
+  the user for confirmation, never assumed).
 
 For `.csx` mappings (auto-transition rules, timer schedules, custom input/output handlers):
 - The relevant component skill scaffolds them using `csx-contracts.md` for interface signatures.
