@@ -1,5 +1,10 @@
 # Roles & Authorization
 
+> **Design rule: roles are opt-in and require explicit user confirmation.** When designing or
+> scaffolding a flow, always ask the user first whether roles should be configured at all — they
+> add real complexity, especially for vNext newcomers. Default to *no roles* unless the user
+> explicitly confirms.
+
 vNext authorizes actions against **role tokens** resolved from the caller's JWT and the instance's
 lineage. This applies to transition `roles`, state/flow `queryRoles`, master-schema field
 visibility (`x-roles` on a schema property), and state-alias role grants (see

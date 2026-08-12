@@ -29,9 +29,17 @@ Rules:
   a domain rule even though the JSON schema marks it optional. Author the schema
   component if it doesn't exist, and normally set `startTransition.schema` to the same.
 - For workflows: author C# `.csx` mappings/rules under the workflow's `src/` folder
-  (classes PascalCase, implementing `IMapping`/condition interfaces) and a `.http`
-  test file. **Never** manually base64-encode `.csx` into `mapping.code` — the vNext
-  VS Code extension does that on save; you author the `.csx` source only.
+  (classes PascalCase, inheriting `ScriptBase` and implementing `IMapping`/condition
+  interfaces) and a `.http` test file. **Never** manually base64-encode `.csx` into
+  `mapping.code` — the vNext VS Code extension does that on save; you author the
+  `.csx` source only.
+- In `.csx` code, **never access dynamic members directly** (`context.Instance.Data.x`,
+  `context.Body?.y`) — instance data is an `ExpandoObject` and a missing member throws
+  `RuntimeBinderException` at runtime (`?.` does not guard it). Use the `ScriptBase`
+  helpers (`HasProperty`, `GetPropertyValue<T>(obj, name, default)`, `GetList`, …).
+  If the same mapping structure repeats across components, extract it into a
+  `sys-mappings` helper as the primary approach. Full contract + helper reference:
+  `references/concepts/csx-contracts.md`.
 
 When done, run `npm run validate` and fix reported errors until it passes. Writing
 the test/validation harness is not your job, but produce components that validate

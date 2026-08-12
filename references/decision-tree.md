@@ -10,6 +10,7 @@ graph TD
   B -->|Notification / Event-driven| C2[Workflow type F + heavy event hooks]
   B -->|Reusable sub-procedure| C3[Workflow type S — SubFlow]
   B -->|Parallel background work| C4[Workflow type P — SubProcess]
+  B -->|Stateless single page or pure API — no states, nothing persisted| C5[NOT a workflow — propose a Function<br/>page → BFF View, no view → BFF API<br/>confirm with user, then component-function]
   C1 --> D[Actor model]
   C2 --> D
   C3 --> D
@@ -55,9 +56,11 @@ graph TD
   K6 --> L
   L --> L1{Need to enrich reads or expose endpoints?}
   L1 -->|Enrich every read| M1[Extension type/scope per matrix]
-  L1 -->|REST endpoint client-callable| M2[Function scope D or I]
+  L1 -->|REST endpoint client-callable| M2[Function as BFF API<br/>scope D/F/I, verbs + schemas, NO views]
+  L1 -->|Stateless single page input→output| M3[Function as BFF View<br/>inputView/outputView + schemas]
   L1 -->|None| N
   M1 --> N[Views]
+  M3 --> N
   M2 --> N
   N --> N1{Renderer?}
   N1 -->|pseudo-ui — recommended| O1[Load vocabulary →<br/>build view tree]

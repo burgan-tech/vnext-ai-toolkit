@@ -4,6 +4,10 @@ vNext has a reusable-code component, **`sys-mappings`** (folder `Mappings/`), pl
 extensions on every mapping object: a **`scripts`** block (shared helpers + allowed assemblies) and a
 **`REF`** code encoding (point `code` at a `sys-mappings` component instead of inlining it).
 
+> **Primary rule: if a mapping structure repeats, extract it into `sys-mappings` first.** Reuse via
+> `scripts.helpers` / `REF` is the default approach for any repeated `.csx` logic — inline duplication
+> is the exception that needs justifying, not the other way around.
+
 > This file is the authoring summary. The full schema, the script sandbox/security model, helper
 > runtime-linking, and the designer UX live in the vNext docs portal (and MCP).
 
@@ -63,9 +67,11 @@ Flow-level `attributes.scripts` applies workflow-wide; per-mapping `scripts` is 
 ## When to extract a helper
 
 Inline `.csx` is fine for one-off logic. Extract into a `sys-mappings` helper (then reference via
-`scripts.helpers`, or the whole mapping via `encoding:"REF"`) when the same logic is needed in more
-than one place, or when it's a self-contained utility (crypto, serialization, formatting). Keep helper
-classes as plain `public static class` types — see `csx-contracts.md`.
+`scripts.helpers`, or the whole mapping via `encoding:"REF"`) **as the primary method** when the same
+logic is needed in more than one place, or when it's a self-contained utility (crypto, serialization,
+formatting). When reviewing or writing mappings, actively look for repeated structures and propose the
+`sys-mappings` extraction rather than copying the code. Keep helper classes as plain
+`public static class` types — see `csx-contracts.md`.
 
 ## Sources
 

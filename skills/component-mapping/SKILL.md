@@ -10,8 +10,13 @@ A **Mapping** is a reusable C# class shared across components — a helper (`Rsa
 `scripts.helpers` reference, or reference a whole mapping with `encoding: "REF"`. This avoids
 duplicating `.csx` logic across workflows/tasks/functions.
 
+**Extracting repeated `.csx` structures into a `sys-mappings` component is the primary reuse
+method** — whenever the same mapping logic shows up in more than one place, reach for this skill
+first rather than copying the code.
+
 See `references/concepts/mappings-and-scripts.md` for the concept and `references/concepts/csx-contracts.md`
-for the C# side.
+for the C# side (including the dynamic type model and `ScriptBase` helpers any reusable mapping
+should follow).
 
 ## Prerequisites
 - Working directory is a vNext domain project (`vnext.config.json` present).

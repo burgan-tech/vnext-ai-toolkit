@@ -45,10 +45,16 @@ hand a concrete design to the `component-author`.
 For a full workflow (or a significant extension), work through these design steps
 before writing the output. Pull the option sets from the schema, not from memory.
 
-1. **Workflow shape.** From the analyst's brief, pick the workflow `type` from
-   `workflow-definition.schema.json` `attributes.type.enum` — typically a top-level
-   user flow, a reusable sub-procedure, or parallel background work. Note any child
-   workflow keys for sub-flows / sub-processes.
+1. **Workflow shape — or no workflow at all.** First check whether the brief actually
+   needs a state machine: a **stateless single input→output page or pure API call**
+   (rate calculator, eligibility check, lookup/aggregation) with nothing to persist is
+   a **Function, not a workflow** — propose it to the user for confirmation (page →
+   Function in **BFF View** mode with `inputView`/`outputView`; no view need → plain
+   **BFF API** mode with verbs + schemas only). See
+   `references/concepts/function-vs-extension-vs-task.md`. Otherwise pick the workflow
+   `type` from `workflow-definition.schema.json` `attributes.type.enum` — typically a
+   top-level user flow, a reusable sub-procedure, or parallel background work. Note any
+   child workflow keys for sub-flows / sub-processes.
 2. **States.** Lay out the state list. For each state: its key (kebab-case), its state
    kind (from the schema's `stateType` enum — exactly one initial state, the rest
    intermediate/final/wizard as appropriate), and whether it shows the user a view
@@ -58,13 +64,22 @@ before writing the output. Pull the option sets from the schema, not from memory
    transitions must come in **complementary, mutually-exclusive `rule` pairs** (or a
    single always-true rule); timer transitions compute their fire-time in an
    `ITimerMapping` `.csx` (there is no cron string). `triggerType` 1/2 transitions carry
-   `view: null`.
+   `view: null`. Factor in the **admission model (v0.0.79+)**: normal shared/state
+   transitions 409 while the instance is Busy, `cancel`/`exit` bypass the busy check,
+   and **`updateData` bypasses all lock/busy checks** (the only way to write data +
+   advance under parallel requests; with an active subflow it updates the parent's data
+   without forwarding) — for parallel branches, fan-in states, and loops, plan an
+   `updateData` definition where concurrent writes are expected
+   (`references/concepts/workflow-types.md` § 3.1).
 4. **Start transition.** The initial state's `startTransition`; confirm its `schema`
    normally points at the master payload schema. It carries **no `view`** (`view: null`) — data is
    validated via `schema` only; client-facing input belongs on the initial-state `view`.
-5. **Multi-actor access.** If different actors act at different steps, plan
-   `queryRoles[]` (see `references/concepts/roles-and-authorization.md` for role tokens and how
-   `queryRoles` gates the built-in `state`/`view`/`schema`/`data` functions — 403 if not allowed).
+5. **Multi-actor access.** **Always ask the user whether the flow should configure roles at
+   all before designing any** — roles add real complexity, especially for vNext newcomers, so
+   proceed with role configuration only on explicit user confirmation; default to no roles when
+   the user declines or is unsure. If confirmed, plan `queryRoles[]` (see
+   `references/concepts/roles-and-authorization.md` for role tokens and how `queryRoles` gates
+   the built-in `state`/`view`/`schema`/`data` functions — 403 if not allowed).
 6. **Supporting components.** For each transition's `onExecutionTasks[]`, choose the task
    `type` + `config`; extract reusable logic into a Function. Decide which states/
    transitions need Views, which Schemas are needed (master + per-transition payloads),

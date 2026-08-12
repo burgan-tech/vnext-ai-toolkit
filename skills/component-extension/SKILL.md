@@ -101,30 +101,35 @@ The mapping shapes the upstream task's response into the enrichment object that 
 ```csharp
 using System.Threading.Tasks;
 using BBT.Workflow.Scripting;
+using BBT.Workflow.Scripting.Functions;
 using BBT.Workflow.Definitions;
 
-public class {ClassName}Mapping : IMapping
+public class {ClassName}Mapping : ScriptBase, IMapping
 {
     public Task<ScriptResponse> InputHandler(WorkflowTask task, ScriptContext context)
     {
-        // context.Instance.Data is available — use it to build the upstream call
-        // e.g. HTTP request for the user's customer details by customer ID
+        // context.Instance.Data is available — read it via GetPropertyValue, never directly
+        // (dynamic member access on a missing property throws at runtime)
+        // e.g. var customerId = GetPropertyValue<string>(context.Instance.Data, "customerId", "");
         return Task.FromResult(new ScriptResponse { /* … */ });
     }
 
     public Task<ScriptResponse> OutputHandler(ScriptContext context)
     {
-        // Unwrap context.Body, return the enrichment payload
+        // Unwrap context.Body (the merged StandardTaskResponse) and return the enrichment payload
         // The runtime attaches it to the instance read response under `extensions[key]` (or similar)
+        var payload = HasProperty(context.Body, "data")
+            ? GetPropertyValue(context.Body, "data")
+            : context.Body;
         return Task.FromResult(new ScriptResponse {
             Key = "{extension-key}",
-            Data = context.Body?.data ?? context.Body
+            Data = payload
         });
     }
 }
 ```
 
-Refer to `references/concepts/csx-contracts.md` for full contract details.
+Refer to `references/concepts/csx-contracts.md` for full contract details — including the dynamic type model (ExpandoObject/`List<object?>`, camelCase keys) and the full `ScriptBase` helper list (`HasProperty`, `GetPropertyValue`, `GetList`, …).
 
 ### 9. Generate the extension JSON
 

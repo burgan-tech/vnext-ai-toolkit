@@ -5,6 +5,8 @@ argument-hint: [optional process name, e.g. "Loan application"]
 allowed-tools: Bash(npm run setup:*), Bash(node setup.js:*), Bash(npm run sync-schema), Bash(npm run validate), Read
 ---
 
+> **Freshness check (non-blocking, first).** If `vnext.config.json` exists, compare the workspace toolkit stamp — `.claude/vnext-toolkit.json` `toolkitVersion`, falling back to the `<!-- vnext-ai-toolkit vX.Y.Z -->` comment in `CLAUDE.md` — against `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` `.version`. If the stamp is missing or older, tell the user once: "Workspace toolkit files are from vX (plugin is vY) — run `/vnext-update` to refresh", then continue with the command below. Never block on this.
+
 # /vnext-design-process
 
 Use this when you want to design a complete vNext process end-to-end. The architect will:

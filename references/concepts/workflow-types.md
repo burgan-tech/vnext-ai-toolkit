@@ -88,6 +88,32 @@ Each call **authorizes against the current state's `queryRoles`**: if the caller
 the current state defines none, the runtime falls back to the **flow-level `queryRoles`**. Use the
 flow level for a workflow-wide default and override it per state only where access differs.
 
+## 2.3 State interaction (long poll)
+
+A state can carry an `interaction.longPoll` block that tells a long-polling client whether to **keep polling or stop** when the instance lands on that state. Clients drive workflows by long-polling the state function; some states belong to a different actor, and the client needs an explicit signal about it.
+
+```jsonc
+{
+  "key": "waiting-approval",
+  "stateType": 2,
+  "interaction": {
+    "longPoll": {
+      "terminate": true,               // required: close the open long-poll on entering this state?
+      "fallbackTimeoutSeconds": 30,    // optional: auto-close window when no ack arrives
+      "roles": [                       // required: who this signal applies to; DENY overrides ALLOW
+        { "role": "client.app", "grant": "allow" }
+      ]
+    }
+  }
+}
+```
+
+- **`terminate: true`** — the client closes its active long-poll, renders the state screen, and acknowledges via `ack`. If no ack arrives within `fallbackTimeoutSeconds`, a scheduled fallback pipeline continues automatically. Use when the process hands over to another actor (e.g. mobile user completes their part; the flow moves to backoffice — the mobile client must stop polling).
+- **`terminate: false`** — the client (re)starts the long-poll and keeps waiting for a state change. Use for the reverse handover: a client opens an instance whose appointment is due; the state says "keep polling", and when the agent progresses the flow, both parties receive the state change.
+- `roles` scopes the signal per actor — the same state can tell the mobile client to stop while the backoffice client keeps polling.
+
+Docs: `https://burgan-tech.github.io/vnext-docs/docs/components/workflow#state-interaction-long-poll`
+
 ## 3. Transition `triggerType`
 
 How the transition fires.
@@ -102,6 +128,58 @@ How the transition fires.
 **Pattern: auto-pair rule.** A state with a conditional auto transition (e.g. `triggerType: 1` with `if x > 0`) MUST also have its complement (`if x <= 0`) targeting a different state. Otherwise the engine has no defined behavior when the rule is false. The validator catches this; the scaffolding skill should catch it earlier by asking the user "what happens when the condition is false?"
 
 **Pattern: no view on auto/timer.** `triggerType` 1, 2, and 3 transitions have `view: null`. They fire without user interaction; attaching a view is a no-op at best, a runtime error at worst.
+
+## 3.1 Transition admission & locking — Busy-as-mutex (v0.0.79+)
+
+Since v0.0.79 (vnext PR #877) the execution mutex is the instance's **Busy status** itself: the first
+hop of a transition does an Active→Busy check-and-set under a short status lock (~5s lease); the rest
+of the pipeline runs lock-free. There is no long-lease distributed lock anymore. What a transition is
+allowed to do when the instance is Busy depends on its **kind**:
+
+| Transition kind | Status lock | Busy check | Behavior when instance is Busy |
+|---|---|---|---|
+| Shared / state transitions (normal) | yes | yes | **409** — request rejected while another execution runs |
+| `cancel` / `exit` (and timeouts) | yes | **exempt** | Admitted even while Busy (they must always be able to fire) |
+| `updateData` | **exempt** | **exempt** | Always admitted — never sets or settles Busy (status-neutral) |
+
+### `updateData` — the reserve transition
+
+`updateData` is exempt from **all** lock and busy checks. Under parallel requests it is the **only
+way** to update instance data and advance the instance — normal transitions would 409 against each
+other.
+
+Behavior by instance situation:
+
+- **Plain instance (no active subflow):** updates the data and runs the **normal transition
+  pipeline** (data write, `$self` state change, auto-transition evaluation) — it advances the flow
+  like a regular transition.
+- **Active subflow:** if the instance defines `updateData`, the **parent answers the request
+  itself** — it does NOT forward to the subflow and never restarts it. It updates the **parent's
+  data** and leaves the flow where it is; auto transitions are still evaluated after every
+  `updateData`, and a satisfied auto reserves ownership at the continuation boundary (it can take
+  over a parked Busy when no live owner exists — fan-in states park Busy by design).
+- `updateData` can never strand an instance in Busy.
+
+### Design guidance — parallel and loop-heavy flows
+
+This behavior matters most when designing **parallel branches, fan-in states, and loop/cyclic
+sections**:
+
+- Expect **409s on normal transitions** whenever another execution is in flight. If clients must be
+  able to push data at any time (bursts, concurrent writers, IoT/stream-style updates), give the
+  workflow an **`updateData` definition** and route those writes through it — don't try to hammer a
+  shared transition.
+- `cancel`/`exit` always get through the busy check — users can abort a stuck or long-running
+  execution; don't design compensating "abort" states around a normal transition.
+- Two authoring rules that come with the new write model:
+  - **Mappings must return delta-only output.** Each accepted write is persisted immediately;
+    a mapping that echoes the full instance data back overwrites concurrent writers' fresher
+    values with stale ones. Return only the fields you changed.
+  - **Parallel branches at the same `order` need distinct task definitions** — the task journal's
+    execution key is `transition+task+order`, so two branches sharing the same task at the same
+    order collide.
+- Each accepted `updateData` produces two data rows (request payload + task output) — relevant when
+  reasoning about data-version history.
 
 ## 4. State lifecycle hooks
 

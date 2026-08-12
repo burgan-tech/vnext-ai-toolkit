@@ -12,6 +12,7 @@ A Function is a REST endpoint hosted by the workflow runtime. It can be:
 Common uses:
 - LOV/lookup endpoints called by views (`x-lov`, `x-lookup`)
 - BFF-style aggregation for clients
+- **BFF View pages** — stateless single screens with no instance data (rate calculators, eligibility checks), where the function itself declares `inputView`/`inputSchema`/`outputView`/`outputSchema`
 - Cross-domain gates and data fetches
 
 ## Canonical schema-first (mandatory pre-step)
@@ -40,12 +41,27 @@ Also read `references/concepts/csx-contracts.md` before scaffolding mappings —
 From `vnext.config.json`: `componentsRoot`, `paths.functions`, `domain`.
 Target folder: `{componentsRoot}/{paths.functions}/{function-key}/`. Inside: `{function-key}.json`, `src/` (for `.csx`), optional README.
 
-### 2. Determine purpose
+### 2. Determine purpose — and the mode: BFF API or BFF View
 
 Ask:
 - **What does this function do?** (One sentence — e.g. "List active branches for a given currency")
 - **Who calls it?** (Client/BFF, another workflow, a view's `x-lov`/`x-lookup`?)
 - **Does it need the workflow instance's data?** (Instance data → scope `I`; flow-scoped → `F`; stateless/domain-wide → `D`.)
+
+Then decide the **mode** and get explicit user confirmation (`AskUserQuestion`):
+
+> "Does this function need to render a screen to the user, or is it a pure API?"
+
+- **BFF View** — the function serves a *page* (single input→output screen: a rate calculator, an
+  eligibility check). It declares `inputView` (the form the client renders) and `outputView` (the
+  result presentation), plus `inputSchema`/`outputSchema`. Propose this mode when the user's stated
+  purpose is a screen/page.
+- **BFF API (Recommended default when no view is mentioned)** — no screen involved: the function is
+  called programmatically (client code, another workflow, `x-lov`/`x-lookup`). Design it **like an
+  API**: verbs + optional `inputSchema`/`outputSchema` only, **no `inputView`/`outputView`**.
+
+**Never add view fields to a function without the user confirming a view need — and never leave
+them off when the user described a page.** The mode drives step 5 below.
 
 ### 3. Will any view bind to this function's output? (controls `rawResponse`)
 
@@ -64,11 +80,23 @@ Full reference: `references/function-mapping-pattern.md` § 5.
 
 Render the `scope` enum from `function.json`. Annotate:
 - `D` — Domain-scoped. Stateless. URL: `/api/v{ver}/{domain}/functions/{key}`. Use for cross-workflow utilities and LOV/lookup endpoints.
-- `F` — Flow-scoped. Bound to a workflow definition (not a specific instance). Verify the URL/semantics against the docs portal.
+- `F` — Flow-scoped. Bound to a workflow definition (not a specific instance). Served on the instance route — the domain route rejects `F`/`I` with 403.
 - `I` — Instance-scoped. Receives instance context. URL: `/api/v{ver}/{domain}/workflows/{wf}/instances/{instanceId}/functions/{key}`. Use when the function depends on the specific instance's data.
 - (Render whatever the schema's `scope` enum lists.)
 
-### 4. Single-task or multi-task?
+### 5. Client contract — verbs, inputSchema/outputSchema, inputView/outputView
+
+> Runtime support: post-v0.0.79. On older runtimes these fields are not enforced — check `runtimeVersion` first. Details: `references/function-mapping-pattern.md` § 9.
+
+Driven by the **mode chosen in step 2**:
+
+- **Both modes** — ask: **Which HTTP verbs should this function accept?** (e.g. `["POST"]`. Omit = every verb accepted. Mismatched verb → 405 + `Allow` header. There is no `QUERY` verb — body-carrying reads are `POST`.) And: **Should the request body be validated?** → `inputSchema` (a `sys-schemas` reference; failure → 400 with field errors). Do NOT declare `inputSchema` if the only verbs can't carry a body (e.g. GET-only) — that's a validation error.
+- **BFF View mode only** — add `inputView` (the form the client renders) and/or `outputView` (result presentation), plus `outputSchema` (declarative response contract). Each slot accepts a single reference or rule-based entries (first match wins; a trailing rule-less entry is the fallback). Hand the view design off to `view-design` if the views don't exist yet.
+- **BFF API mode** — **no `inputView`/`outputView`.** The contract is verbs + schemas, like any REST API.
+
+Skip this step entirely for plain LOV/lookup functions — they need none of these fields.
+
+### 6. Single-task or multi-task?
 
 Ask: "Does this function call one upstream system, or does it aggregate multiple?"
 
@@ -77,37 +105,40 @@ Ask: "Does this function call one upstream system, or does it aggregate multiple
 
 For most LOV functions, single-task is enough. Multi-task is for true aggregation (e.g. "fetch user + account + balance from three services, return one envelope").
 
-### 5. Reference or create tasks
+### 7. Reference or create tasks
 
 For each task this function will call:
 - If a matching task already exists, reference it.
 - Otherwise, hand off to `component-task` first; come back when it's ready.
 
-### 6. Scaffold `.csx` mappings
+### 8. Scaffold `.csx` mappings
 
-For each task reference, scaffold an `IMapping` in `src/`:
+For each task reference, scaffold an `IMapping` in `src/`. Inherit `ScriptBase` and read dynamic data ONLY through its helpers (`HasProperty`, `GetPropertyValue`) — direct dynamic access (`context.Body?.x`) throws `RuntimeBinderException` when the member is absent:
 
 ```csharp
 using System.Threading.Tasks;
 using BBT.Workflow.Scripting;
+using BBT.Workflow.Scripting.Functions;
 using BBT.Workflow.Definitions;
 
-public class {ClassName}Mapping : IMapping
+public class {ClassName}Mapping : ScriptBase, IMapping
 {
     public Task<ScriptResponse> InputHandler(WorkflowTask task, ScriptContext context)
     {
-        // Pull params from context.QueryString, context.Headers, context.Body (multi-source for GET-mode functions)
+        // Pull params via GetPropertyValue from context.QueryParameters, context.Headers, context.Body
+        // (multi-source for GET-mode functions; there is NO context.QueryString)
         // Mutate the task config (e.g. HttpTask URL, body)
-        // Return ScriptResponse with prepared payload
         return Task.FromResult(new ScriptResponse { /* … */ });
     }
 
     public Task<ScriptResponse> OutputHandler(ScriptContext context)
     {
-        // context.Body is the upstream task's StandardTaskResponse
-        // Unwrap one level (context.Body?.data) to avoid double-wrapping LOV responses
+        // The task's StandardTaskResponse is merged into context.Body (body.data, body.statusCode, …)
+        // Unwrap one level to avoid double-wrapping LOV responses; probe with HasProperty
         // Tag with ["lov","success"] / ["lov","failure"] / ["lookup","not-found"]
-        dynamic payload = context.Body?.data ?? context.Body;
+        var payload = HasProperty(context.Body, "data")
+            ? GetPropertyValue(context.Body, "data")
+            : context.Body;
         return Task.FromResult(new ScriptResponse {
             Key = "{function-key}-result",
             Data = new { data = payload },
@@ -117,16 +148,19 @@ public class {ClassName}Mapping : IMapping
 }
 ```
 
-Multi-task variant: each task gets its own `IMapping`; add a final `IOutputHandler` in `src/`:
+Multi-task variant: each task gets its own `IMapping`; add a final `IOutputHandler` in `src/` — the method is **`OutputHandler`**, not `Handler`:
 
 ```csharp
-public class {FunctionName}Output : IOutputHandler
+public class {FunctionName}Output : ScriptBase, IOutputHandler
 {
-    public Task<ScriptResponse> Handler(ScriptContext context)
+    public Task<ScriptResponse> OutputHandler(ScriptContext context)
     {
-        var taskA = context.TaskResponse["taskKeyA"]?.data;
-        var taskB = context.TaskResponse["taskKeyB"]?.data;
-        // Merge, project, envelope
+        // TaskResponse[key] = each task's StandardTaskResponse (dynamic, camelCase keys)
+        // OutputResponse[key] = each task's own output-mapping result, when it has one
+        var taskA = context.TaskResponse.TryGetValue("taskKeyA", out var a)
+            ? GetPropertyValue(a, "data") : null;
+        var taskB = context.TaskResponse.TryGetValue("taskKeyB", out var b)
+            ? GetPropertyValue(b, "data") : null;
         return Task.FromResult(new ScriptResponse {
             Data = new { user = taskA, account = taskB },
             Tags = new[] { "success" }
@@ -135,9 +169,9 @@ public class {FunctionName}Output : IOutputHandler
 }
 ```
 
-Follow `references/concepts/csx-contracts.md` for the exact signatures and standard `using` directives. Follow `references/concepts/mapping-types.md` for the unwrap rule (the most common bug).
+Follow `references/concepts/csx-contracts.md` for the exact signatures, the dynamic type model (ExpandoObject/`List<object?>`, camelCase), and the full `ScriptBase` helper list. Follow `references/concepts/mapping-types.md` for the unwrap rule (the most common bug).
 
-### 7. Generate the function JSON
+### 9. Generate the function JSON
 
 Envelope (single-task):
 
@@ -160,19 +194,19 @@ Envelope (single-task):
 }
 ```
 
-For multi-task: `onExecutionTasks[]` array + `output` field. The exact shape comes from the schema.
+For multi-task: `onExecutionTasks[]` array + `output` field. Contract fields (`verbs`, `inputSchema`, `outputSchema`, `inputView`, `outputView`) go in `attributes` alongside `scope` when step 5 selected them. The exact shape comes from the schema.
 
 `mapping.code` is left empty — the vNext VS Code extension auto-encodes the `.csx` file on save. **Never manually base64-encode.**
 
-### 8. Write the file
+### 10. Write the file
 
 Path: `{componentsRoot}/{paths.functions}/{function-key}/{function-key}.json`. The `.csx` files live in `src/` next to it.
 
-### 9. Validate
+### 11. Validate
 
 Run `npm run validate`. Hand failures to `validate-and-fix`.
 
-### 10. (If a view calls this function) Wire up the `x-lov` / `x-lookup`
+### 12. (If a view calls this function) Wire up the `x-lov` / `x-lookup`
 
 If this function backs a view's LOV or lookup, the schema field that references it needs:
 
@@ -195,7 +229,8 @@ See `references/concepts/schema-vocabularies.md` for the full vocabulary.
 
 ## Notes
 
-- LOV/lookup functions are invoked via **GET**. Parameters arrive in `context.QueryString` or `context.Headers`, NOT `context.Body`. Use a multi-source resolver in `InputHandler`.
+- LOV/lookup functions are invoked via **GET**. Parameters arrive in `context.QueryParameters` or `context.Headers`, NOT `context.Body` (there is no `context.QueryString`). Use a multi-source resolver via `GetPropertyValue` in `InputHandler`.
+- **Never access dynamic members directly** (`context.Body?.x`, `context.Instance.Data.y`) — an absent member throws at runtime. Inherit `ScriptBase`; use `HasProperty` / `GetPropertyValue`.
 - The double-wrap bug: never set `ScriptResponse.Data = context.Body` raw — unwrap one level first.
 - `scope: D` functions cannot access instance data; if you need it, use `I`.
 - `mapping.location` paths are relative to the function's folder (e.g. `./src/MyMapping.csx`).

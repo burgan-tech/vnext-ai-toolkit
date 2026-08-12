@@ -11,7 +11,7 @@ It ships these capabilities:
 1. **Seven specialized agents** that form a build pipeline — `analyst` → `architect` → `component-author` → `validator` → (`security-reviewer` + `doc-writer`), with `reviewer` for PR-style checks.
 2. **A multi-turn design orchestrator** (`vnext-architect`) for designing a whole workflow end-to-end — discovery → state machine → components → tests — through a structured decision tree.
 3. **Eleven skills** — one umbrella reference skill (`authoring-vnext-components`) plus ten focused authoring and review skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `validate-and-fix`, `security-audit`).
-4. **Six slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:review-components`, `/vnext-ai-toolkit:build`, and `/vnext-ai-toolkit:security-audit` — as entry points.
+4. **Eight slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:vnext-update`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:review-components`, `/vnext-ai-toolkit:build`, and `/vnext-ai-toolkit:security-audit` — as entry points.
 
 ## Install
 
@@ -93,7 +93,8 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 
 | Command | What it does |
 |---------|--------------|
-| `/vnext-ai-toolkit:vnext-init` | Sets up or refreshes the workspace. Scaffolds the base project via `@burgan-tech/vnext-template` (npx) when missing, then layers the toolkit files (docker-compose + MockLab, `CLAUDE.md`/`AGENTS.md`, `.claude/references`, integration tests) — diffing before overwriting. Offers to bump `runtimeVersion`/`schemaVersion`. |
+| `/vnext-ai-toolkit:vnext-init` | Sets up or refreshes the workspace. Scaffolds the base project via `@burgan-tech/vnext-template` (npx) when missing, then layers the toolkit files (docker-compose + MockLab, `CLAUDE.md`/`AGENTS.md`, `.claude/references`, integration tests) — diffing before overwriting. Offers to bump `runtimeVersion`/`schemaVersion`. Stamps the workspace with the toolkit version (`.claude/vnext-toolkit.json`). |
+| `/vnext-ai-toolkit:vnext-update [--force]` | Refreshes the toolkit-owned files after a plugin update: compares the workspace stamp against the installed plugin version, diffs each file against the current templates, and confirms per file (overwrite/skip/merge). A SessionStart hook and a preamble in every command suggest running it when the workspace is stale. |
 | `/vnext-ai-toolkit:new-component <type> <key> [desc]` | Scaffolds a component end-to-end through the agent pipeline. `<type>` ∈ `schema\|workflow\|task\|view\|function\|extension`. |
 | `/vnext-ai-toolkit:vnext-design-process [name]` | Multi-turn, end-to-end workflow design via the `vnext-architect` orchestrator (discovery → states → components → tests). |
 | `/vnext-ai-toolkit:validate` | Runs `npm run validate`, summarizes failures by file with the violated schema rule, and offers to fix. |
@@ -145,13 +146,16 @@ vnext-ai-toolkit/
 │   ├── analyst.md  architect.md  component-author.md
 │   ├── validator.md  reviewer.md  security-reviewer.md  doc-writer.md
 │   └── vnext-architect.md            # multi-turn end-to-end design orchestrator
-├── skills/                           # 10 skills
+├── skills/                           # 11 skills
 │   ├── authoring-vnext-components/SKILL.md   # core reference skill
 │   ├── workflow-scaffold/  view-design/  schema-design/
 │   ├── component-task/  component-function/  component-extension/  component-mapping/
-│   └── integration-test/  validate-and-fix/
-├── commands/                         # 5 slash commands
-│   └── vnext-init.md  new-component.md  vnext-design-process.md  validate.md  build.md
+│   └── integration-test/  validate-and-fix/  security-audit/
+├── commands/                         # 8 slash commands
+│   ├── vnext-init.md  vnext-update.md  new-component.md  vnext-design-process.md
+│   └── validate.md  review-components.md  build.md  security-audit.md
+├── hooks/                            # SessionStart staleness check
+│   └── hooks.json  check-toolkit-version.sh
 ├── references/                       # Concept docs the agents may consult
 │   ├── concepts/                     # workflow-types, view-roles, roles-and-authorization, csx-contracts, ...
 │   ├── decision-tree.md  external-sources.md
@@ -161,7 +165,7 @@ vnext-ai-toolkit/
 │   │                                 #   integration tests from VNext.Testing.Template
 │   ├── docker-compose.yml.tmpl  .gitignore.tmpl  .http.tmpl
 │   ├── CLAUDE.md.tmpl / AGENTS.md.tmpl
-│   ├── view-author-guide.md  function-mapping-pattern.md  mocklab-seed-format.md
+│   ├── view-author-guide.md  function-mapping-pattern.md  mocklab-seed-format.md  csx-contracts.md
 │   └── etc/{docker,dapr}/...
 └── scripts/check-prerequisites.sh
 ```
