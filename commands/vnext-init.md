@@ -58,36 +58,46 @@ confirmation.** This is the only place this command touches the CLI-owned config
 ## Steps 3+ — Layer / revise the toolkit-owned files
 
 These files are **not** produced by the CLI; they are the toolkit's value-add. For each one: resolve
-its target path, render the matching `templates/*.tmpl` by substituting `{{domain}}`, `{{Domain}}`
-(PascalCase), `{{runtimeVersion}}`, `{{schemaVersion}}`, `{{maintainer}}`, `{{workflowKey}}` from
-`vnext.config.json`. Then:
+its target path, render the matching `${CLAUDE_PLUGIN_ROOT}/templates/*.tmpl` (the templates live in
+the **plugin's install directory**, never in the workspace) by substituting ONLY these placeholders:
+`{{domain}}` and `{{workflowKey}}` from `vnext.config.json`, and `{{toolkitVersion}}` from
+`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `.version`.
+
+> **Placeholder allowlist — do not blanket-replace `{{...}}`.** Tokens like `{{baseUrl}}`,
+> `{{apiVersion}}`, `{{instanceId}}`, `{{start.response.body.$.id}}` in `.http` content are VS Code
+> REST Client variables and must survive verbatim.
+
+Then:
 
 - **Missing** → offer to create it (default: yes).
 - **Already exists** → **diff** the existing file against the rendered template, show what differs,
   and ask per file whether to **overwrite**, **skip**, or merge. **Never overwrite silently.**
 
 ### 3 — `CLAUDE.md` and `AGENTS.md`
-- `CLAUDE.md` ← `templates/CLAUDE.md.tmpl`; `AGENTS.md` ← `templates/AGENTS.md.tmpl` (same content,
-  Codex-friendly header). Keep the two mirrored — if only one exists, offer to mirror to the other.
+- `CLAUDE.md` ← `${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md.tmpl`; `AGENTS.md` ←
+  `${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md.tmpl` (same content, Codex-friendly header). Keep the
+  two mirrored — if only one exists, offer to mirror to the other.
 
 ### 4 — `docker-compose.yml` + MockLab seed + Dapr config
-- `docker-compose.yml` ← `templates/docker-compose.yml.tmpl` (MockLab + `mocklab-dapr` sidecar).
-- `etc/docker/config/seed/{domain}-collection.json` ← `templates/etc/docker/config/seed/example-collection.json`.
-- `etc/dapr/config.yaml` ← `templates/etc/dapr/config.yaml.tmpl` (Dapr is optional — offer to skip).
+- `docker-compose.yml` ← `${CLAUDE_PLUGIN_ROOT}/templates/docker-compose.yml.tmpl` (MockLab + `mocklab-dapr` sidecar).
+- `etc/docker/config/seed/{domain}-collection.json` ← `${CLAUDE_PLUGIN_ROOT}/templates/etc/docker/config/seed/example-collection.json`.
+- `etc/dapr/config.yaml` ← `${CLAUDE_PLUGIN_ROOT}/templates/etc/dapr/config.yaml.tmpl` (Dapr is optional — offer to skip).
 - Warn about port conflicts (3001 MockLab, 3500 Dapr, 4201 runtime).
 - Remind: after editing seed files later, run `docker compose down -v && docker compose up -d mocklab`
   to force a re-import (MockLab skips collections that already exist by name).
 
 ### 5 — `.claude/references/` pattern guides
-Copy these three guides (no substitution) so the AI has in-repo pattern context even if the plugin
-is uninstalled:
+Copy these four guides from `${CLAUDE_PLUGIN_ROOT}/templates/` (no substitution) so the AI has
+in-repo pattern context even if the plugin is uninstalled:
 - `view-author-guide.md`
 - `function-mapping-pattern.md`
 - `mocklab-seed-format.md`
+- `csx-contracts.md` (the `.csx` interface contracts, `ScriptContext` surface, dynamic type model, and `ScriptBase` helper reference — without it a workspace has no interface-contract source)
 
 ### 6 — `api-tests/` + `.http`
-If missing, create `api-tests/` with a `.gitkeep` and a short README pointing at `templates/.http.tmpl`
-(the per-workflow REST Client file pattern; uses `{{domain}}` / `{{workflowKey}}`).
+If missing, create `api-tests/` with a `.gitkeep` and a short README pointing at
+`${CLAUDE_PLUGIN_ROOT}/templates/.http.tmpl` (the per-workflow REST Client file pattern; uses
+`{{domain}}` / `{{workflowKey}}` — all other `{{...}}` tokens are REST Client variables, keep them).
 
 ### 7 — Integration test scaffold (recommended)
 If no `*.IntegrationTests.csproj` exists (typically under `tests/`), ask:
@@ -111,6 +121,31 @@ If yes, scaffold with the **official dotnet template** (the toolkit no longer ha
   / the template fails to resolve, see
   `https://github.com/burgan-tech/vnext-integration-test/blob/master/GETTING_STARTED.md`.
 
+### 8 — Version stamp (always, last)
+
+Write `.claude/vnext-toolkit.json` so `/vnext-update` and the plugin's session hook can detect
+staleness later (create `.claude/` if needed):
+
+```json
+{
+  "toolkitVersion": "<version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>",
+  "updatedAt": "<today, YYYY-MM-DD>",
+  "files": [
+    "CLAUDE.md",
+    "AGENTS.md",
+    ".claude/references/view-author-guide.md",
+    ".claude/references/function-mapping-pattern.md",
+    ".claude/references/mocklab-seed-format.md",
+    ".claude/references/csx-contracts.md",
+    "docker-compose.yml",
+    "etc/dapr/config.yaml"
+  ]
+}
+```
+
+List only the files that actually exist after this run. The rendered CLAUDE.md/AGENTS.md already
+carry the matching `<!-- vnext-ai-toolkit vX.Y.Z -->` comment via `{{toolkitVersion}}`.
+
 ## Final report
 
 - **Mode B**: note the `npx @burgan-tech/vnext-template <domain>` command that ran and where the
@@ -124,6 +159,8 @@ If yes, scaffold with the **official dotnet template** (the toolkit no longer ha
   docker compose up -d mocklab                   # if you'll develop with mocked endpoints
   ```
 - Suggest: `/vnext-design-process "<your first workflow name>"` to start designing.
+- Remind: after updating the plugin later (`claude plugin marketplace update burgan-tech`), run
+  **`/vnext-update`** to refresh these toolkit-owned files.
 
 ## What this command does NOT do
 

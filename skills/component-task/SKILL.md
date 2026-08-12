@@ -102,7 +102,7 @@ Most consumers (transitions, functions) attach a mapping to their reference of t
 
 For `NotificationTask`, the mapping implements `INotificationMapping` (per-channel). For all other tasks, the mapping usually implements `IMapping`.
 
-Use `references/concepts/csx-contracts.md` for the exact interface signature, standard `using` directives, and class structure.
+Use `references/concepts/csx-contracts.md` for the exact interface signature, standard `using` directives, and class structure. Mapping classes inherit `ScriptBase` and read dynamic data only through its helpers (`HasProperty`, `GetPropertyValue`, `GetList`, …) — direct dynamic access like `context.Instance.Data.x?.y` throws at runtime when the member is absent. Note: `INotificationMapping`'s method is `ChannelHandler(string channel, ScriptContext context)`, not `Handler`.
 
 ### 8. (HTTP/SOAP/Dapr tasks) Add a MockLab seed
 

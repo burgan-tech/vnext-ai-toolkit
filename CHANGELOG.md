@@ -4,7 +4,102 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
 ## [Unreleased]
 
+### Added
+
+- **Transition admission & locking documentation (v0.0.79, vnext PR #877 — Busy-as-mutex).** New
+  `workflow-types.md` § 3.1: the Busy status is the execution mutex; normal shared/state transitions
+  **409 while Busy**, `cancel`/`exit` hold the status lock but **bypass the busy check**, and
+  **`updateData` bypasses all lock/busy checks** (status-neutral reserve transition) — the only way
+  to write data and advance an instance under parallel requests. `updateData` semantics per
+  situation: plain instance → data write + normal pipeline (advances the flow); active subflow →
+  the **parent answers** (no forwarding, parent data updated, flow left in place, autos still
+  evaluated). Design guidance for parallel branches, fan-in states, and loops (409 handling, when
+  to add an `updateData` definition, distinct task definitions per parallel branch at the same
+  order, two data rows per accepted updateData) baked into the `workflow-scaffold` skill, the
+  `architect`/`vnext-architect` transition steps, and the CLAUDE/AGENTS templates.
+- **Delta-only mapping rule** added to the csx-contracts golden rules (and templates copy): under
+  the v0.0.79 immediate-persistence write model, `ScriptResponse.Data` must contain only changed
+  fields — a full instance-data echo overwrites concurrent writers' fresher values.
+
+- **Function mode decision — BFF API vs BFF View, confirm-first.** Functions now have an explicit
+  two-mode model across the design surface: a **BFF API** (pure programmatic endpoint — verbs +
+  schemas, no view fields) or a **BFF View** (stateless single input→output page — the function
+  declares `inputView`/`outputView` itself). The `vnext-architect` Phase 1 discovery and the
+  `architect` agent gained a "Function gate": when the user describes a stateless single page or
+  pure API need, they propose a **Function instead of a workflow** and ask for confirmation. The
+  `component-function` skill now settles the mode with the user in step 2 (no view need → design
+  like an API; view fields only on confirmed view need) and drives the contract step from it.
+  Also reflected in `references/decision-tree.md` (new early branch + split M2/M3 leaves),
+  `function-vs-extension-vs-task.md`, `function-mapping-pattern.md` § 9, and the CLAUDE/AGENTS
+  templates.
+
+- **`/vnext-update` command** — refreshes the toolkit-owned workspace files (CLAUDE.md, AGENTS.md,
+  the four `.claude/references/` guides, docker-compose, dapr config) after a plugin update:
+  reads the installed plugin version from `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json`,
+  compares it with the workspace stamp, then diffs and confirms **per file** (overwrite/skip/merge —
+  never silent). Supports `--force` and a legacy path for workspaces with no stamp yet.
+- **Workspace version stamp** — `/vnext-init` and `/vnext-update` now write
+  `.claude/vnext-toolkit.json` (`toolkitVersion`, `updatedAt`, tracked `files[]`), and the rendered
+  CLAUDE.md/AGENTS.md carry an `<!-- vnext-ai-toolkit v{{toolkitVersion}} -->` comment via the new
+  `{{toolkitVersion}}` template placeholder.
+- **SessionStart staleness hook** (`hooks/hooks.json` + `hooks/check-toolkit-version.sh`) — on
+  session start in a vNext workspace, compares the workspace stamp against the installed plugin
+  version and injects a non-blocking reminder to run `/vnext-update` (or to update the plugin, when
+  the stamp is newer). Silent no-op outside vNext workspaces; always exits 0; no jq dependency.
+- **Freshness preamble in commands** — `/new-component`, `/vnext-design-process`, `/validate`,
+  `/review-components`, `/build`, `/security-audit` now start with an identical non-blocking check
+  that suggests `/vnext-update` when the workspace stamp is missing or older than the plugin.
+
 ### Changed
+
+- **`/vnext-init` template paths are now plugin-rooted** (`${CLAUDE_PLUGIN_ROOT}/templates/...`
+  instead of ambiguous bare `templates/...`), the placeholder substitution is an explicit allowlist
+  (`{{domain}}`, `{{workflowKey}}`, `{{toolkitVersion}}` — REST Client variables like `{{baseUrl}}`
+  / `{{apiVersion}}` / `{{instanceId}}` must survive verbatim), and a final step writes the
+  `.claude/vnext-toolkit.json` stamp.
+
+- **`csx-contracts.md` rewritten against the runtime source** (`Models.cs`, `ScriptBase.cs`,
+  `Scripting/Contracts/*`): the verified `ScriptContext` surface (no `QueryString` — the query string
+  is `QueryParameters`; adds `CurrentTransition`, `RawBody`, `EventPayload`, `Incident`,
+  `OutputResponse`, `Related`), the dynamic runtime type model (every `dynamic` is an
+  `ExpandoObject` / `List<object?>` with camelCase keys; a missing member access **throws**
+  `RuntimeBinderException` — `?.` does not guard it), the full `ScriptBase` helper reference
+  (`HasProperty`, `GetPropertyValue<T>`, list ops, `CreateObject`/`SetProperty`, XML, logging
+  `args:` rule, config & Dapr secrets), and previously missing interfaces (`ISubProcessMapping`,
+  `IEventMapping`, `IStateNotificationMapping`). Fixed two wrong method names: `IOutputHandler`'s
+  method is `OutputHandler` (not `Handler`) and `INotificationMapping`'s is `ChannelHandler`.
+- **All `.csx` skeletons and examples** (component-function / component-extension / component-task
+  skills, mapping-types, function-mapping-pattern, CLAUDE/AGENTS templates) now inherit `ScriptBase`
+  and read dynamic data via `HasProperty` / `GetPropertyValue` instead of direct dynamic access;
+  the reflection-based `ResolveParam` (which probed a non-existent `QueryString` property) is gone.
+- **`TaskResponse` vs `OutputResponse` vs `Body`** semantics unified across docs (previously
+  contradictory): each task's `StandardTaskResponse` is merged into `Body` *and* stored in
+  `TaskResponse[taskKey]`; a task's own output-mapping result goes to `OutputResponse[taskKey]`.
+- **`sys-mappings` promoted to the primary reuse method** for repeated mapping structures
+  (mappings-and-scripts, mapping-types, component-mapping skill, component-author agent, templates).
+- **Roles are now confirm-first**: architect/vnext-architect agents, workflow-scaffold skill, and
+  roles-and-authorization.md instruct asking the user whether a flow should configure roles at all
+  before adding any (default: no roles — they add complexity for vNext newcomers).
+- `templates/function-mapping-pattern.md` re-synced with `references/` (it was stale — missing the
+  `rawResponse` section) and the duplicate "§ 5" heading fixed.
+
+### Added
+
+- **`context.Related` documentation (v0.0.79+, vnext PR #857)** in csx-contracts + templates:
+  `HasParent` / `ParentAsync` / `SubAsync` / `SubsAsync` / `SubKeysAsync`, `RelatedInstanceView`
+  fields, `IsCompleted` vs `CorrelationCompleted`, absence-vs-failure semantics, resolution cap,
+  x-roles copy warning — and the rule that `Related` is for correlation data only (anything else
+  goes through a task).
+- **Function BFF contract documentation (vnext PRs #679/#858/#868)**: `verbs[]` (405 + `Allow`),
+  `inputSchema` (400 validation), `outputSchema` (declarative), `inputView`/`outputView`
+  (rule-based slots, first match wins), `cache`, `/info` + `view|schema?target=` discovery
+  endpoints, the "BFF View" stateless-page pattern, and the missing `F` scope semantics —
+  in function-mapping-pattern § 9, function-vs-extension-vs-task, component-function skill,
+  and the CLAUDE/AGENTS templates.
+- **State `interaction.longPoll` documentation** (`terminate`, `fallbackTimeoutSeconds`, `roles`)
+  in workflow-types § 2.3 and the templates — the client stop/keep-polling handover signal.
+- `csx-contracts.md` added to the `/vnext-init` `.claude/references/` copy list (and to
+  `templates/`), so user workspaces carry the interface contracts even without the plugin.
 
 - **`/vnext-init` now delegates base scaffolding to the official `@burgan-tech/vnext-template` CLI.**
   When no `vnext.config.json` exists, it runs `npx @burgan-tech/vnext-template <domain>` to create the

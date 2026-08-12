@@ -6,26 +6,40 @@ Three vNext components all run code, but their roles are distinct. Picking the w
 
 | You need to… | Use |
 |--------------|-----|
-| …expose a REST endpoint (call from client, BFF, or another service) | **Function** |
+| …expose a REST endpoint (call from client, BFF, or another service) | **Function (BFF API mode)** |
+| …serve a stateless single page — one input → one output, nothing persisted (calculator, eligibility check) | **Function (BFF View mode)** — not a workflow |
 | …enrich an instance's data on every read (e.g. attach user profile, branch detail) | **Extension** |
 | …perform an action inside a workflow (HTTP call, script, message publish, sub-process start) | **Task** |
 
 ## 1. Function
 
-**Role.** A REST endpoint hosted by the workflow runtime.
+**Role.** A REST endpoint hosted by the workflow runtime — vNext's BFF surface. It has **two modes**, and the mode must be settled with the user before designing:
+
+- **BFF API** (the original purpose): a pure endpoint called programmatically — verbs + optional `inputSchema`/`outputSchema`, **no view fields**. When no screen is involved, design the function like an API.
+- **BFF View**: a stateless single page with no instance data (e.g. a loan-rate calculator) — the function itself declares the form (`inputView`), the validation contract (`inputSchema`), and the result presentation (`outputView`).
+
+**Design rule (confirm-first).** When a user describes a stateless single input→output page, **propose a Function (BFF View), not a workflow**, and get their confirmation. Conversely, when a function has no view need, **propose designing it as a plain BFF API** (no `inputView`/`outputView`) and confirm — never attach view fields on a hunch.
 
 **Scope values** (from the schema):
 - `D` — Domain-scoped. Stateless, workflow-independent. URL: `/api/v{ver}/{domain}/functions/{key}`.
+- `F` — Flow-scoped. Bound to a workflow definition (not a specific instance). Served on the instance route (the domain route rejects `F`/`I` with 403).
 - `I` — Instance-scoped. Receives instance context. URL: `/api/v{ver}/{domain}/workflows/{wf}/instances/{instanceId}/functions/{key}`.
-- (Other scopes may exist; check `function.json` schema.)
 
 **Composition.**
 - Single-task function: one `task` field with `mapping` (single `IMapping` `.csx`)
 - Multi-task function: `onExecutionTasks[]` (multiple tasks) + `output` (an `IOutputHandler` `.csx` that aggregates results)
 
+**Client contract fields** (post-v0.0.79 runtimes; see `references/function-mapping-pattern.md` § 9):
+- `verbs` — accepted HTTP verbs (absent = all; mismatch → 405 + `Allow`)
+- `inputSchema` — request body validated before tasks run (failure → 400); `outputSchema` — declarative only
+- `inputView` / `outputView` — the views a client renders to collect input / present output; all four slots accept a single reference or rule-based entries (first match wins, rule-less tail = fallback)
+- `rawResponse`, `cache`, `roles` (DENY overrides ALLOW)
+- Discovery: `GET .../functions/{fn}/info` (+ `view`/`schema?target=input|output`) answers "may I run this, with which verb, which view/schema applies" — 403 for unauthorized callers.
+
 **Use cases.**
 - LOV/lookup endpoints called by views (`x-lov`, `x-lookup`)
 - BFF-style aggregation calls from clients
+- BFF View pages (stateless single screens: calculators, eligibility checks)
 - Cross-domain data fetch / gates
 
 ## 2. Extension
