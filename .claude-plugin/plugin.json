@@ -1,6 +1,6 @@
 {
   "name": "vnext-ai-toolkit",
-  "version": "0.0.3",
+  "version": "0.2.0",
   "description": "AI tooling for the vNext platform: process designer (multi-turn architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration test scaffolding. Canonical schema-first — every component is generated from the official JSON Schema at the workspace's schemaVersion tag, never from hardcoded assumptions.",
   "author": {
     "name": "Burgan Tech vNext Team",
@@ -68,10 +68,30 @@
     "references/concepts/component-schemas.md",
     "references/concepts/mocklab-spec.md",
     "references/concepts/integration-test-patterns.md",
-    "references/concepts/security-review-checklist.md"
+    "references/concepts/security-review-checklist.md",
+    "references/function-mapping-pattern.md",
+    "references/mocklab-seed-format.md",
+    "references/view-author-guide.md",
+    "references/runtime-feature-matrix.md",
+    "references/concepts/task-types.md",
+    "references/concepts/fan-out.md",
+    "references/concepts/transition-pipeline.md",
+    "references/concepts/long-poll-interaction.md",
+    "references/concepts/state-function-response.md",
+    "references/concepts/human-task.md",
+    "references/concepts/subflow-overrides.md",
+    "references/concepts/instance-query.md",
+    "references/concepts/incidents-and-retry.md",
+    "references/concepts/runtime-operations.md",
+    "references/concepts/observability.md",
+    "references/concepts/schema-runtime-gaps.md"
   ],
   "vnext": {
+    "knownRuntimeVersion": "0.0.97",
+    "knownSchemaVersion": "0.0.54",
+    "metaPackageVersion": "0.0.53",
     "schemaSource": "node_modules/@burgan-tech/vnext-schema/schemas/{componentType}-definition.schema.json",
+    "schemaFallbackUrl": "https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}-definition.schema.json",
     "knowledgeOrder": [
       "pinned @burgan-tech/vnext-schema (node_modules)",
       "Context7 MCP (/burgan-tech/vnext-docs, /burgan-tech/vnext-example)",
@@ -85,6 +105,30 @@
       "function",
       "extension",
       "mapping"
+    ],
+    "workspaceReferences": [
+      "references/concepts/csx-contracts.md",
+      "references/function-mapping-pattern.md",
+      "references/mocklab-seed-format.md",
+      "references/view-author-guide.md",
+      "references/concepts/workflow-types.md",
+      "references/concepts/transition-pipeline.md",
+      "references/concepts/roles-and-authorization.md",
+      "references/concepts/function-vs-extension-vs-task.md",
+      "references/concepts/schema-vocabularies.md",
+      "references/concepts/mapping-types.md",
+      "references/concepts/task-types.md",
+      "references/concepts/fan-out.md",
+      "references/concepts/state-function-response.md",
+      "references/concepts/long-poll-interaction.md",
+      "references/concepts/human-task.md",
+      "references/concepts/subflow-overrides.md",
+      "references/concepts/instance-query.md",
+      "references/concepts/incidents-and-retry.md",
+      "references/concepts/observability.md",
+      "references/concepts/runtime-operations.md",
+      "references/concepts/schema-runtime-gaps.md",
+      "references/runtime-feature-matrix.md"
     ]
   }
 }

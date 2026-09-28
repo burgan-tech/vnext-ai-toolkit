@@ -18,10 +18,10 @@ Interactive, multi-step authoring of a vNext View component. The first decision 
 
 ```
 1. Read vnext.config.json → schemaVersion + domain + paths.*
-2. Fetch https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/view.json
-   ├─ HTTP 404 on tag → retry master branch, warn user
-   ├─ Network down → fall back to references/concepts/component-schemas.md snapshot, warn user
-   └─ No snapshot → halt; ask user to paste schema. Never guess.
+2. Load the view schema from the pinned package:
+   node_modules/@burgan-tech/vnext-schema/schemas/view-definition.schema.json
+   (missing → `npm install`; version/fallback rules → references/concepts/component-schemas.md;
+   never guess field names from memory)
 3. Parse:
    - properties.attributes.properties.display.enum → display options
    - properties.attributes.properties.renderer.enum → renderer options
@@ -91,6 +91,7 @@ Ask the user:
 - **`display`** — `full-page`, `popup`, `inline`, etc.
 - **State binding** — which workflow + state will reference this view?
 - **Placement (state vs transition)** — if this view collects user input AND the target state is the workflow's Initial state (`stateType: 1`), the **Recommended placement is `state.view`** (not on the outgoing transition). Reason: the runtime serves the state view immediately on instance start, so the user sees the form right away. Confirm with `AskUserQuestion` — let the user override if they want an intentional "intro → tap → form" two-step. Wizard states (`stateType: 5`) are the exception — their form belongs on the single transition. See `references/concepts/view-roles.md` and `references/concepts/workflow-types.md`.
+- **Parent overriding a child's view** — when a SubFlow parent wants a different view for one of the child's states/transitions, don't fork the child: use `subFlow.overrides.states.<state>.views.<childViewKey>` / `overrides.transitions.<key>.views.<childViewKey>` on the parent (`references/concepts/subflow-overrides.md`). The older `viewOverrides` / `views`-by-key forms are deprecated since 0.0.95.
 - **`dataSchema`** — which schema drives the data shape? **Choose by role**:
   - *Transition / input view* (user fills a form) → bind to the **transition payload schema** (carries `enum`/`x-lov`/`x-validation`/`x-conditional` for the input set).
   - *Display / summary / status view* (read-only from `$instance`) → bind to the **master / instance schema** (covers the full instance shape so `$schema.X.label` and `$instance.X` paths resolve everywhere).

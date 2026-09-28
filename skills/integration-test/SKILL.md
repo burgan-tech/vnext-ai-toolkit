@@ -69,6 +69,12 @@ For each state and transition, note:
 - **Timer transitions (`triggerType: 2`)** — fire after a duration; poll with a generous timeout
 - **Event transitions (`triggerType: 3`)** — need an external signal
 - **Final states** — assert `GetCurrentState(...)` equals the final state key
+- **Human states (`subType: 6`)** — assert the instance appears in `GET /{domain}/functions/human-task` for an allowed role header and is absent for a denied one
+- **Long-poll `terminate: true` states** — assert the state body carries `interaction.ack.href`, `POST …/longpoll/ack`, then the pipeline resumes
+- **Busy / concurrency** — a second transition while Busy returns 409 `Instance:100031`; parallel `updateData` calls are all accepted
+- **Failures** — after a faulted task: `metadata.incident.hasActiveIncident`, `GET …/incidents/active` (fields `errorCode`, `errorLayer`, `traceId`), then `POST …/retry`
+- **Polling** — read `metadata.effectiveStatus` (deepest active subflow) rather than `status`; use `If-None-Match` and expect 304 on the state function
+  Reference: `references/concepts/integration-test-patterns.md` ("Surfaces added in 0.0.80–0.0.97") and `references/concepts/state-function-response.md`.
 
 ### 3. Decide test scope with the user
 

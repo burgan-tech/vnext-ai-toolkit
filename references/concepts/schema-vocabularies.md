@@ -180,40 +180,40 @@ Declares which filter operators a field accepts in instance queries. **Empty or 
 is not filterable.** Most relevant on the **master schema**, where the built-in `data` function reads
 it to build the query.
 
+> **Schema-side names ≠ wire names.** The runtime (`SchemaFilterContext.cs`) translates the wire
+> operator before checking the schema: `ne→neq`, `ge→gte`, `le→lte`, `like|match→contains`,
+> `startswith→startsWith`, `endswith→endsWith`, `isnull→isNull` (case-insensitive; `eq gt lt between
+> in nin includes` unchanged). **Declare the schema-side names.** A schema listing `ge`/`le`/`ne`/`like`
+> validates fine but makes those operators fail at runtime with `Validation:900010`. Full mapping
+> table, wire operators, limits and error codes: `instance-query.md`.
+
 ```jsonc
 "startDateTime": {
   "type": "string",
   "format": "date-time",
-  "x-filterOperators": ["eq", "gt", "ge", "lt", "le", "between"],
+  "x-filterOperators": ["eq", "gt", "gte", "lt", "lte", "between"],
   "x-sortable": true,
   "x-displayFormat": "yyyy-MM-dd'T'HH:mm:ssXXX"
 }
 ```
 
-Operator semantics depend on the field's JSON `type` (canonical operator tokens are `ge`/`le`, not
-`gte`/`lte`):
+Operator semantics depend on the field's JSON `type` (schema-side spellings below):
 
-| Schema `type` | Operators | SQL behavior |
+| Schema `type` | Typical `x-filterOperators` | SQL behavior |
 |---|---|---|
-| `number` / `integer` | `gt`, `ge`, `lt`, `le`, `between` | `accessor::numeric {op} @param` |
-| `string` + `gt`/`ge`/`lt`/`le`/`between` | date comparison | `accessor::timestamptz {op} @param` |
-| `string` + `eq`/`like`/`startswith`/`endswith` | text comparison | `accessor ILIKE @param` |
-| `boolean` | `eq`, `ne` | equality |
-| `array` (JSON array in instance data) | `in` / `includes` | `Data @> @param` (leaf path: single-element array + partial-object pattern) |
+| `number` / `integer` | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `nin`, `isNull` | `accessor::numeric {op} @param` |
+| `string` + `format: date-time` with `gt`/`gte`/`lt`/`lte`/`between` | date comparison | `accessor::timestamptz {op} @param` |
+| `string` + `eq`/`contains`/`startsWith`/`endsWith`/`in`/`nin` | text comparison | `accessor ILIKE @param` / equality |
+| `boolean` | `eq`, `neq`, `isNull` | equality |
+| `array` (JSON array in instance data) | `includes` (+ `in`) | `Data @> @param` (leaf path: single-element array + partial-object pattern) |
 
-JSON-Schema definition:
+Schema-side full set: `eq, neq, gt, gte, lt, lte, between, contains, startsWith, endsWith, in, nin,
+isNull, includes`.
 
-```jsonc
-"x-filterOperators": {
-  "type": "array",
-  "description": "Allowed filter operators for this field. Empty or absent means the field is not filterable. Operator semantics depend on the field's JSON type (number/integer: numeric compare; string + gt/lt/ge/le/between: date compare; string + eq/like/startswith/endswith: text compare; boolean: equality; array: includes).",
-  "items": {
-    "type": "string",
-    "enum": ["eq", "ne", "gt", "ge", "lt", "le", "between", "match", "like", "startswith", "endswith", "in", "nin"]
-  },
-  "uniqueItems": true
-}
-```
+Vocabulary file caveat: `vnext-schema/vocabularies/view-vocab.json` (`x-filterOperators.items.enum`)
+still lists the **wire** names (`ne, ge, le, like, match, startswith, endswith`) and omits `isNull`
+/ `includes`. The runtime (`SchemaFilterContext`) is authoritative; `npm run validate` will not
+catch the wrong spelling. When the fetched vocab and this file disagree, use the schema-side names.
 
 ### `x-sortable` — sortable field
 
@@ -236,6 +236,29 @@ validation or storage.
   "type": "string",
   "minLength": 1,
   "description": "UI-facing format hint (e.g. yyyy-MM-dd'T'HH:mm:ssXXX)."
+}
+```
+
+### `x-indexed` — attribute index preparation (runtime 0.0.94+)
+
+Boolean. **Master schema only** — the component's `attributes.type` must be exactly `"master"`;
+any `x-indexed` (even `false`) in another schema is rejected at publish. `true` marks a scalar
+(`string` / `number` / `integer` / `boolean`, date = `string` + `format: "date-time"`, nested under
+fixed `object.properties`) as a candidate for a stored generated column + PostgreSQL index. Arrays,
+objects, `$ref` and conditional nodes are rejected.
+
+**Not a permission** — filterability stays with `x-filterOperators`, sortability with `x-sortable`.
+**No DDL from the runtime** — `wf indexes generate` produces SQL, the DBA runs it, and
+`AttributeIndexes:Enabled` routes queries to ready projections. Not present in
+`vnext-schema/vocabularies/*.json` (0.0.54); the runtime parses it directly. Full flow, limits and
+fallback behavior: `instance-query.md` §9.
+
+```jsonc
+"amount": {
+  "type": "number",
+  "x-indexed": true,
+  "x-filterOperators": ["eq", "gte", "lte", "between"],
+  "x-sortable": true
 }
 ```
 
@@ -289,5 +312,6 @@ When `schema-design` runs, it:
 ## Sources
 
 - Vocabularies repo: `https://github.com/burgan-tech/vnext-schema/tree/master/vocabularies`
-- Canonical envelope: `vnext-schema/schemas/schema.json` at `v{schemaVersion}`
+- Canonical envelope: `vnext-schema/schemas/schema-definition.schema.json` at `v{schemaVersion}` (see `component-schemas.md`)
 - Working examples: `vnext-example/core/Schemas/account-opening/*.json` (look for `x-labels`, `x-lov`, `x-lookup`)
+- Filter/sort/index runtime truth: `vnext/src/BBT.Workflow.Domain/Definitions/Schemas/{SchemaFilterContext,SchemaFilterMetadataResolver,AttributeIndexDefinition}.cs`; vnext-docs `components/schema.md`, `how-to/attribute-indexes.md`; toolkit `instance-query.md`

@@ -2,7 +2,53 @@
 
 All notable changes to the vNext AI Toolkit will be documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Plugin uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [Unreleased] — 0.2.0
+
+**Runtime coverage: vNext runtime 0.0.97 / schema 0.0.54 / `@burgan-tech/vnext-meta` 0.0.53** (previously 0.0.79). Closed milestones v0.0.80 … v0.0.97 folded in.
+
+### Added
+
+- **New runtime references** under `references/concepts/` (all copied into workspaces via `workspaceReferences`):
+  `task-types.md` (full task `type` catalog 1–23 with default execution location — Local on Orchestration vs Remote — and the schema 0.0.54 ceiling 1–21; task/action history functions),
+  `fan-out.md` (FanOut task 21: `itemsPath`/`ItemSelector`, `IFanOutMapping`, single-write join, four join policies, limits, when-vs-SubFlow/SubProcess),
+  `transition-pipeline.md` (LifecycleOrder with Auto 80 before Schedule 90 since 0.0.90, admission kinds, full `updateData` semantics incl. the `+Self` profile and parent-with-subflow data-only path, `annotations` placement, extensions read-only since 0.0.93),
+  `long-poll-interaction.md` (`interaction.longPoll` terminate/fallback/roles|rule, ack endpoint, rule-arm pitfalls, when to acknowledge),
+  `state-function-response.md` (shape v12: `transitions[]` kinds incl. `updateData`/`exit`/`scheduled`, `correlations[]`, `functions`, `interaction`, `incident`, `timeout`, ETag/`X-Entity-ETag`/304, `metadata.effectiveStatus`/`type`),
+  `human-task.md` (human approval = state `subType: 6` + fail-closed `queryRoles` + `humanTask` data + `GET /{domain}/functions/human-task` — **not** task type 5),
+  `subflow-overrides.md` (`subFlow.overrides` key catalog, resolution rules, deprecated `viewOverrides`),
+  `instance-query.md` (list endpoint, wire vs schema-side operator names, `x-indexed`, limits, error codes 900010–900014, sort JSON, `instanceType`/`effectiveStatus`),
+  `incidents-and-retry.md` (incident endpoints and retry rules since 0.0.92),
+  `runtime-operations.md` (Busy-as-mutex lock model and 409 codes, cache/ETag/generation memo, Dapr service discovery and the `publish/completed` hook, URL BasePath, Monitor API removal),
+  `observability.md` (WorkflowLogs EventId ranges, span/tag names, correlation headers, local OpenObserve/Elastic APM, "debug a failed transition" recipe),
+  `schema-runtime-gaps.md` (where vnext-schema 0.0.54 and runtime 0.0.97 disagree, with author workarounds).
+- **`references/runtime-feature-matrix.md`** — generated snapshot of `@burgan-tech/vnext-meta` (feature → since/status, task types, deprecations, migrations, known issues, security policies, performance profiles) via the new **`scripts/sync-vnext-meta.sh`** (`--from <dir>` | `--npm [ver]` | `--check`). The script also stamps `vnext.knownRuntimeVersion` / `knownSchemaVersion` / `metaPackageVersion` into `plugin.json`.
+- **Runtime-version awareness**: the SessionStart hook now also compares the workspace `runtimeVersion` with the toolkit's `knownRuntimeVersion` (older → "features newer than your runtime are unavailable, see the matrix"; newer → "toolkit knowledge lags"); the six command preambles, `/vnext-init` Step 2 and a new `/vnext-update` Step 1b say the same; `CLAUDE.md` gains a "Runtime version awareness" section fed by the new `{{knownRuntimeVersion}}` placeholder.
+- **`scripts/lint-references.sh`** — fails on stale runtime facts (task enum 15/16, HumanTask as type 5, wrong schema filenames, wire operator names in `x-filterOperators`, zipkin, POST transitions, `$CurrentUser`, deleted template paths) and on manifest/link drift (every reference listed, every `.claude/references/*` link resolvable, matrix version = `knownRuntimeVersion`, CLAUDE.md placeholders allow-listed). `<!-- lint:allow -->` opts a line out. Wired into a new **`.github/workflows/ci.yml`** (PRs + master) and into `publish-plugin.yml`.
+- `.http.tmpl` gains conditional state polling (`If-None-Match`), `updateData`, cancel/exit, `longpoll/ack`, `authorize` probes, function catalog/info/view/schema discovery, task/action history, incidents, human-task inbox and a filter+sort JSON query.
+
+### Changed
+
+- **Single source for reference guides.** The byte-identical copies under `templates/` were deleted; `/vnext-init` and `/vnext-update` copy every entry of `plugin.json` → `vnext.workspaceReferences[]` from `references/` into `.claude/references/` (22 guides now, was 4) with one batched confirmation instead of a prompt per file. The stamp `files[]` is derived from the manifest.
+- **`AGENTS.md` is rendered from `CLAUDE.md.tmpl`** (placeholders `{{agentFile}}`, `{{agentAudience}}`, `{{peerFile}}`, `{{peerAudience}}`); `templates/AGENTS.md.tmpl` is gone and the two files are identical by construction except lines 1, 4 and 6.
+- **`CLAUDE.md.tmpl` restructured** (311 → ~235 lines while covering more): a Reference index table up front, short rule summaries with pointers, new sections *Runtime version awareness*, *Authorization model (0.0.95+)* and *Debugging a failed transition*; the View, Functions, MockLab and `.http` sections were cut to essentials.
+- **Authorization model rewritten** (`roles-and-authorization.md`, `security-review-checklist.md`, architect/vnext-architect/reviewer/security-reviewer agents, security-audit skill): `authorize` is the single decision point (selectors `transitionKey` | `functionKey` | `queryRoles` | `ack`), built-in reads and ack are visibility-only in the runtime since 0.0.95, the gateway ("middle tier") enforces; grant rule (deny AND / allow OR / empty allows / roleless caller cannot clear a role-bound deny since 0.0.96); `availableIn` with roles; caller-role providers `default` / `morph-idm` and the role-header precedence (0.0.97).
+- **Task knowledge**: `component-task` skill type picker covers 17–23 with routing notes and FanOut prompts; `function-vs-extension-vs-task.md` task table replaced by a "most used" table + pointer; `authoring-vnext-components` task line corrected (`"1"`–`"21"` validated, 22/23 runtime-only); `csx-contracts.md`/`mapping-types.md` gain `IFanOutMapping`, numeric precision (0.0.85), secret cache and `using`-merge (0.0.87) notes.
+- **Workflow authoring**: `workflow-scaffold` asks about human states, long-poll hand-over, `subFlow.overrides`, `annotations` and `updateData`; the workflow `timeout` sample is now the real shape (`{ key, target, versionStrategy, timer: { reset, duration }, annotations? }`) and the two contradicting samples were unified; `workflow-types.md` §5 rewritten (state-level SubFlow is `S` only; `P` via `SubProcessTask` 14; sync starts; `effectiveStatus`; failed start faults the parent).
+- **Schema knowledge**: `schema-vocabularies.md`, `schema-design` skill and `CLAUDE.md` use the schema-side `x-filterOperators` names (`gte`/`lte`/`neq`/`contains`/…) and document `x-indexed`; `component-schemas.md` now names the real `*-definition.schema.json` files, makes `node_modules` the primary source and drops the fictional `schemas-snapshot/` appendix; the six skills that restated a wrong raw-GitHub URL point at it instead.
+- `validate-and-fix` triages known schema↔runtime gaps before proposing edits; `reviewer` lists runtime-acceptance blockers (state-level `subFlow.type "P"`, task 22/23, duplicate function task keys, wire operator names, `x-indexed` off-master, `longPoll` without `roles`|`rule`, non-lowercase `grant`).
+- `templates/etc/dapr/config.yaml.tmpl` aligned with the runtime's local Dapr config (`mdns` name resolution, `otel:` tracing to `otel-collector:4317` instead of zipkin).
+- `function-mapping-pattern.md` § 9 covers the function list/catalog/info endpoints, error codes 800001–800005, and the multi-task `TaskResponse` isolation + duplicate-key publish rejection (0.0.95).
+- `plugin.json` version 0.2.0 (release branch `release-v0.2`; the pre-existing `v0.1.0` tag blocks 0.1.x).
+
+### Removed
+
+- `templates/csx-contracts.md`, `templates/function-mapping-pattern.md`, `templates/mocklab-seed-format.md`, `templates/view-author-guide.md` (duplicates of `references/`), `templates/AGENTS.md.tmpl` (derived), the `schemas-snapshot/` appendix in `component-schemas.md`.
+
+### Fixed
+
+- HumanTask described as task type 5; task enum stated as 1–15 / 1–16; `x-filterOperators` examples with wire names; transition endpoint shown as POST in places; `Authorization.Decide` span name (real: `Auth.Decide`); flow-level `authorize` route (does not exist).
+
+## [0.0.6] — 2026-08-12
 
 ### Added
 
@@ -101,7 +147,22 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 - `csx-contracts.md` added to the `/vnext-init` `.claude/references/` copy list (and to
   `templates/`), so user workspaces carry the interface contracts even without the plugin.
 
-- **`/vnext-init` now delegates base scaffolding to the official `@burgan-tech/vnext-template` CLI.**
+## [0.0.5] — 2026-07-21
+
+### Added
+
+- **Security audit workflow** — new `security-audit` skill and `/security-audit` command for
+  OWASP-inspired reviews of secrets, authz, injection, SSRF/path traversal, weak crypto,
+  dependency issues, and configuration risk, with output written to `security-report/SECURITY-REPORT.md`.
+  The audit follows a four-phase pipeline (recon → hunt → verify → report): candidates are
+  checked for reachability, existing mitigations, and test/mock context, confidence-scored
+  (0–100) with severity capped by confidence, and reported with CWE / OWASP Top 10
+  references. The `security-review-checklist.md` reference carries vNext-specific hunt
+  patterns (`roles`/`queryRoles`/`x-roles`, `.csx` `ScriptContext` data flow, `allowedHosts`,
+  `REF`/`allowedAssemblies` supply chain) and false-positive rules; the `security-reviewer`
+  agent follows the same rubric. (Methodology informed by utkusen/sast-skills,
+  mfkocalar/OWASP-Security-Skills, and ersinkoc/security-check.)
+
   When no `vnext.config.json` exists, it runs `npx @burgan-tech/vnext-template <domain>` to create the
   base project (config, `package.json`, component folders) instead of re-implementing it. In an
   existing workspace it skips the CLI and only layers the toolkit's value-add files.
@@ -127,6 +188,8 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 - `templates/tests/*` — the integration test project is now scaffolded by the official
   `VNext.Testing.Template` (`dotnet new vnext-integration-test`).
 
+## [0.0.4] — 2026-06-12
+
 ### Added
 
 - **`.claude-plugin/marketplace.json`** — makes the repo installable as the `burgan-tech`
@@ -136,17 +199,8 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
   the plugin (`claude plugin validate`), auto-increments the patch version, commits the
   bump, tags, and cuts a GitHub Release. Manual `workflow_dispatch` supports an explicit
   version and a dry run.
-- **Security audit workflow** — new `security-audit` skill and `/security-audit` command for
-  OWASP-inspired reviews of secrets, authz, injection, SSRF/path traversal, weak crypto,
-  dependency issues, and configuration risk, with output written to `security-report/SECURITY-REPORT.md`.
-  The audit follows a four-phase pipeline (recon → hunt → verify → report): candidates are
-  checked for reachability, existing mitigations, and test/mock context, confidence-scored
-  (0–100) with severity capped by confidence, and reported with CWE / OWASP Top 10
-  references. The `security-review-checklist.md` reference carries vNext-specific hunt
-  patterns (`roles`/`queryRoles`/`x-roles`, `.csx` `ScriptContext` data flow, `allowedHosts`,
-  `REF`/`allowedAssemblies` supply chain) and false-positive rules; the `security-reviewer`
-  agent follows the same rubric. (Methodology informed by utkusen/sast-skills,
-  mfkocalar/OWASP-Security-Skills, and ersinkoc/security-check.)
+
+## [0.0.3] — 2026-06-04
 
 ### Changed
 
@@ -167,7 +221,9 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
   raw-GitHub-tag fetch chain.
 - Rewrote `README.md` to match the new structure.
 
-## [0.1.0] — initial release
+## [0.0.0] — 2026-06-02 — initial release
+
+> Git tag `v0.1.0`. The version scheme restarted at 0.0.x when the release-branch CI was introduced; `0.1.x` is therefore skipped.
 
 ### Added
 

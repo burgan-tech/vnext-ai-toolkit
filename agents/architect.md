@@ -53,12 +53,20 @@ before writing the output. Pull the option sets from the schema, not from memory
    **BFF API** mode with verbs + schemas only). See
    `references/concepts/function-vs-extension-vs-task.md`. Otherwise pick the workflow
    `type` from `workflow-definition.schema.json` `attributes.type.enum` — typically a
-   top-level user flow, a reusable sub-procedure, or parallel background work. Note any
-   child workflow keys for sub-flows / sub-processes.
+   top-level user flow (`F`), a reusable sub-procedure (`S`, started from a `stateType: 4`
+   state) or an independent child process (`P`, started **only** via a `SubProcessTask`
+   type 14 — a state-level `subFlow.type: "P"` is rejected at publish since 0.0.95). Note
+   any child workflow keys. Check the workspace `runtimeVersion` against
+   `references/runtime-feature-matrix.md` before relying on anything newer.
 2. **States.** Lay out the state list. For each state: its key (kebab-case), its state
    kind (from the schema's `stateType` enum — exactly one initial state, the rest
    intermediate/final/wizard as appropriate), and whether it shows the user a view
-   (input form vs. read-only summary).
+   (input form vs. read-only summary). Mark **human steps** (approval, review) as
+   `subType: 6` states with `queryRoles` and a `humanTask: {title, description}` write on
+   entry (`references/concepts/human-task.md`); mark states where the engine must wait for
+   a client to render before continuing with `interaction.longPoll { terminate: true, … }`
+   (`references/concepts/long-poll-interaction.md`); for `stateType: 4` decide whether the
+   parent needs `subFlow.overrides` (`references/concepts/subflow-overrides.md`).
 3. **Transitions.** For each state, map how it's left: target state and `triggerType`
    (from the schema enum — manual `0`, auto/rule `1`, timer `2`, event `3`). Auto
    transitions must come in **complementary, mutually-exclusive `rule` pairs** (or a
@@ -66,22 +74,29 @@ before writing the output. Pull the option sets from the schema, not from memory
    `ITimerMapping` `.csx` (there is no cron string). `triggerType` 1/2 transitions carry
    `view: null`. Factor in the **admission model (v0.0.79+)**: normal shared/state
    transitions 409 while the instance is Busy, `cancel`/`exit` bypass the busy check,
-   and **`updateData` bypasses all lock/busy checks** (the only way to write data +
-   advance under parallel requests; with an active subflow it updates the parent's data
-   without forwarding) — for parallel branches, fan-in states, and loops, plan an
-   `updateData` definition where concurrent writes are expected
-   (`references/concepts/workflow-types.md` § 3.1).
+   and **`updateData` is admitted unconditionally** (lock-free; `target: "$self"`; trimmed
+   `+Self` pipeline that skips OnExit/OnEntry/timers; with an active subflow it updates
+   the parent's data without forwarding) — for parallel branches, fan-in states, and
+   loops, plan an `updateData` definition where concurrent writes are expected. Autos
+   (order 80) run before timers are armed (order 90). Add `annotations` where the UI needs
+   hints (`ui/priority`, `ui/intent`, …). "Do X for every item of a list" is a **FanOut
+   task** (type 21) on the transition, not an auto loop (`references/concepts/fan-out.md`).
+   Details: `references/concepts/transition-pipeline.md`.
 4. **Start transition.** The initial state's `startTransition`; confirm its `schema`
    normally points at the master payload schema. It carries **no `view`** (`view: null`) — data is
    validated via `schema` only; client-facing input belongs on the initial-state `view`.
 5. **Multi-actor access.** **Always ask the user whether the flow should configure roles at
    all before designing any** — roles add real complexity, especially for vNext newcomers, so
    proceed with role configuration only on explicit user confirmation; default to no roles when
-   the user declines or is unsure. If confirmed, plan `queryRoles[]` (see
-   `references/concepts/roles-and-authorization.md` for role tokens and how `queryRoles` gates
-   the built-in `state`/`view`/`schema`/`data` functions — 403 if not allowed).
+   the user declines or is unsure. If confirmed, plan transition `roles` (+ `availableIn` with
+   roles), state `queryRoles` and, for functions, `roles` — knowing that since 0.0.95 the runtime
+   only **filters visibility** by them and the **`authorize` function** (called by the gateway) is
+   the single enforcement point; human states *must* have `queryRoles` or they are hidden from
+   the human-task list (`references/concepts/roles-and-authorization.md`).
 6. **Supporting components.** For each transition's `onExecutionTasks[]`, choose the task
-   `type` + `config`; extract reusable logic into a Function. Decide which states/
+   `type` + `config` from `references/concepts/task-types.md` (which types run in-process on
+   Orchestration, which are deprecated/experimental, schema ceiling 1–21); extract reusable logic
+   into a Function. Decide which states/
    transitions need Views, which Schemas are needed (master + per-transition payloads),
    and whether instance-read enrichment needs an Extension. Use
    `references/concepts/function-vs-extension-vs-task.md` to pick the right component.
