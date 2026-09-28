@@ -22,9 +22,14 @@ Scan areas:
   untrusted origins?
 - Exposure: is `exports.visibility` or the exported component set broader than the
   change needs (leaking internal components cross-domain)?
-- Authorization: do transition `roles`, state/flow `queryRoles`, and schema
-  `x-roles` still enforce the intended actor model, or does the change widen access
-  (including IDOR-style instance access via functions)?
+- Authorization: do transition `roles` (+ `availableIn[].roles`), state/flow `queryRoles`,
+  function `roles`, `interaction.longPoll.roles|rule`, `subFlow.overrides.*` and schema
+  `x-roles` still express the intended actor model, or does the change widen access
+  (including IDOR-style instance access via functions)? Remember the 0.0.95 model: the
+  runtime only *filters visibility*; enforcement is the gateway's `authorize` call — flag any
+  design that assumes an in-process 403 on built-in reads, a human state without
+  `queryRoles`, or `grant` values that are not lowercase
+  (`references/concepts/roles-and-authorization.md`).
 - Task / function / extension config: do `type`/`scope` settings or task mappings
   grant more capability than required, or reference untrusted code/endpoints? Do
   task URLs or `.csx` outbound calls take their destination from instance data (SSRF)?

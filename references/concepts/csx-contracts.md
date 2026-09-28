@@ -375,6 +375,44 @@ public class MySubProcessMapping : ScriptBase, ISubProcessMapping
 }
 ```
 
+### `IFanOutMapping` — per-item binding for a FanOut task (type 21, v0.0.85+)
+
+Attached on the **workflow's task binding** (`onEntries[]` / `onExecutionTasks[]` `mapping`), never on the type-21 component itself. Only `ItemInputHandler` is abstract; the other two members carry defaults whose `null` return means "use the runtime behaviour" (`itemsPath` / default output packaging). Full guide: `fan-out.md`.
+
+```csharp
+public interface IFanOutMapping
+{
+    Task<IEnumerable<dynamic>?> ItemSelector(ScriptContext context)                                   // optional; null → itemsPath. XOR with itemsPath
+        => Task.FromResult<IEnumerable<dynamic>?>(null);
+    Task<ScriptResponse> ItemInputHandler(WorkflowTask task, ScriptContext context, FanOutItem item);   // REQUIRED, once per item, in parallel
+    Task<ScriptResponse?> OutputHandler(ScriptContext context, FanOutResult result)                     // optional; null → default {resultKey, resultKeySummary}
+        => Task.FromResult<ScriptResponse?>(null);
+}
+
+public sealed record FanOutItem(int Index, dynamic? Value, string ItemKey);   // ItemKey: item.id → item.key → index
+public sealed record FanOutResult(int Total, int Succeeded, int Failed, bool TimedOut, IReadOnlyList<FanOutItemResult> Items);
+public sealed record FanOutItemResult(int Index, string ItemKey, bool IsSuccess, dynamic? Data, string? ErrorCode, string? ErrorMessage, TimeSpan Duration);
+```
+
+```csharp
+public class MyFanOutMapping : ScriptBase, IFanOutMapping
+{
+    public Task<ScriptResponse> ItemInputHandler(WorkflowTask task, ScriptContext context, FanOutItem item)
+    {
+        // Mutate the CLONED inner task for this item; item.Value is the usual ExpandoObject model.
+        if (task is HttpTask http)
+            http.SetUrl($"{http.Url}?id={Uri.EscapeDataString(item.ItemKey)}");
+        return Task.FromResult(new ScriptResponse());   // audit only — the executor discards it
+    }
+}
+```
+
+Semantics you must not get wrong:
+
+- **`ItemInputHandler` mutates the cloned inner task; its return value is audit-only.** Nothing it returns reaches instance data.
+- **Per item = pure.** It runs N times concurrently on discarded branch contexts. No instance-data writes, no shared mutable state across items.
+- **`OutputHandler` is the single write point** of the whole batch — its `Data` is merged once. `result.Items` is a typed list (plain LINQ), not a dynamic — the `List*` helpers are for `item.Value` / `Data`, not for `Items`.
+
 ### `INotificationMapping` — per-channel notification payload
 
 > The method is named **`ChannelHandler`**, not `Handler`. The `state` channel never reaches this interface — the platform handles it; implement `IStateNotificationMapping` (in the same file) to enrich it.
@@ -462,7 +500,7 @@ if (task is HttpTask httpTask)
 }
 ```
 
-Common concrete types: `HttpTask`, `ScriptTask`, `NotificationTask`, `SoapTask`, `DaprServiceTask`, `DaprPubSubTask`, `GetInstancesTask`.
+Common concrete types: `HttpTask`, `ScriptTask`, `NotificationTask`, `SoapTask`, `DaprServiceTask`, `DaprPubSubTask`, `GetInstancesTask`, `GetInstanceTask`, `StateStoreTask`, `CacheAsideTask` (`SetCacheKey`), `DaprConversationTask`, `FanOutTask` (its per-item binding is `IFanOutMapping`, not `IMapping`). Catalog: `task-types.md`.
 
 ## Function envelope: `rawResponse`
 
@@ -502,6 +540,26 @@ See `references/concepts/mappings-and-scripts.md`.
 > A reusable *mapping* (vs a static helper) may implement a mapping interface — the example
 > `initial-mapping` uses **`ITransitionMapping`** (`Handler(ScriptContext)` → `dynamic`).
 
+## Runtime notes that bite scripts (v0.0.81 – v0.0.87)
+
+### Numeric precision — carry money as strings (PR #907, 0.0.85)
+
+Instance-data appends reformat every number through int/double: integers above **2^53** and decimals beyond **~15 significant digits** lose precision on write (vnext-meta known issue `instance-data-numeric-precision-loss`). The lossless path is **opt-in**:
+
+```json
+{ "WorkflowExecution": { "InstanceDataWrite": { "PreserveNumericPrecision": true } } }
+```
+
+Default **`false`** — flipping it changes affected instances' content hash once, so operators decide. Author-side rule until your environment enables it: **serialize money, IBAN-like numerics and 64-bit ids as strings** in `ScriptResponse.Data`, and parse with `decimal.Parse` when you need arithmetic. The same release pinned four behaviours as deliberate (vnext-meta migrations `script-context-shared-tree-visibility`, `script-context-setbody-preserves-expando-keys`, `parallel-merge-conflict-order-insensitive`, `script-body-cycles-throw-instead-of-being-dropped`): mutations are visible within the transition, `SetBody` keeps expando keys, parallel-merge conflicts resolve order-insensitively, and a **cyclic expando now throws** instead of being pruned.
+
+### Secret cache — 30 s staleness is the contract (PR #899, 0.0.85)
+
+`GetSecret*` / `GetSecrets*` read through an in-process `ScriptSecretCache` keyed by `(storeName, secretStore)`: `Scripting:SecretCache` `{ Enabled: true, TtlSeconds: 30 }`. A rotated secret keeps returning the **old value for up to `TtlSeconds` per replica**; misses still block on the sync wrappers, so miss-heavy scripts should prefer `GetSecretAsync`. Never `IDistributedCache` — secret material does not transit Redis.
+
+### `using` directives — pre-0.0.87 runtimes dropped yours (PR #888 / #920)
+
+Before **v0.0.87** the compiler replaced the script's using list with the platform list, so an author's `using System.Text;` was silently discarded and `StringBuilder` failed at **runtime** with `CS0246` — despite the import being right there. Since 0.0.87 author usings are **merged** (aliases and `using static` included). Two rules still hold on every version: the default usings are `System`, `System.Collections.Generic`, `System.Linq`, `System.Threading.Tasks`, `System.Text.Json`; anything from an assembly outside the default reference set needs `scripts.allowedAssemblies` regardless of the `using`. A `CS0246` for a namespace you clearly imported on a workspace pinned below 0.0.87 is this bug, not your code.
+
 ## Class naming
 
 - File name: `kebab-case.csx`
@@ -511,10 +569,12 @@ See `references/concepts/mappings-and-scripts.md`.
 
 ## Sources
 
-- Runtime source of truth: `BBT.Workflow.Domain/Scripting/Models.cs` (ScriptContext), `Scripting/Contracts/*.cs` (interfaces), `BBT.Workflow.Modules.Scripting/.../ScriptBase.cs` (helpers), `Scripting/Related/*.cs` (Related API)
+- Runtime source of truth: `BBT.Workflow.Domain/Scripting/Models.cs` (ScriptContext), `Scripting/Contracts/*.cs` (interfaces, incl. `IFanOutMapping.cs`), `BBT.Workflow.Modules.Scripting/.../ScriptBase.cs` (helpers), `Scripting/Related/*.cs` (Related API), `Modules.Scripting/.../Evaluators/CSharpEvaluator.cs` (using-merge), `Modules.Scripting/.../Functions/SecretCacheOptions.cs`, `Application/BackgroundJobs/Options/WorkflowExecutionOptions.cs` (`PreserveNumericPrecision`)
+- Release notes: vnext-docs `blog/2026-08-20-v0-0-81-84.md` (#888), `blog/2026-08-24-v0-0-85.md` (#899, #905, #907), `blog/2026-08-31-v0-0-87.md` (#920); vnext-meta known issue `instance-data-numeric-precision-loss`, feature `scriptSecretCache` (0.0.80)
 - Working examples:
   - `vnext-example/core/Workflows/payments/src/SendPaymentNotificationSmsMapping.csx` — IMapping
   - `vnext-example/core/Workflows/payments/src/PaymentSuccessRule.csx` — IConditionMapping
   - `vnext-example/core/Workflows/payments/src/PaymentDueTimerRule.csx` — ITimerMapping
   - `vnext-example/core/Workflows/payments/src/PaymentProcessMapping.csx` — ISubFlowMapping
   - `vnext-example/core/Functions/account-opening/src/GetBranchDetailLookupMapping.csx` — IMapping + ScriptBase
+  - `vnext-example/core/Workflows/fan-out-documents/src/FanOutDocumentsMapping.csx` — IFanOutMapping (item binding only, default output)

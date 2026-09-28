@@ -23,9 +23,10 @@ whole-instance enrichment. See `references/concepts/function-vs-extension-vs-tas
 
 ```
 1. Read vnext.config.json → schemaVersion + domain + paths.extensions
-2. Fetch https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/extension.json
-   ├─ Fail → master → references/concepts/component-schemas.md snapshot
-   └─ No snapshot → halt; never guess.
+2. Load the extension schema from the pinned package:
+   node_modules/@burgan-tech/vnext-schema/schemas/extension-definition.schema.json
+   (missing → `npm install`; version/fallback rules → references/concepts/component-schemas.md;
+   never guess field names from memory)
 3. Parse:
    - properties.attributes.properties.type.enum (typical: 1 Global, 2 GlobalAndRequested, 3 DefinedFlows, 4 DefinedFlowAndRequested)
    - properties.attributes.properties.scope.enum (typical: 1 GetInstance, 2 GetAllInstances, 3 Everywhere)
@@ -49,6 +50,10 @@ Ask:
 - **What does this extension add?** (One sentence — e.g. "Attach the customer profile to every instance read")
 - **Does it apply to every workflow, or only specific ones?** (Drives `type` 1/2 vs 3/4.)
 - **Should it fire on single-instance reads, list queries, or everywhere?** (Drives `scope` 1/2/3.)
+  Note: since 0.0.93 extensions run on **read surfaces only** (instance GET, list, the `data`
+  function, the extensions endpoint). Sync start/transition responses always return `extensions: {}`
+  and `?extensions=` on start is ignored — anyone who needs the enriched value must read it back
+  (`references/concepts/transition-pipeline.md`).
 
 ### 3. Choose type (from schema)
 

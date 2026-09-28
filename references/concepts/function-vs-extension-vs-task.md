@@ -29,12 +29,13 @@ Three vNext components all run code, but their roles are distinct. Picking the w
 - Single-task function: one `task` field with `mapping` (single `IMapping` `.csx`)
 - Multi-task function: `onExecutionTasks[]` (multiple tasks) + `output` (an `IOutputHandler` `.csx` that aggregates results)
 
-**Client contract fields** (post-v0.0.79 runtimes; see `references/function-mapping-pattern.md` § 9):
+**Client contract fields** (runtime ≥ 0.0.79 for verbs/schemas/views and `/info`; `catalog` + `functions.href` in the state response later; multi-task slot isolation 0.0.95 — see `references/function-mapping-pattern.md` § 9):
 - `verbs` — accepted HTTP verbs (absent = all; mismatch → 405 + `Allow`)
 - `inputSchema` — request body validated before tasks run (failure → 400); `outputSchema` — declarative only
 - `inputView` / `outputView` — the views a client renders to collect input / present output; all four slots accept a single reference or rule-based entries (first match wins, rule-less tail = fallback)
 - `rawResponse`, `cache`, `roles` (DENY overrides ALLOW)
-- Discovery: `GET .../functions/{fn}/info` (+ `view`/`schema?target=input|output`) answers "may I run this, with which verb, which view/schema applies" — 403 for unauthorized callers.
+- Discovery: `GET .../functions/{fn}/info` (+ `view`/`schema?target=input|output`) answers "may I run this, with which verb, which view/schema applies" — 403 for unauthorized callers; `GET …/instances/{id}/functions/catalog` lists the role-filtered functions of an instance's workflow (`{name, version, scope, href}`); no ETag on any of them.
+- Multi-task: results land in `TaskResponse[ToVariableName(key)]` (isolated copies since 0.0.95); keys that normalise to the same variable (`user-info` / `user_info`) are **rejected at publish** — § 9.
 
 **Use cases.**
 - LOV/lookup endpoints called by views (`x-lov`, `x-lookup`)
@@ -55,7 +56,7 @@ inline, an extension fits. But for **`x-lov` / `x-lookup`-style inputs** (dropdo
 lookups), use a **Function** — those are request-time, input-bound resolutions, not read-time
 enrichment of the whole instance.
 
-**Type × Scope matrix** (from the `extension.json` schema):
+**Type × Scope matrix** (from `extension-definition.schema.json`):
 
 | Type | Behavior |
 |------|----------|
@@ -81,26 +82,20 @@ enrichment of the whole instance.
 
 **Role.** A discrete action invoked inside a workflow — typically inside a transition's `onExecutionTasks[]`, a state's `onEntries[]` / `onExits[]`, or a function's task list.
 
-**Type values** (numeric — read the canonical `task.json` schema; baseline mapping):
+**Most-used types** (`attributes.type` is a numeric **string**; the schema enum is `"1"`–`"21"`, the runtime knows 1–23 — see `schema-runtime-gaps.md` D1):
 
 | Value | Type | Purpose |
 |-------|------|---------|
-| `1`  | DaprHttpEndpoint | Dapr HTTP endpoint invocation |
-| `2`  | DaprBinding | Dapr input/output binding |
-| `3`  | DaprService | Dapr service-to-service call |
-| `4`  | DaprPubSub | Publish to a Dapr topic |
-| `5`  | HumanTask | Human-in-the-loop (manual step) |
-| `6`  | HttpTask | Plain HTTP/REST call |
-| `7`  | ScriptTask | Inline C# script |
-| `8`  | ConditionTask | Branch decision (verify in schema) |
-| `9`  | TimerTask | Scheduling/delay (verify in schema) |
-| `10` | NotificationTask | Multi-channel notification (SMS, email, push) |
-| `11` | StartFlowTask | Start a new workflow instance |
-| `12` | TriggerTransitionTask | Fire a transition on another instance |
-| `13` | GetInstanceDataTask | Fetch a single instance's data |
-| `14` | SubProcessTask | Execute a SubProcess |
-| `15` | GetInstancesTask | List/query instances |
-| `16` | SoapTask | SOAP 1.1/1.2 call |
+| `6`  | HttpTask | Plain HTTP/REST call. Runs orchestrator-local by default since 0.0.94 (`Workflow:TaskInvocation`) — also the replacement for deprecated type 22 |
+| `7`  | ScriptTask | Inline C# (`IMapping`) — pure logic, no external call |
+| `10` | NotificationTask | Multi-channel notification (SMS, email, push) + `INotificationMapping` |
+| `12` | DirectTrigger | Fire a transition on another instance (cross-instance / cross-domain) |
+| `14` | SubProcessTask | Start a fire-and-forget child (`P`) and create the correlation — the **only** way to start a SubProcess (state-level `subFlow.type: "P"` is rejected at publish since 0.0.95) |
+| `15` | GetInstancesTask | List/query instances (filters, paging) |
+| `18` | CacheAsideTask | Read-through cache around an inner task |
+| `21` | FanOutTask | Run one inner task once per item of a data-driven collection, in parallel, with a join policy (`all` / `allSettled` / `quorum` / `firstSuccess`) — `IFanOutMapping` |
+
+Full catalog including Dapr types (1–4), Condition/Timer (8/9), StartTrigger (11), GetInstanceData (13), Soap (16), StateStore (17), GetInstance (19), DaprConversation (20), ExternalHttp (22, deprecated) and Python (23), plus which types run Local vs Remote: **`task-types.md`**. A **human approval step is not a task** — it is a state with `subType: 6` + `queryRoles` served by the built-in `human-task` function: **`human-task.md`**.
 
 **Use cases (by type).**
 - External REST API → HttpTask (6)
@@ -109,6 +104,8 @@ enrichment of the whole instance.
 - Async messaging → DaprPubSub (4)
 - Notification → NotificationTask (10) + `INotificationMapping`
 - Pure C# logic with no external call → ScriptTask (7)
+- Same call for every element of a list (documents, accounts, recipients) → FanOutTask (21) — `fan-out.md`
+- Independent background child process → SubProcessTask (14) — `workflow-types.md` §5
 
 ## Boundary cases & rules of thumb
 
@@ -116,9 +113,14 @@ enrichment of the whole instance.
 - **"Should this be an Extension or a Function?"** If it should run automatically on every read → Extension. If it should run only when the client asks → Function.
 - **"Should this be a Task or a Function?"** If it's reused across multiple workflows → consider a Function (then call it from tasks if needed). If it's specific to one workflow's logic → Task.
 - **Functions can be composed of Tasks.** A multi-task Function pipelines several Tasks and aggregates via `IOutputHandler`. This is how complex aggregations are built without bloating a workflow's transition logic.
+- **"One call per item of a list?"** That is a **FanOutTask (21)** wrapping the per-item task — not a loop of transitions, not N tasks in `onExecutionTasks`. The join policy decides success; branch on the `{resultKey}Summary` counters with auto transitions. Nested fan-out is rejected at runtime.
+- **"Start a child that the parent does not wait for?"** A **SubProcessTask (14)** on a transition. A state-level `subFlow` is always `type: "S"` (blocking SubFlow); `"P"` there is a publish-time error since 0.0.95.
+- **Function catalog and key collisions.** Clients find a workflow's functions through `…/functions/catalog` (role-filtered); a multi-task function's task keys must stay distinct after `ToVariableName` normalisation or publish fails — `function-mapping-pattern.md` § 9.
 
 ## Sources
 
-- Canonical schemas: `function.json`, `extension.json`, `task.json` at `vnext-schema/v{schemaVersion}/schemas/`
+- Canonical schemas: `function-definition.schema.json`, `extension-definition.schema.json`, `task-definition.schema.json` — resolve as described in `component-schemas.md`
+- Runtime: `src/BBT.Workflow.Domain/Definitions/Tasks/TaskEnums.cs` (v0.0.97), `WorkflowValidator.ValidateStateSubFlowType`, `FunctionComponentValidator.ValidateTaskKeysDistinct`
+- Related references: `task-types.md`, `fan-out.md`, `human-task.md`, `schema-runtime-gaps.md`
 - Docs: `https://burgan-tech.github.io/vnext-docs/docs/components/{functions/index|extension|tasks/index}`
 - Examples: `vnext-example/core/Functions/`, `core/Extensions/`, `core/Tasks/`

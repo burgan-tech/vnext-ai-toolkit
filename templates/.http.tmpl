@@ -1,15 +1,20 @@
 ### vNext Runtime API — {{workflowKey}}
 ### REST Client (.http) — for manual exploration. The xUnit integration tests are CI's source of truth.
+### Endpoint contracts: .claude/references/state-function-response.md, incidents-and-retry.md,
+### instance-query.md, human-task.md, long-poll-interaction.md, roles-and-authorization.md.
 
 @baseUrl = http://localhost:4201
 @apiVersion = 1
 @domain = {{domain}}
 @workflowKey = {{workflowKey}}
+# Caller identity for a local runtime without a gateway (CallerRoleProvider default → `role` header)
+@role = tester
 
-### Start a new instance
+### Start a new instance (sync → response carries metadata.effectiveStatus)
 # @name start
-POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/start
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/start?sync=true
 Content-Type: application/json
+role: {{role}}
 
 {
   /* Initial payload — match the workflow's master schema required fields */
@@ -18,28 +23,91 @@ Content-Type: application/json
 ###
 @instanceId = {{start.response.body.$.id}}
 
-### Get current state (long-poll for view + data)
+### Get current state (poll: server answers immediately with 200 or 304; role-filtered transitions[])
+# @name state
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/state
+role: {{role}}
 
-### Execute a manual transition
-PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{transition-key}
+### Same, conditional — expect 304 while nothing in the ETag material changed
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/state
+role: {{role}}
+If-None-Match: {{state.response.headers.ETag}}
+
+### Execute a manual transition (PATCH; 409 Instance:100031 while the instance is Busy)
+PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{transition-key}?sync=true
 Content-Type: application/json
+role: {{role}}
 
 {
   /* Transition payload — match the transition's input schema */
 }
 
-### Call a function on this instance
+### updateData (configured key; admitted unconditionally, delta-only payload, target $self)
+PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{update-data-key}
+Content-Type: application/json
+role: {{role}}
+
+{
+  /* only the fields that change */
+}
+
+### Cancel / exit (bypass the busy check)
+PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{cancel-key}
+role: {{role}}
+
+### Acknowledge a long-poll termination (state body carried interaction.ack.href)
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/longpoll/ack
+role: {{role}}
+
+### Authorize probe — what the gateway asks before forwarding (exactly one selector)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/authorize?transitionKey={transition-key}
+role: {{role}}
+
+### Authorize — may this caller read the instance (queryRoles chain)?
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/authorize?queryRoles=true
+role: {{role}}
+
+### Instance data / master schema
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/data
+role: {{role}}
+
+### Function catalog for this instance (role-filtered, hrefs → /info)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/catalog
+role: {{role}}
+
+### Function contract discovery
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/functions/{function-key}/info
+###
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/functions/{function-key}/view?target=input
+###
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/functions/{function-key}/schema?target=input
+
+### Call a function on this instance (verbs[] mismatch → 405 + Allow)
 POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/{function-key}
 Content-Type: application/json
+role: {{role}}
 
 {}
 
-### Retry a failed transition
-POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/retry
+### Task / action history (metadata only)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/tasks
+###
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/actions?taskId={task-id}
 
-### Query instances (list)
-GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances?state={state-key}
+### Incidents — active (404 Instance:100037 = none) and history
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/incidents/active
+###
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/incidents?page=1&pageSize=20
+
+### Retry a Faulted instance (400 Instance:100027 otherwise)
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/retry?sync=true
+
+### Human-task inbox for this domain (leaf state subType 6, authorised by its queryRoles)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/functions/human-task
+role: {{role}}
+
+### Query instances — filter uses WIRE operator names; sort is JSON; instanceType/effectiveStatus are columns
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances?filter={"and":[{"status":{"eq":"A"}},{"attributes":{"amount":{"ge":1000}}}]}&sort={"field":"createdAt","direction":"desc"}&page=1&pageSize=20
 
 ### List all instances
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances

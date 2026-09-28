@@ -18,9 +18,10 @@ End-to-end scaffolding for a new vNext workflow. A workflow is a state machine �
 
 ```
 1. Read vnext.config.json → schemaVersion + domain + paths.workflows + runtimeVersion
-2. Fetch https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/workflow.json
-   ├─ Fail → master → references/concepts/component-schemas.md snapshot
-   └─ No snapshot → halt; never guess.
+2. Load the workflow schema from the pinned package:
+   node_modules/@burgan-tech/vnext-schema/schemas/workflow-definition.schema.json
+   (missing → `npm install`; version/fallback rules → references/concepts/component-schemas.md;
+   never guess field names from memory)
 3. Parse:
    - properties.attributes.properties.type.enum → workflow type options
    - properties.attributes.properties.states.items.properties.stateType.enum → state kinds
@@ -47,13 +48,13 @@ Target folder: `{componentsRoot}/{paths.workflows}/{workflow-key}/`. Inside it: 
 
 `attributes.type` values (rendered from `workflow.json` schema enum — typical set):
 - **`F`** — Flow (standard top-level user-facing flow)
-- **`S`** — Subflow (started from a parent workflow)
-- **`P`** — Process (background / long-running)
+- **`S`** — SubFlow (started from a parent's state via `stateType: 4` + `subFlow`; result merges into the parent)
+- **`P`** — SubProcess (independent child; started **only** through a `SubProcessTask` (type 14) — a state-level `subFlow.type: "P"` is rejected at publish since 0.0.95)
 - **`C`** — Core (system-level)
 
 Verify the current set against Context7 (`"workflow attributes type values"`) if the user's case doesn't fit cleanly.
 
-**Roles gate (mandatory question).** Before designing any state or transition, **ask the user whether this flow should configure roles (`queryRoles`/`roles`) at all** — via `AskUserQuestion`, with "no roles" as the Recommended default. Roles add real complexity, especially for vNext newcomers; never add role configuration without explicit user confirmation. If confirmed, follow `references/concepts/roles-and-authorization.md`.
+**Roles gate (mandatory question).** Before designing any state or transition, **ask the user whether this flow should configure roles (`queryRoles`/`roles`) at all** — via `AskUserQuestion`, with "no roles" as the Recommended default. Roles add real complexity, especially for vNext newcomers; never add role configuration without explicit user confirmation. If confirmed, follow `references/concepts/roles-and-authorization.md` — and remember the 0.0.95 model: the runtime only *filters visibility* by roles; the **`authorize` function** (called by the gateway) is the single enforcement point, so a local runtime without a gateway will not 403 on reads.
 
 ### 3. Map the states
 
@@ -64,6 +65,21 @@ Walk through the flow with the user. For each state capture:
 - **Is it final?** (`isFinal: true` ends the instance)
 - **Has a view?** (if yes, note the view key — will resolve in step 6)
 - **`onEntry` tasks?** (anything that must run when entering the state)
+- **Is a person expected to act here (approval, review, manual step)?** If yes → **human task state**:
+  `subType: 6`, a `queryRoles` list (mandatory — with no `queryRoles` anywhere the task is *hidden*
+  from the `human-task` list, fail-closed), and the entering transition's mapping (or an `onEntry`
+  task) must write `humanTask: { title, description }` at the instance-data root. Details and the
+  `GET /{domain}/functions/human-task` contract: `references/concepts/human-task.md`.
+- **Does the engine have to pause until a specific client has rendered this state?** (e.g. a
+  result screen on mobile before an auto transition continues) → `interaction.longPoll`
+  `{ terminate: true, fallbackTimeoutSeconds, roles | rule }` — exactly one of `roles`/`rule` is
+  required by the schema (write `"roles": []` for "everyone"). Keep the fallback short (5–10 s) when
+  other clients wait on the instance. Never put a `rule` on a long-lived human state (it disables the
+  shared body cache). `references/concepts/long-poll-interaction.md`.
+- **SubFlow state (`stateType: 4`)?** Ask whether the parent must adjust the child's
+  `timeout`, transition `roles`/`views`, or state `queryRoles`/`interaction.longPoll`/`views` →
+  `subFlow.overrides` (`references/concepts/subflow-overrides.md`; the old `viewOverrides` /
+  `views`-by-key forms are deprecated since 0.0.95).
 
 **Initial state input pattern** — if the Initial state needs user input before anything happens, **propose placing the form on `state.view`** (not on the outgoing transition) and confirm with the user via `AskUserQuestion`. Reason: the runtime serves the state view immediately on instance start; the user fills it and submits via a `view: null` transition. The reverse (form on transition) forces an extra discovery step with no UX benefit. Make state-view the Recommended option; only switch if the user wants an intentional "intro screen → tap → form" two-step. See `references/concepts/workflow-types.md` for the pattern note.
 
@@ -71,12 +87,22 @@ Visualize back to the user as a list before moving on.
 
 ### 4. Map the transitions
 
-**Locking awareness (v0.0.79+).** Normal shared/state transitions **409 while the instance is Busy**
-(another execution in flight); `cancel`/`exit` bypass the busy check; **`updateData` bypasses all
-lock/busy checks** and is the only way to write data + advance under parallel requests (with an
-active subflow it updates the PARENT's data and does not forward). If the flow has parallel branches,
-fan-in states, loops, or clients that push data concurrently, ask whether an `updateData` definition
-is needed and design around the 409 behavior. Details: `references/concepts/workflow-types.md` § 3.1.
+**Admission & `updateData` (v0.0.79+ Busy-as-mutex, refined through 0.0.86).** Normal shared/state
+transitions **409 (`Instance:100031`) while the instance is Busy**; `cancel`/`exit`/timeout bypass
+the busy check; **`updateData` is admitted unconditionally** (no lock, no duplicate guard — N parallel
+calls are all accepted) and is the only way to write data + advance under parallel requests. On a
+plain instance it runs a trimmed `+Self` pipeline (OnExit/OnEntry/timer scheduling are **skipped**);
+with an active SubFlow the **parent** stores the data and does **not** forward or run tasks/autos.
+Its `target` must be `"$self"`. Mappings must return **deltas only**. If the flow has parallel
+branches, fan-in states, loops, or clients that push data concurrently, ask whether an `updateData`
+definition is needed. Auto transitions (order 80) are evaluated **before** timers are armed (order
+90, since 0.0.90) — a state passed through by an auto never schedules its timers. Details:
+`references/concepts/transition-pipeline.md`.
+
+**Annotations.** Any transition (state, shared, `cancel`, `exit`, `updateData`) and the workflow
+`timeout` may carry `annotations: { "<ns>/<key>": "<string>" }` (e.g. `ui/priority`, `ui/intent`,
+`ui/visibility-channel`); they are passed through verbatim to the state function's `transitions[]`
+and `timeout` blocks. Ask the UI team whether they need any — `startTransition` cannot carry them.
 
 For each transition capture:
 
@@ -84,7 +110,8 @@ For each transition capture:
 - **`triggerType`**: `0` (manual / user action), `1` (auto / condition-evaluated), `2` (timer), `3` (event)
 - **For auto transitions**: confirm complementary pair (mutually exclusive `rule` conditions) — a lone conditional auto transition is invalid; if there's only one, it must be unconditional.
 - **For timer**: `duration` (ISO 8601, e.g. `PT15M`)
-- **`onExecutionTasks`**: which tasks run during the transition, and which `.csx` mapping shapes each task's input/output
+- **`onExecutionTasks`**: which tasks run during the transition, and which `.csx` mapping shapes each task's input/output. Parallel tasks at the same `order` must be **distinct task definitions** (the journal key is transition+task+order). "Do X for each item in a list" → a **FanOut task** (type 21), not an auto loop — `references/concepts/fan-out.md`.
+- **`annotations`** (optional, see above)
 
 ### 5. Identify the start transition
 
@@ -108,7 +135,7 @@ For each `onExecutionTasks` entry that needs input/output mapping:
 
 Read one existing workflow in this repo for envelope and reference style (e.g. `core/Workflows/account-opening/account-opening-workflow.json`). Especially confirm:
 - Cross-component reference shape
-- `timeout` structure
+- `timeout` structure (`{ key, target, versionStrategy, timer: { reset, duration }, annotations? }` — `timer.reset` is required by the schema but not read by the runtime)
 - `onExecutionTasks` ordering
 
 ### 9. Generate the workflow JSON
@@ -125,7 +152,11 @@ Envelope:
   "tags": [],
   "attributes": {
     "type": "F",
-    "timeout": { "key": "timeout", "target": "{state}", "duration": "PT15M" },
+    "timeout": {
+      "key": "timeout", "target": "{final-or-expired-state}", "versionStrategy": "None",
+      "timer": { "reset": "N", "duration": "PT15M" },
+      "annotations": { "ui/countdown": "root-deadline" }
+    },
     "startTransition": { /* from step 5 */ },
     "states": [ /* from step 3, with transitions from step 4 */ ]
   }

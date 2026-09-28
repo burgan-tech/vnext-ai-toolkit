@@ -206,6 +206,105 @@ Content-Type: application/json
 { "accountType": "savings" }
 ```
 
+## Surfaces added in 0.0.80–0.0.97 worth asserting
+
+Runtime v0.0.97 exposes several read surfaces that make lifecycle tests deterministic. Endpoints
+without a dedicated SDK method go through `GetRawAsync(path)`; paths are `BasePath`-relative
+(`/api/v1/{domain}/workflows/{wf}/instances/{id}/…` on a plain local runtime). Snippets below are
+xUnit-style pseudo-code — verify method names against the SDK when it disagrees. Details:
+`runtime-operations.md`, `observability.md`, `incidents-and-retry.md`, `human-task.md`.
+
+| Surface | Path | Assert |
+|---|---|---|
+| Effective status / type | `GET …/instances/{id}` → `metadata.effectiveStatus`, `metadata.type` | Poll `effectiveStatus` (deepest active SubFlow), not `status` — a parent stays `B` for its child's lifetime |
+| State ETag / 304 | `GET …/functions/state` with `If-None-Match` | `304`, empty body; `ETag` ≠ `X-Entity-ETag` |
+| Busy admission | second `RunTransitionAsync` while Busy | `409`, `ProblemDetails.errorCode == "Instance:100031"` |
+| Incidents | `GET …/incidents`, `…/incidents/active` | `errorLayer`, `errorCode`, `traceId`; `404 Instance:100037` when none |
+| Retry | `RetryInstanceAsync` | `200`; `status` `"F"` = faulted again, else incidents closed |
+| Long-poll ack | `POST …/longpoll/ack` after `interaction` appears | `200`; instance leaves Busy |
+| Human-task list | `GET /{domain}/functions/human-task` | Items filtered by caller roles (`queryRoles` fail-closed) |
+| Function catalog / info | `GET …/functions/catalog`, `/{domain}/functions/{fn}/info` | `functions[].href`, `verbs[]`, `inputSchema` |
+| Task journal | `GET …/functions/tasks`, `…/functions/actions?taskId=` | Executed task keys, outcomes |
+| Filter + sort | `GET …/instances?filter={json}&sort={json}` | `x-filterOperators` names (`eq`, `gte`, `contains`…); `sort={"field":"createdAt","direction":"desc"}` |
+
+```csharp
+// effectiveStatus polling — replaces "sleep then read state"
+static async Task WaitUntilNotBusy(VNextApiClient api, string wf, string id, TimeSpan timeout)
+{
+    var deadline = DateTime.UtcNow + timeout;
+    while (DateTime.UtcNow < deadline)
+    {
+        var r = await api.GetInstanceAsync(wf, id);
+        var eff = r.Body.GetProperty("metadata").GetProperty("effectiveStatus").GetString();
+        if (eff != "B") return;                       // A / C / F — settled
+        await Task.Delay(200);
+    }
+    throw new TimeoutException("instance stayed Busy");
+}
+
+[Fact]
+public async Task Transition_WhileBusy_Returns409_InstanceBusy()
+{
+    var started = await Api.StartInstanceAsync(Workflow, TestDataBuilder.NewAccount());
+    var id = started.Body.GetProperty("id").GetString()!;
+    var slow = Api.RunTransitionAsync(Workflow, id, "slow-step", new { });   // async, holds Busy
+    var second = await Api.RunTransitionAsync(Workflow, id, "slow-step", new { });
+    Assert.Equal(HttpStatusCode.Conflict, second.StatusCode);
+    Assert.Equal("Instance:100031", second.Body.GetProperty("errorCode").GetString());
+    await slow;
+}
+
+[Fact]
+public async Task State_WithIfNoneMatch_Returns304()
+{
+    var first = await Api.GetRawAsync($"/api/v1/{Domain}/workflows/{Workflow}/instances/{id}/functions/state");
+    var etag = first.Headers.GetValues("ETag").First();
+    // GetRawAsync has no header overload — send the conditional GET through the base class
+    // HttpClient (CreateApiClient) or the SDK's conditional-GET helper if one exists.
+    var second = /* GET same path with If-None-Match: {etag} */;
+    Assert.Equal(HttpStatusCode.NotModified, second.StatusCode);
+    Assert.True(string.IsNullOrEmpty(second.RawBody));
+}
+
+[Fact]
+public async Task FaultedInstance_ExposesActiveIncident_AndRetries()
+{
+    // MockLab rule returns 500 for the task → instance faults
+    var incident = await Api.GetRawAsync($"/api/v1/{Domain}/workflows/{Workflow}/instances/{id}/incidents/active");
+    Assert.Equal("Task", incident.Body.GetProperty("errorLayer").GetString());
+    Assert.False(string.IsNullOrEmpty(incident.Body.GetProperty("traceId").GetString()));
+    // fix the MockLab rule, then
+    var retried = await Api.RetryInstanceAsync(Workflow, id);
+    Assert.True(retried.IsSuccessStatusCode);
+    var none = await Api.GetRawAsync($"/api/v1/{Domain}/workflows/{Workflow}/instances/{id}/incidents/active");
+    Assert.Equal(HttpStatusCode.NotFound, none.StatusCode);       // Instance:100037 — resolved
+}
+
+[Fact]
+public async Task HumanTaskList_And_Catalog_AreReadable()
+{
+    var tasks = await Api.GetRawAsync($"/api/v1/{Domain}/functions/human-task");
+    Assert.True(tasks.IsSuccessStatusCode);
+    var catalog = await Api.GetRawAsync($"/api/v1/{Domain}/workflows/{Workflow}/instances/{id}/functions/catalog");
+    Assert.True(catalog.Body.GetProperty("functions").GetArrayLength() > 0);
+    var journal = await Api.GetRawAsync($"/api/v1/{Domain}/workflows/{Workflow}/instances/{id}/functions/tasks");
+    Assert.True(journal.IsSuccessStatusCode);
+}
+
+[Fact]
+public async Task List_FilterAndSort_UsesJsonQuery()
+{
+    var filter = Uri.EscapeDataString("""{"attributes":{"status":{"eq":"active"}}}""");
+    var sort   = Uri.EscapeDataString("""{"field":"createdAt","direction":"desc"}""");
+    var page = await Api.GetRawAsync($"/api/v1/{Domain}/workflows/{Workflow}/instances?filter={filter}&sort={sort}&pageSize=10");
+    Assert.True(page.IsSuccessStatusCode);
+}
+```
+
+Notes: long-poll `ack` is a `POST` with no SDK method — use the base HttpClient; after
+publishing components in `OnAfterEnvironmentReadyAsync`, wait `GenerationMemoSeconds + 2` s (≈ 7 s)
+or call `POST /api/v1/utilities/invalidate` before the first assertion (see `runtime-operations.md`).
+
 ## Skill behavior
 
 `integration-test` skill flow:
@@ -226,3 +325,5 @@ Content-Type: application/json
 - Getting started: `https://github.com/burgan-tech/vnext-integration-test/blob/master/GETTING_STARTED.md`
 - SDK + template source: `https://github.com/burgan-tech/vnext-integration-test`
 - Reference workspace examples: `vnext-example/tests/`
+- Runtime surfaces (0.0.80–0.0.97): `runtime-operations.md`, `observability.md`, `incidents-and-retry.md`,
+  `human-task.md`; runtime `orchestration/BBT.Workflow.Orchestration.HttpApi.Host/Controllers/{Instances/InstanceController,Functions/FunctionController}.cs`

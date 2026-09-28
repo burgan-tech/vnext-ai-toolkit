@@ -14,10 +14,16 @@ description: Use when the user asks to validate components or fix validation err
 ```
 1. Read vnext.config.json → schemaVersion.
 2. For each failing file, identify its component type (from `flow` field: sys-flows / sys-views / sys-mappings / ...).
-3. Fetch the matching schema:
-   https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}.json
+3. Open the matching schema from the pinned package:
+   node_modules/@burgan-tech/vnext-schema/schemas/{componentType}-definition.schema.json
+   (fallback rules → references/concepts/component-schemas.md)
 4. Compare the failing field against the schema clause.
-5. Cite the clause in your fix proposal: "schema v0.0.42 / properties.attributes.required missing 'transitions'".
+5. Cite the clause in your fix proposal: "schema v{schemaVersion} / properties.attributes.required missing 'transitions'".
+6. Before proposing a "fix", check references/concepts/schema-runtime-gaps.md: some validate failures
+   are schema-vs-runtime gaps (task type 22/23, errorBoundary action as string, longPoll without
+   roles/rule, x-indexed outside the master schema) and the right answer is the documented workaround,
+   not a blind edit. Conversely, warn when a file validates but the runtime will reject it at publish
+   (state-level subFlow.type "P", duplicate function task keys).
 ```
 
 This is what makes proposals precise instead of speculative. See `references/concepts/component-schemas.md`.

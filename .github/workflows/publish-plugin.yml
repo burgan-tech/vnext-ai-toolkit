@@ -66,6 +66,9 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Lint knowledge files
+        run: scripts/lint-references.sh
+
       - name: Validate plugin and marketplace
         # Non-strict on purpose: the manifest carries custom fields (compatibleAgents,
         # references, vnext) that are valid-but-unrecognized; --strict would fail on them.

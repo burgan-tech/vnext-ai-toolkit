@@ -50,3 +50,8 @@ services:
 #     docker compose down -v && docker compose up -d mocklab
 # - The mocklab-dapr sidecar exposes Dapr service invocation:
 #     http://localhost:3500/v1.0/invoke/mocklab/method/api/{{domain}}/{resource}/{action}
+# - The runtime's own sidecars use the app-id convention vnext-{{domain}}-app (orchestrator) and
+#   vnext-{{domain}}-execution-app (execution); cross-domain calls resolve to those ids via Dapr
+#   name resolution (mdns locally). See .claude/references/runtime-operations.md.
+# - Logs/traces: the runtime compose stack ships an otel-collector → OpenObserve (:5080) and
+#   Elastic APM/Kibana (:5601); etc/dapr/config.yaml points this sidecar at the same collector.

@@ -120,7 +120,11 @@ Confirm the exact shape against the schema each time; this is the gist:
 - **workflow** — required `type`, `states`, `startTransition`, `labels`. `type` is a
   letter (`"S"`, `"F"`, `"P"`, `"C"`, …). Also supports `timeout`, `functions`,
   `features`, `sharedTransitions`, `extensions`, `errorBoundary`, `cancel`, `exit`,
-  `updateData`, `schema`, `queryRoles`. Transitions have a `triggerType`
+  `updateData`, `schema`, `queryRoles`. States may carry `subType` (6 = human task),
+  `interaction.longPoll`, and for `stateType: 4` a `subFlow` with optional `overrides`;
+  transitions, `cancel`/`exit`/`updateData` and `timeout` may carry `annotations`
+  (see `references/concepts/{human-task,long-poll-interaction,subflow-overrides,transition-pipeline}.md`).
+  Transitions have a `triggerType`
   (`0` manual, `1` auto/rule, `2` timer, `3` event); auto transitions must come in
   complementary pairs with mutually exclusive rules (or a single always-true rule).
   **Domain rule — every workflow MUST declare a master payload schema** at
@@ -128,8 +132,10 @@ Confirm the exact shape against the schema each time; this is the gist:
   version }`), even though the JSON schema marks it optional. `npm run validate`
   enforces this. Author the referenced schema component first, and normally point the
   `startTransition.schema` at the same schema so the start payload is validated.
-- **task** — required `type` (enum `"1"`–`"15"`, e.g. `"6"`=HTTP, `"7"`=Script,
-  `"15"`=GetInstances — verify against docs) and `config`.
+- **task** — required `type` (string number; the schema validates `"1"`–`"21"`, the runtime knows
+  `"22"` ExternalHttp (deprecated) and `"23"` Python (experimental) as well — e.g. `"6"`=HTTP,
+  `"7"`=Script, `"15"`=GetInstances, `"18"`=CacheAside, `"21"`=FanOut; full catalog and default
+  execution location in `references/concepts/task-types.md`) and `config`.
 - **view** — required `type` (integer) and `content`; optional `labels`, `display`.
 - **function** — required `scope` (enum `D`/`F`/`I`) and `task` (object with
   `order`, `task`, `mapping`); optional `labels`, `roles`.
@@ -193,11 +199,11 @@ A transition's `triggerType` decides what carries its logic (enum, verified):
 - **`rule`/`timer` are `scriptCode`** (see above) — so `{ "location": "./src/X.csx" }`
   validates and the extension fills `code` later. `triggerType` 1/2 transitions must have
   `view: null` (the runtime fires them without user interaction).
-- **Don't confuse with timeouts.** A *transition* `timer` is a `scriptCode` (`.csx`). A
-  **timeout** (`errorBoundary`/state `timeout`) uses a different `timerConfig` shape —
-  a declarative `{ "reset": "None", "duration": "PT30M" }` (ISO 8601 duration). The public
-  docs show the `{reset,duration}` form for timeouts; it does **not** validate as a
-  transition `timer` in this schema version. Always check your pinned schema.
+- **Don't confuse with timeouts.** A *transition* `timer` is a `scriptCode` (`.csx`). The
+  **workflow `timeout`** is declarative:
+  `{ "key", "target", "versionStrategy", "timer": { "reset": "N", "duration": "PT30M" }, "annotations"? }`
+  (`timer.reset` is required by the schema but not read by the runtime). It does **not**
+  validate as a transition `timer`. Always check your pinned schema.
 
 ## Workflow
 

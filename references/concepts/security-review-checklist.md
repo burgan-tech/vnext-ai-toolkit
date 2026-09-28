@@ -31,28 +31,52 @@ Not a finding:
 
 ## 2. Authentication and authorization
 
-- Verify that workflow entry points and function execution paths enforce the expected roles
-  or access constraints.
-- Review transition `roles`, state/flow `queryRoles`, schema `x-roles`, exported visibility,
-  and component-level exposure for over-broad access (see
-  [roles-and-authorization.md](roles-and-authorization.md)).
+- Review against the **authorize-function model** (runtime ≥ 0.0.95, see
+  [roles-and-authorization.md](roles-and-authorization.md)): the runtime does **not** 403 on
+  built-in reads (`state`, `data`, `view`, `schema`, `master`, `tasks`, `actions`, `incidents`),
+  on `POST …/longpoll/ack`, on `PATCH …/transitions/{key}` or on custom function calls. Admission is
+  the Internal Gateway's `authorize` pre-flight. A design or test that relies on an in-process 403
+  is a finding; a role grant is only as good as the gateway that consults `authorize`.
+- Review transition `roles`, `availableIn[].roles`, state/flow `queryRoles`, function `roles`,
+  `interaction.longPoll.roles`, schema `x-roles`, exported visibility, and component-level
+  exposure for over-broad access.
+- Apply the grant semantics when judging a set: deny is AND-ed across the caller's **whole** role
+  set and wins over any allow; allows are OR-ed; a deny-only set is a **blacklist** (allowed unless
+  denied); an empty set allows; since 0.0.96 a role-less caller cannot clear a role-bound deny.
 - Look for broken access control patterns such as IDOR or privilege escalation paths.
 
 Hunt patterns:
 
 - Privileged transitions (approve, cancel, override, admin-ish actions) with missing or
   wildcard `roles`.
-- States holding sensitive data whose `queryRoles` (state-level, falling back to
-  flow-level `attributes.queryRoles`) allow broader read access than the actor model intends.
+- States holding sensitive data whose `queryRoles` (parent-stamped SubFlow override → state →
+  flow-level `attributes.queryRoles`) allow broader read access than the actor model intends —
+  remember the runtime only *describes* this via `authorize?queryRoles=true`; it does not enforce it.
+- Human states (`subType: 6`) with no `queryRoles` at state or root: the human-task list is
+  **fail-closed** and silently drops them (log 20459) — a functional finding, not an exposure.
+- A deny-only grant set where the author meant "block everyone" (it is a blacklist: everyone else
+  passes); or an allow that is expected to rescue a role the same set also denies (deny wins).
+- Shared/well-known transitions whose `availableIn` should narrow roles per state but list bare
+  state strings, or list the same state twice (only the first entry applies; publish rejects it).
+- `grant` values not lowercase (`"ALLOW"`, `"Deny"`) — schema enum rejects them; docs examples
+  using uppercase are stale.
+- Dynamic grants whose path does not start with the case-sensitive literal `$.context.`.
+- Under `CallerRoleProvider:Provider=morph-idm` (0.0.97+): a non-blank `role` header, or
+  `authorize?role=`, **replaces** the identity service's answer. Confirm the gateway strips or owns
+  the `role` header on every inbound request; a client that can set it asserts its own roles.
 - Sensitive schema fields (national ID, salary, limits) without restrictive `x-roles`.
 - Functions with instance scope that accept an instance key but never constrain which caller
-  may query it (IDOR via instance enumeration).
+  may query it (IDOR via instance enumeration) — note `function.roles` is not a call gate since
+  0.0.88; the constraint must exist in the gateway's `authorize?functionKey=` pre-flight.
 - A change that widens `roles`/`queryRoles`/exports beyond what the change itself needs.
 
 Not a finding:
 
 - Public-by-design entry transitions of a public workflow, when the rest of the flow is
   properly constrained.
+- A local runtime returning 200 on a read the caller "should not" see: that is the documented
+  gateway model, not a runtime defect. Verify with `authorize` instead and report only if the
+  grants themselves are wrong.
 
 ## 3. Injection and unsafe execution
 
@@ -127,6 +151,10 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
   privileged containers, default credentials, debug flags).
 - Validate that `exports` and their `visibility` are intentionally scoped — internal
   components must not leak cross-domain.
+- Confirm the deployment's gateway attaches the `authorize` pre-flight (`?queryRoles=true` for
+  reads, `?ack=true` for `longpoll/ack`, `?transitionKey=`/`?functionKey=` for writes) on the
+  `/workflows` routes, and that the configured `CallerRoleProvider` is known — an unrecognised
+  value silently degrades to `default` (header-trusting).
 - Confirm MockLab and other test surfaces are not wired into production configuration.
 
 ## Verification rubric
@@ -159,7 +187,7 @@ Common false positives in this toolkit:
 | Severity | Meaning in a vNext domain | Typical examples |
 |----------|---------------------------|------------------|
 | Critical | Direct compromise of the runtime or another domain's data, no auth required | Real credentials in committed config; untrusted `REF` code source; unauthenticated privileged transition |
-| High | Sensitive data exposure or privilege gain with minor preconditions | Over-broad `queryRoles` on sensitive states; SSRF from instance data; SQL built from instance data |
+| High | Sensitive data exposure or privilege gain with minor preconditions | Over-broad or blacklist-by-accident `queryRoles` on sensitive states; `role` header not owned by the gateway under `morph-idm`; SSRF from instance data; SQL built from instance data |
 | Medium | Exploitable with user interaction or unusual conditions | Missing `x-roles` on sensitive fields; PII in logs; weakened `strictMode` |
 | Low | Hardening gaps, best-practice violations | `http://` internal endpoint; unpinned dependency without known CVE |
 | Info | Confidence <30, positive observations, defense-in-depth advice | Placeholder secrets in seeds; documentation gaps |
@@ -176,4 +204,5 @@ Common false positives in this toolkit:
 
 For function/API surfaces, the OWASP API Security Top 10 (2023) analogues apply: BOLA
 (API1) for instance-key access without caller constraints, and broken function-level
-authorization (API5) for missing transition/function role checks.
+authorization (API5) for missing transition/function role grants — keeping in mind that the
+runtime evaluates those grants only through `authorize`; the enforcing component is the gateway.

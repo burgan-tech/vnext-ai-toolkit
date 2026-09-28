@@ -18,14 +18,14 @@ Schemas drive view rendering, transition validation, and task I/O. **Never** pro
 
 ```
 1. Read vnext.config.json → schemaVersion + domain + paths.schemas
-2. Fetch
-   a) https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/schema.json
-   b) https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/vocabularies/
-      (one file per vocab: x-labels, x-lov, x-lookup, x-conditional, x-validation, x-enum, x-roles, x-filterOperators, x-sortable, x-displayFormat)
-   ├─ Fail → master branch → references/concepts/component-schemas.md + schema-vocabularies.md
-   └─ No snapshot → halt; never guess.
+2. Load from the pinned package (missing → `npm install`; rules → references/concepts/component-schemas.md):
+   a) node_modules/@burgan-tech/vnext-schema/schemas/schema-definition.schema.json
+   b) node_modules/@burgan-tech/vnext-schema/vocabularies/*.json
+      (one file per vocab: x-labels, x-lov, x-lookup, x-conditional, x-validation, x-enum, x-roles, x-filterOperators, x-sortable, x-displayFormat, x-indexed)
+   Note: the x-filterOperators vocab still lists WIRE names; the runtime expects schema-side names
+   (gte/lte/neq/contains/startsWith/endsWith/isNull) — see references/concepts/instance-query.md. Never guess.
 3. Parse:
-   - schema.json `properties.attributes.properties.type.enum` → schema type options
+   - schema-definition.schema.json `properties.attributes.properties.type.enum` → schema type options
    - vocabularies → per `x-*` keyword shape (what fields are valid, what they accept)
 4. Drive AskUserQuestion lists + skeleton from these.
 ```
@@ -96,16 +96,18 @@ Built-in system roles: `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfSt
 ### 6. Ask about query metadata (mostly for the master schema)
 
 If the instance data will be **queried/filtered/sorted** (via the built-in `data` function), capture per field:
-- **`x-filterOperators`** — allowed operators, e.g. `["eq", "gt", "ge", "lt", "le", "between"]`. Empty/absent ⇒ not filterable. Operator semantics depend on the field type (see `references/concepts/schema-vocabularies.md`).
+- **`x-filterOperators`** — allowed operators using the **schema-side names**: `eq, neq, gt, gte, lt, lte, between, contains, startsWith, endsWith, in, nin, isNull` (clients send the wire names `ne/ge/le/like/match/…`; the runtime maps them before checking — a schema written with the wire spellings `ge`/`le` silently rejects those filters with `Validation:900010`). Empty/absent ⇒ not filterable. Semantics per type: `references/concepts/schema-vocabularies.md`; full query contract: `references/concepts/instance-query.md`.
 - **`x-sortable`** — `true` if the field can be sorted on.
 - **`x-displayFormat`** — UI format hint, e.g. `"yyyy-MM-dd'T'HH:mm:ssXXX"`.
+- **`x-indexed`** — `true` to mark a hot filter field for a physical attribute index. **Master schema only** (any other schema type is rejected at publish, even `false`); scalar string/number/integer/boolean fields. It does **not** grant filter permission and the runtime runs **no DDL**: `wf indexes generate` produces the SQL, a DBA applies it, and `AttributeIndexes:Enabled` switches the routing on. Ask only when the user expects large instance volumes.
 
 ```json
 "startDateTime": {
   "type": "string",
   "format": "date-time",
-  "x-filterOperators": ["eq", "gt", "ge", "lt", "le", "between"],
+  "x-filterOperators": ["eq", "gt", "gte", "lt", "lte", "between"],
   "x-sortable": true,
+  "x-indexed": true,
   "x-displayFormat": "yyyy-MM-dd'T'HH:mm:ssXXX"
 }
 ```

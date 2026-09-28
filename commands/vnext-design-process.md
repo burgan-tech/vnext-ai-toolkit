@@ -5,7 +5,7 @@ argument-hint: [optional process name, e.g. "Loan application"]
 allowed-tools: Bash(npm run setup:*), Bash(node setup.js:*), Bash(npm run sync-schema), Bash(npm run validate), Read
 ---
 
-> **Freshness check (non-blocking, first).** If `vnext.config.json` exists, compare the workspace toolkit stamp — `.claude/vnext-toolkit.json` `toolkitVersion`, falling back to the `<!-- vnext-ai-toolkit vX.Y.Z -->` comment in `CLAUDE.md` — against `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` `.version`. If the stamp is missing or older, tell the user once: "Workspace toolkit files are from vX (plugin is vY) — run `/vnext-update` to refresh", then continue with the command below. Never block on this.
+> **Freshness check (non-blocking, first).** If `vnext.config.json` exists, compare the workspace toolkit stamp — `.claude/vnext-toolkit.json` `toolkitVersion`, falling back to the `<!-- vnext-ai-toolkit vX.Y.Z -->` comment in `CLAUDE.md` — against `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` `.version`. If the stamp is missing or older, tell the user once: "Workspace toolkit files are from vX (plugin is vY) — run `/vnext-update` to refresh". Also compare `vnext.config.json` `runtimeVersion` with the plugin manifest's `.vnext.knownRuntimeVersion`: if the workspace is older, mention once that features newer than its runtime (see `.claude/references/runtime-feature-matrix.md` `since`) are unavailable here; if newer, that the toolkit's knowledge lags the runtime. Then continue with the command below. Never block on this.
 
 # /vnext-design-process
 

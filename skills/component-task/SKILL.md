@@ -13,9 +13,10 @@ A Task is the unit of action inside a workflow — invoked from a transition's `
 
 ```
 1. Read vnext.config.json → schemaVersion + domain + paths.tasks
-2. Fetch https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/task.json
-   ├─ Fail → master branch → references/concepts/component-schemas.md snapshot
-   └─ No snapshot → halt; never guess.
+2. Load the task schema from the pinned package:
+   node_modules/@burgan-tech/vnext-schema/schemas/task-definition.schema.json
+   (missing → `npm install`; version/fallback rules → references/concepts/component-schemas.md;
+   never guess field names from memory)
 3. Parse:
    - properties.attributes.properties.type.enum (or oneOf branching on type)
    - per-type `config` shape (HTTP has url/method/headers/body; SOAP has wsdl/...; Dapr has app-id/...)
@@ -41,26 +42,48 @@ Ask:
 - **Is it called from a workflow transition, a function, or both?** (Affects which mapping interface you'll need.)
 - **Is it reusable across workflows?** (If yes, consider extracting to a Function later.)
 
-### 3. Choose the task type (from schema)
+### 3. Choose the task type (from schema + catalog)
 
-Render `AskUserQuestion` with the enum from `task.json`. Annotate by common use:
-- HTTP / REST → `HttpTask` (type usually 6)
-- C# script (no external call) → `ScriptTask` (usually 7)
-- Notification (SMS/email/push) → `NotificationTask` (usually 10) — requires `INotificationMapping`
-- Cross-workflow query → `GetInstancesTask` (usually 15)
-- Legacy SOAP → `SoapTask` (usually 16)
-- Internal service via Dapr → `DaprService` (usually 3)
-- Async messaging → `DaprPubSub` (usually 4)
-- Start another workflow → `StartFlowTask`
-- Fire a transition on an existing instance → `TriggerTransitionTask`
+Render `AskUserQuestion` with the enum from the task schema, annotated from
+`references/concepts/task-types.md` (the full 1–23 catalog with config shapes, default execution
+location and pitfalls). Most common picks:
 
-(Verify the exact numbers and full list from the fetched schema — the table above is illustrative.)
+| Need | Type | Notes |
+|---|---|---|
+| HTTP / REST call | `6` Http | runs **in-process on Orchestration** (routed Local since 0.0.94); MockLab URL in dev |
+| C# logic, no external call | `7` Script | |
+| SMS / email / push | `10` Notification | needs `INotificationMapping` |
+| Start another workflow | `11` StartTrigger | same-domain → in-process; `sync` defaults to `false` |
+| Fire a transition on an existing instance | `12` DirectTrigger | `version` is deprecated |
+| Read another instance's data | `13` GetInstanceData / `19` GetInstance | system identity, unfiltered |
+| Independent child process | `14` SubProcess | the **only** way to start a SubProcess (never state-level `subFlow.type "P"`) |
+| Query instances | `15` GetInstances | invalid filter now **faults** the task — declare `x-filterOperators` correctly |
+| Legacy SOAP | `16` Soap | Local |
+| Dapr state store get/set/delete | `17` StateStore | Local; custom `storeName` needs an orchestrator-scoped Dapr component |
+| Cache an expensive task's result | `18` CacheAside | Local; wraps a `sourceTask`, `ttlInSeconds`, `bypassOnCacheError` |
+| LLM conversation via Dapr | `20` DaprConversation | Remote |
+| **Same work over a data-driven collection** | `21` FanOut | see `references/concepts/fan-out.md`; ask this whenever the user says "for each …" |
+| Internal service via Dapr | `3` DaprService | Local; `httpVerb` must be set |
+| Async messaging | `4` DaprPubSub | Remote |
+
+Do **not** offer `5` Human (a stub — human approval is a *state* with `subType: 6`, see
+`references/concepts/human-task.md`), `8` Condition / `9` Timer (no executor), `22` ExternalHttp
+(deprecated 0.0.94 → use 6) or `23` Python unless the user asks (experimental; `Python:Enabled` is
+off by default). **Schema ceiling:** vnext-schema 0.0.54 validates `"1"`–`"21"` only — a `22`/`23`
+task fails `npm run validate` even though the runtime runs it (`references/concepts/schema-runtime-gaps.md`).
+
+Before continuing: if the workspace `runtimeVersion` is below a type's `since` in
+`references/runtime-feature-matrix.md`, say so and pick an older alternative.
 
 ### 4. Fill the `config` from the schema
 
 Once the user picks a type, the schema tells you the per-type `config` shape. For example, an HTTP task's config needs `url`, `method`, optional `headers`, `body`, `timeoutSeconds`, `validateSsl`. Walk the user through each required field.
 
 For URLs that hit external systems during development, default to MockLab: `http://localhost:3001/api/{domain}/{resource}/{action}`. Production URLs are hardcoded only when explicitly requested.
+
+**Error boundary reminders.** `errorBoundary.onError[].action` must be an **integer** (0–5) to pass the schema even though the runtime also accepts strings; `errorBoundary.onTimeout` is accepted by the schema but never read; a task timeout surfaces as `…:TaskCanceledException` with **no status code**, so only an `errorTypes` rule can catch it; `errorTypes` rules now match on the in-process path too (they silently never did on the remote path before 0.0.94) — dormant rules may fire for the first time after an upgrade.
+
+**FanOut (21).** If chosen, walk `references/concepts/fan-out.md`: `itemsPath` XOR `ItemSelector`, inner `task` reference (distinct task definition), `execution.{maxDegreeOfParallelism,itemTimeoutSeconds ≤ batchTimeoutSeconds}`, `join.{policy,resultKey}` (default `allSettled`; branch on `{resultKey}Summary` with an order-80 auto transition), and scaffold an `IFanOutMapping` `.csx` with at least `ItemInputHandler`.
 
 ### 5. Look at a sibling task
 

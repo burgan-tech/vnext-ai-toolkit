@@ -19,6 +19,18 @@ Checklist:
   pairs (or a single always-true rule).
 - `.csx` mappings: class names PascalCase, referenced via `mapping.location`; no
   hand-edited / manually base64-encoded `mapping.code`.
+- Runtime acceptance beyond the schema (`references/concepts/schema-runtime-gaps.md`) —
+  **Blockers**: a state-level `subFlow.type: "P"` (publish 400 since 0.0.95; use a
+  SubProcessTask 14); task `type` `"22"`/`"23"` (fail `npm run validate` on schema 0.0.54;
+  22 is deprecated); function `onExecutionTasks` keys that normalise to the same variable
+  name (`user-info`/`user_info`); `x-filterOperators` written with wire names (`ge`, `le`,
+  `ne`, `like` — must be `gte`/`lte`/`neq`/`contains`); `x-indexed` on a non-master schema;
+  `interaction.longPoll` without exactly one of `roles`/`rule`; `grant` not lowercase.
+  **Suggestions**: human states (`subType: 6`) without `queryRoles` (hidden from the
+  human-task list) or without a `humanTask` write; `errorBoundary.onError[].action` given as a
+  string (schema wants an integer); `timeout.timer.reset` relied upon (not implemented);
+  `updateData` mappings that echo the whole document instead of a delta; features newer than
+  the workspace `runtimeVersion` (check `references/runtime-feature-matrix.md`).
 - Exports: components meant to be shared are listed under `exports` in
   vnext.config.json, and every listed export exists on disk.
 - Readability: meaningful keys/state names, no dead or duplicated components,

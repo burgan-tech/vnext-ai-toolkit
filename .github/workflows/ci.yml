@@ -1,0 +1,30 @@
+name: CI
+
+# Runs on every PR and on pushes to master. Publishing lives in publish-plugin.yml (release-v* only).
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Lint knowledge files (stale runtime facts, manifest/link integrity)
+        run: scripts/lint-references.sh
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate plugin manifest
+        # Non-strict on purpose: the manifest carries custom fields (compatibleAgents, references, vnext).
+        run: claude plugin validate .

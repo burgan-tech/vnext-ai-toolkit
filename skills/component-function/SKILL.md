@@ -21,9 +21,10 @@ Common uses:
 
 ```
 1. Read vnext.config.json → schemaVersion + domain + paths.functions + runtimeVersion
-2. Fetch https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/function.json
-   ├─ Fail → master → references/concepts/component-schemas.md snapshot
-   └─ No snapshot → halt; never guess.
+2. Load the function schema from the pinned package:
+   node_modules/@burgan-tech/vnext-schema/schemas/function-definition.schema.json
+   (missing → `npm install`; version/fallback rules → references/concepts/component-schemas.md;
+   never guess field names from memory)
 3. Parse:
    - properties.attributes.properties.scope.enum (typically D, I, possibly F)
    - oneOf for single-task vs multi-task (task vs onExecutionTasks[])
@@ -86,7 +87,7 @@ Render the `scope` enum from `function.json`. Annotate:
 
 ### 5. Client contract — verbs, inputSchema/outputSchema, inputView/outputView
 
-> Runtime support: post-v0.0.79. On older runtimes these fields are not enforced — check `runtimeVersion` first. Details: `references/function-mapping-pattern.md` § 9.
+> Runtime support: since v0.0.79 (`functionContract`, `functionInfoEndpoint` in `references/runtime-feature-matrix.md`). On older runtimes these fields are not enforced — check `runtimeVersion` first. Details: `references/function-mapping-pattern.md` § 9.
 
 Driven by the **mode chosen in step 2**:
 
@@ -95,6 +96,13 @@ Driven by the **mode chosen in step 2**:
 - **BFF API mode** — **no `inputView`/`outputView`.** The contract is verbs + schemas, like any REST API.
 
 Skip this step entirely for plain LOV/lookup functions — they need none of these fields.
+
+**Discovery & roles.** Clients find the function through `GET …/instances/{id}/functions/catalog`
+(role-filtered list of `{name, version, scope, href → /info}`) and `GET …/functions/{fn}/info`,
+`…/view?target=input|output`, `…/schema?target=…`. Since 0.0.88 the runtime does **not** enforce
+`roles` on the function call itself — it only filters the catalog; the gateway asks
+`authorize?functionKey={fn}` before forwarding. So `roles` is a *visibility + authorize* contract,
+not an in-process 403 (`references/concepts/roles-and-authorization.md`).
 
 ### 6. Single-task or multi-task?
 
@@ -194,7 +202,10 @@ Envelope (single-task):
 }
 ```
 
-For multi-task: `onExecutionTasks[]` array + `output` field. Contract fields (`verbs`, `inputSchema`, `outputSchema`, `inputView`, `outputView`) go in `attributes` alongside `scope` when step 5 selected them. The exact shape comes from the schema.
+For multi-task: `onExecutionTasks[]` array + `output` field. Every task's result lands in
+`context.TaskResponse[<camelCase(key)>]` as an isolated copy (0.0.95); task keys that normalise to the
+same variable name (`user-info` and `user_info` → `userInfo`) are **rejected at publish**, so pick
+distinct keys. Contract fields (`verbs`, `inputSchema`, `outputSchema`, `inputView`, `outputView`) go in `attributes` alongside `scope` when step 5 selected them. The exact shape comes from the schema.
 
 `mapping.code` is left empty — the vNext VS Code extension auto-encodes the `.csx` file on save. **Never manually base64-encode.**
 

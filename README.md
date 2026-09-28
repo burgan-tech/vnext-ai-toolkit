@@ -2,6 +2,8 @@
 
 > Claude Code plugin for building [vNext](https://burgan-tech.github.io/vnext-docs/) workflow-domain components with AI assistance — analyze a request, design it, author the JSON, validate, security-review, and document it. Built for projects scaffolded from [`@burgan-tech/vnext-template`](https://github.com/burgan-tech). **Schema-first**: every component is authored against the JSON Schemas shipped in `@burgan-tech/vnext-schema` (pinned in the project's `package.json`), never from hardcoded assumptions.
 
+**Runtime coverage:** toolkit 0.2.0 describes vNext runtime **0.0.97** / schema **0.0.54** (`@burgan-tech/vnext-meta` 0.0.53). See [`references/runtime-feature-matrix.md`](references/runtime-feature-matrix.md) for feature → since-version, and "Updating runtime knowledge" below.
+
 ## What it is
 
 The vNext platform defines a workflow domain as a set of JSON component files — `schema`, `workflow`, `task`, `view`, `function`, `extension`, `mapping` — each validated against a JSON Schema. Building a domain by hand means juggling cross-references, getting enum values right, writing `.csx` mapping files against the right C# interfaces, and keeping everything passing `npm run validate`. This plugin turns that work into a guided, agent-driven workflow inside your domain project.
@@ -94,7 +96,7 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 | Command | What it does |
 |---------|--------------|
 | `/vnext-ai-toolkit:vnext-init` | Sets up or refreshes the workspace. Scaffolds the base project via `@burgan-tech/vnext-template` (npx) when missing, then layers the toolkit files (docker-compose + MockLab, `CLAUDE.md`/`AGENTS.md`, `.claude/references`, integration tests) — diffing before overwriting. Offers to bump `runtimeVersion`/`schemaVersion`. Stamps the workspace with the toolkit version (`.claude/vnext-toolkit.json`). |
-| `/vnext-ai-toolkit:vnext-update [--force]` | Refreshes the toolkit-owned files after a plugin update: compares the workspace stamp against the installed plugin version, diffs each file against the current templates, and confirms per file (overwrite/skip/merge). A SessionStart hook and a preamble in every command suggest running it when the workspace is stale. |
+| `/vnext-ai-toolkit:vnext-update [--force]` | Refreshes the toolkit-owned files after a plugin update: compares the workspace stamp against the installed plugin version, reports how the workspace `runtimeVersion` relates to the runtime the toolkit knows, diffs each file against the current templates, and confirms (per file for `CLAUDE.md`/`AGENTS.md`/compose/dapr, once for the batched `.claude/references/` set). A SessionStart hook and a preamble in every command suggest running it when the workspace is stale. |
 | `/vnext-ai-toolkit:new-component <type> <key> [desc]` | Scaffolds a component end-to-end through the agent pipeline. `<type>` ∈ `schema\|workflow\|task\|view\|function\|extension`. |
 | `/vnext-ai-toolkit:vnext-design-process [name]` | Multi-turn, end-to-end workflow design via the `vnext-architect` orchestrator (discovery → states → components → tests). |
 | `/vnext-ai-toolkit:validate` | Runs `npm run validate`, summarizes failures by file with the violated schema rule, and offers to fix. |
@@ -154,21 +156,51 @@ vnext-ai-toolkit/
 ├── commands/                         # 8 slash commands
 │   ├── vnext-init.md  vnext-update.md  new-component.md  vnext-design-process.md
 │   └── validate.md  review-components.md  build.md  security-audit.md
-├── hooks/                            # SessionStart staleness check
+├── hooks/                            # SessionStart staleness check (toolkit version + runtime version)
 │   └── hooks.json  check-toolkit-version.sh
-├── references/                       # Concept docs the agents may consult
-│   ├── concepts/                     # workflow-types, view-roles, roles-and-authorization, csx-contracts, ...
+├── references/                       # Runtime knowledge — single source; a subset is copied into
+│   │                                 #   workspaces per plugin.json → vnext.workspaceReferences[]
+│   ├── concepts/                     # workflow-types, transition-pipeline, task-types, fan-out,
+│   │                                 #   state-function-response, long-poll-interaction, human-task,
+│   │                                 #   subflow-overrides, roles-and-authorization, instance-query,
+│   │                                 #   incidents-and-retry, runtime-operations, observability,
+│   │                                 #   schema-runtime-gaps, csx-contracts, ...
+│   ├── runtime-feature-matrix.md     # GENERATED from @burgan-tech/vnext-meta (scripts/sync-vnext-meta.sh)
 │   ├── decision-tree.md  external-sources.md
-│   ├── view-author-guide.md  function-mapping-pattern.md  mocklab-seed-format.md
-├── templates/                        # Toolkit value-add layer ({{domain}} placeholders)
+│   └── view-author-guide.md  function-mapping-pattern.md  mocklab-seed-format.md
+├── templates/                        # Rendered files only ({{domain}} etc. placeholders)
 │   │                                 #   base project comes from @burgan-tech/vnext-template;
 │   │                                 #   integration tests from VNext.Testing.Template
+│   ├── CLAUDE.md.tmpl                # rendered twice → CLAUDE.md and AGENTS.md
 │   ├── docker-compose.yml.tmpl  .gitignore.tmpl  .http.tmpl
-│   ├── CLAUDE.md.tmpl / AGENTS.md.tmpl
-│   ├── view-author-guide.md  function-mapping-pattern.md  mocklab-seed-format.md  csx-contracts.md
 │   └── etc/{docker,dapr}/...
-└── scripts/check-prerequisites.sh
+├── scripts/
+│   ├── sync-vnext-meta.sh            # regenerate the feature matrix + known versions
+│   ├── lint-references.sh            # stale-fact + manifest/link lint (CI)
+│   └── check-prerequisites.sh
+└── .github/workflows/                # ci.yml (lint + validate on PRs), publish-plugin.yml (release-v*)
 ```
+
+## Updating runtime knowledge
+
+When a new vNext runtime ships:
+
+1. Pull the runtime repo (or `npm pack @burgan-tech/vnext-meta`) and run
+   `scripts/sync-vnext-meta.sh --from ../vnext/vnext-meta` (or `--npm`). Review the diff of
+   `references/runtime-feature-matrix.md` — new `since` rows, deprecations, migrations and known
+   issues are the to-do list.
+2. Update the hand-written references under `references/concepts/` for anything that changed
+   behaviour; mirror author-facing rules into the skills/agents and, briefly, `templates/CLAUDE.md.tmpl`.
+3. Add or adjust `<!-- lint:allow -->`-free wording and run `scripts/lint-references.sh`; fix every
+   FAIL. Then `claude plugin validate .`.
+4. Record the change in `CHANGELOG.md` (state the runtime/schema/meta versions covered), bump
+   `plugin.json` `version`, and release from a `release-vX.Y` branch.
+
+Manual smoke test after structural changes: run `/vnext-init` into a scratch directory and check
+that `.claude/references/` contains one file per `workspaceReferences` entry, `diff CLAUDE.md AGENTS.md`
+shows only lines 1/4/6, `.claude/vnext-toolkit.json` lists every written file, and no `{{` placeholder
+survived in `CLAUDE.md`. Point `CLAUDE_PLUGIN_ROOT` at the checkout and run
+`hooks/check-toolkit-version.sh` there with an older `runtimeVersion` to see the runtime warning.
 
 ## Compatibility
 
@@ -178,7 +210,7 @@ vnext-ai-toolkit/
 | Codex (via `AGENTS.md`) | Supported — every `CLAUDE.md` is mirrored to `AGENTS.md` |
 | Cursor (`.cursor/rules/*.mdc`) | Planned |
 
-The plugin tracks whatever `@burgan-tech/vnext-schema` version your project pins in `package.json` — when vNext adds a new state type or task type, the plugin sees it on the next read, no change required here.
+Skills read enum values from whatever `@burgan-tech/vnext-schema` version your project pins in `package.json`. Behavioural knowledge (what a task type does, how `updateData` or `authorize` behave) lives in `references/` and is tied to the runtime version in `plugin.json` → `vnext.knownRuntimeVersion`; the SessionStart hook warns when a workspace targets a different runtime, and `references/runtime-feature-matrix.md` says since which version each feature exists.
 
 ## Related repos
 
