@@ -23,11 +23,14 @@ name matches the domain subfolder (`Workflows`, `Tasks`, `Views`, `Functions`,
 
 What each doc contains:
 - Title, `key`, `version`, `domain`, and one-line purpose.
-- For **workflows**: the states (with type/subType meaning), the start transition,
-  and the key transitions; note any `onEntries`/`onExits` tasks and the schema the
-  flow validates against. A simple state list/diagram is welcome.
-- For **tasks**: the task `type` (and what it maps to, e.g. Dapr HTTP Endpoint) and
-  its `config`; which workflow states/transitions reference it.
+- For **workflows**: the states (with type/subType meaning — call out human task states
+  `subType: 6` and their `queryRoles`), the start transition, and the key transitions
+  (including `cancel`/`exit`/`updateData` and any `annotations` the UI relies on); note any
+  `onEntries`/`onExits` tasks, `interaction.longPoll` states, `subFlow.overrides`, the
+  `timeout`, and the schema the flow validates against. A simple state list/diagram is welcome.
+- For **tasks**: the task `type` (and what it maps to — names from
+  `references/concepts/task-types.md`, e.g. 21 = FanOut) and its `config`; which workflow
+  states/transitions reference it.
 - For **schemas**: the payload fields, types, and constraints.
 - For **functions/views/extensions**: the relevant attributes and how they're used.
 - Cross-links to the components it references (other docs under `docs/`).

@@ -9,7 +9,7 @@ graph TD
   B -->|Registration / Onboarding| C1
   B -->|Notification / Event-driven| C2[Workflow type F + heavy event hooks]
   B -->|Reusable sub-procedure| C3[Workflow type S — SubFlow]
-  B -->|Parallel background work| C4[Workflow type P — SubProcess]
+  B -->|Parallel background work| C4[Child workflow type P — started only by SubProcessTask 14,<br/>never a state-level subFlow type P]
   B -->|Stateless single page or pure API — no states, nothing persisted| C5[NOT a workflow — propose a Function<br/>page → BFF View, no view → BFF API<br/>confirm with user, then component-function]
   C1 --> D[Actor model]
   C2 --> D
@@ -17,12 +17,24 @@ graph TD
   C4 --> D
   D --> D1{Single actor or multi-actor?}
   D1 -->|Single| E
-  D1 -->|Multi| D2[Add queryRoles<br/>$InstanceStarter / $PreviousUser]
-  D2 --> E[Complexity / nesting]
+  D1 -->|Multi| D2[queryRoles + authorize function — gateway decides<br/>$InstanceStarter / $PreviousUser — roles-and-authorization.md]
+  D2 --> D3{Approval by a person?}
+  D3 -->|Yes| D4[Human state — subType 6 + queryRoles<br/>+ humanTask data block — human-task.md]
+  D3 -->|No| E
+  D4 --> E
+  E[Complexity / nesting]
   E --> E1{Parallel branches or nested sequences?}
   E1 -->|None| F
   E1 -->|Reusable nested sequence| E2[Spin off SubFlow]
-  E1 -->|Fire-and-forget parallel| E3[Spin off SubProcess]
+  E1 -->|Fire-and-forget parallel| E3[SubProcessTask 14 on a transition —<br/>child workflow type P]
+  E1 -->|Child needs different roles / views / timeout| E4[subFlow.overrides states.* / transitions.* / timeout —<br/>subflow-overrides.md]
+  E1 -->|Same work over a data-driven collection| E5[FanOutTask 21 + IFanOutMapping —<br/>join policy, fan-out.md]
+  E1 -->|Concurrent writers / fan-in of results| E6[updateData transition — $self profile,<br/>transition-pipeline.md]
+  E1 -->|Hand over to another actor mid-flow| E7[interaction.longPoll terminate: true —<br/>long-poll-interaction.md]
+  E4 --> F
+  E5 --> F
+  E6 --> F
+  E7 --> F
   E2 --> F[Input model per state]
   E3 --> F
   F --> F1{How does the user provide input?}
@@ -91,8 +103,10 @@ Ask: process name, business goal, who initiates, who consumes. Output:
 ### Phase 2 — Flow Architecture (Levels 1–4)
 
 Determine:
-- Actor model → `queryRoles[]` on workflow and selectively on states
-- Complexity → SubFlow/SubProcess spin-offs
+- Actor model → `queryRoles[]` on workflow and selectively on states; the gateway calls the built-in `authorize` function to decide (`roles-and-authorization.md`)
+- Human approval → a state with `subType: 6`, `queryRoles`, a `humanTask` data block and (optionally) `interaction.longPoll` (`human-task.md`)
+- Complexity → SubFlow spin-off (state-level `subFlow.type: "S"`) or SubProcessTask (14) on a transition — never state-level `"P"` (`workflow-types.md` §5, `schema-runtime-gaps.md` D5)
+- Child customisation → `subFlow.overrides` (`subflow-overrides.md`); collections → FanOutTask 21 (`fan-out.md`); concurrent writers → `updateData` (`transition-pipeline.md`); actor hand-over → `interaction.longPoll` (`long-poll-interaction.md`)
 - State list (kind + view need) — `stateType` enum from schema
 - Transition map — `triggerType` enum from schema
 - Auto-pair correctness check
@@ -100,7 +114,7 @@ Determine:
 ### Phase 3 — Component Design (Levels 5–7)
 
 For each:
-- **External integration**: choose Task type (HTTP/SOAP/Dapr/...) → `component-task` skill
+- **External integration**: choose Task type (HTTP/SOAP/Dapr/FanOut/...) → `component-task` skill (`task-types.md`)
 - **Data enrichment**: Function (`component-function`) or Extension (`component-extension`)
 - **Views**: renderer → `view-design`; data binding via schema
 - **Schemas**: master + transition payloads → `schema-design`

@@ -42,7 +42,10 @@ significantly since it was written, reuse it. Otherwise map the target first:
 - `package.json` — dependencies, scripts, registries
 - the component inventory: workflows, functions (public REST surface), tasks (outbound
   integrations), extensions, views, schemas
-- authorization model in use: transition `roles`, state/flow `queryRoles`, schema `x-roles`
+- authorization model in use: transition `roles` (+ `availableIn[].roles`), state/flow `queryRoles`,
+  function `roles`, schema `x-roles`, `interaction.longPoll.roles|rule`, `subFlow.overrides.*` role
+  overrides — and remember that since 0.0.95 the runtime only *filters visibility*; enforcement is
+  the gateway's `authorize` call (`references/concepts/roles-and-authorization.md`)
 - external touch points: HTTP/SOAP/Dapr task endpoints, `scripts.helpers` / `encoding: "REF"`
   sources, MockLab seeds, Docker/Dapr deployment assets
 
@@ -59,7 +62,11 @@ list. Categories (details and IS / IS-NOT rules in the checklist reference):
    tokens, or PII in JSON, `.csx`, seed data, or docs
 2. **Authentication and authorization** — missing or over-broad `roles` / `queryRoles` /
    `x-roles`, exported components broader than needed, privileged transitions reachable
-   without role checks, IDOR-style access via instance keys
+   without role checks, IDOR-style access via instance keys; designs that assume an in-process
+   403 on built-in reads (none since 0.0.95 — a gateway must call `authorize`); human states
+   without `queryRoles` (silently hidden from the human-task list); deny grants that a roleless
+   caller could bypass before 0.0.96; `grant` values not lowercase; a `role` header that would
+   override morph-idm resolution (0.0.97) on an internal route
 3. **Injection and unsafe execution** — untrusted instance data reaching SQL, command
    execution, dynamic code evaluation, or template rendering inside `.csx` or task config
 4. **SSRF and untrusted hosts** — task URLs or webhook destinations built from instance

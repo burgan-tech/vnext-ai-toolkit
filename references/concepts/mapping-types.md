@@ -14,6 +14,7 @@ vNext runs C# scripts (`.csx` files) as "mappings" — input/output adapters bet
 | `ITimerMapping` | Compute a dynamic schedule for a timer transition | `transition.timer.mapping` when `triggerType: 2` and the timer is dynamic |
 | `ISubFlowMapping` | Adapt data flowing into/out of a SubFlow (S) invocation | `state.subFlow.mapping` when `stateType: 4` |
 | `ISubProcessMapping` | Prepare input for a fire-and-forget SubProcess (input only — no output handler) | `state.subFlow.mapping` when the subflow type is SubProcess (P) |
+| `IFanOutMapping` | Bind each item of a FanOut batch to its cloned inner task (`ItemInputHandler`, required, pure per item); optionally pick the items (`ItemSelector`) or shape the single batch output (`OutputHandler`) | the **workflow's** task binding `mapping` for a type-21 task (`state.onEntries[]` / `transition.onExecutionTasks[]`) — never on the task component. See `fan-out.md` |
 | `INotificationMapping` | Produce per-channel notification payload (method: `ChannelHandler(string channel, ScriptContext)`; return null to skip a channel) | `task.mapping` for NotificationTask (type 10) |
 | `IStateNotificationMapping` | Enrich the platform-managed `state` channel's Dapr metadata (optional; same `.csx` file as `INotificationMapping`) | picked up automatically when the notification mapping class also implements it |
 | `IEventMapping` | Map an inbound pub/sub / binding payload to a correlation key + body (`EventMappingResult`) | `event.mapping` on a workflow or transition |
@@ -118,6 +119,7 @@ The client filters on these tags.
 ## Sources
 
 - Type definitions: `csx-contracts.md` (this folder)
+- FanOut mapping guide: `fan-out.md` (this folder); task catalog: `task-types.md`
 - Pattern guide: `function-mapping-pattern.md` (top-level `references/`)
 - NuGets: `BBT.Workflow.Scripting`, `BBT.Workflow.Domain`, `BBT.Workflow.Definitions`
 - Working examples: `vnext-example/core/Workflows/payments/src/*.csx`, `vnext-example/core/Functions/account-opening/src/*.csx`

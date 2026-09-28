@@ -13,7 +13,7 @@ Selects the workflow's runtime behavior. Read the schema for the current value s
 | `P` | SubProcess | Parallel, fire-and-forget child work | Independent lifecycle; parent does not block on it |
 | `C` | Core | Platform/system-level workflows | Rare; reserved for the platform team |
 
-**Decision rule.** First question: "Is this a top-level business flow, or is it called from another workflow?" → `F` vs `S`. If parallel and independent → `P`.
+**Decision rule.** First question: "Is this a top-level business flow, or is it called from another workflow?" → `F` vs `S`. If parallel and independent → `P` — but a `P` child is started **only** by a SubProcess task (type 14), never from a state's `subFlow` block (see §5).
 
 ## 2. State `stateType`
 
@@ -23,9 +23,11 @@ Each state in `attributes.states[]` carries a `stateType`. Conceptual mapping:
 |-------|------|------|-------------|
 | `1` | Initial | Starting point | Exactly **one** per workflow. `startTransition.target` points to it. |
 | `2` | Intermediate | Awaits user action or system work | Can have a view (user-facing) or be purely passive (auto-only transitions) |
-| `3` | Final | Workflow ends here | `isFinal: true`. Instance status becomes Completed; optional `subType` (Success/Error/Terminated) |
-| `4` | SubFlow | Invokes a SubFlow / SubProcess child | Carries `subFlow` reference; type S/P chosen at the child level |
+| `3` | Final | Workflow ends here | Instance status becomes Completed; `subType` 1 Success / 2 Error / 3 Terminated / 7 Cancelled / 8 Timeout |
+| `4` | SubFlow | Invokes a SubFlow child | Carries `subFlow` reference with `type: "S"` only (`"P"` rejected at publish since 0.0.95 — §5) |
 | `5` | Wizard | Step-by-step form | Exactly one outgoing manual transition; the transition's view is returned on state entry (fast-path), so `state.view` stays `null` |
+
+**`subType`.** `#/definitions/stateSubType` enum 0–8 (0 none, 1 Success, 2 Error, 3 Terminated, 4 Suspended, 5 Busy, **6 Human**, 7 Cancelled, 8 Timeout). `subType: 6` on an Intermediate state makes it a **human task** candidate for `GET /{domain}/functions/human-task` — it needs `queryRoles` and a root-level `humanTask: {title, description}` in data. See `human-task.md`. This is unrelated to task type 5.
 
 **Pattern: wizard view placement.** When `stateType: 5`, attach the form to the single transition's `view`, not the state's `view`. The runtime exposes that form on state entry; reproducing it as `state.view` causes double-render bugs.
 
@@ -90,29 +92,12 @@ flow level for a workflow-wide default and override it per state only where acce
 
 ## 2.3 State interaction (long poll)
 
-A state can carry an `interaction.longPoll` block that tells a long-polling client whether to **keep polling or stop** when the instance lands on that state. Clients drive workflows by long-polling the state function; some states belong to a different actor, and the client needs an explicit signal about it.
-
-```jsonc
-{
-  "key": "waiting-approval",
-  "stateType": 2,
-  "interaction": {
-    "longPoll": {
-      "terminate": true,               // required: close the open long-poll on entering this state?
-      "fallbackTimeoutSeconds": 30,    // optional: auto-close window when no ack arrives
-      "roles": [                       // required: who this signal applies to; DENY overrides ALLOW
-        { "role": "client.app", "grant": "allow" }
-      ]
-    }
-  }
-}
-```
-
-- **`terminate: true`** — the client closes its active long-poll, renders the state screen, and acknowledges via `ack`. If no ack arrives within `fallbackTimeoutSeconds`, a scheduled fallback pipeline continues automatically. Use when the process hands over to another actor (e.g. mobile user completes their part; the flow moves to backoffice — the mobile client must stop polling).
-- **`terminate: false`** — the client (re)starts the long-poll and keeps waiting for a state change. Use for the reverse handover: a client opens an instance whose appointment is due; the state says "keep polling", and when the agent progresses the flow, both parties receive the state change.
-- `roles` scopes the signal per actor — the same state can tell the mobile client to stop while the backoffice client keeps polling.
-
-Docs: `https://burgan-tech.github.io/vnext-docs/docs/components/workflow#state-interaction-long-poll`
+A **state** (never a transition) may declare `interaction.longPoll`. With `terminate: true` the
+pipeline pauses after OnEntry (order 75), the instance stays Busy, and the state function returns an
+`interaction` block (`terminateLongPoll`, `fallbackTimeoutSeconds`, `ack.href`) to admitted callers —
+the client stops polling, renders, then `POST`s the ack (or the fallback timer resumes). Gate is
+exactly one of `roles` | `rule` (schema `oneOf`; write `"roles": []` for an open gate). `terminate: false`
+emits nothing. Full semantics, SubFlow bubbling, rule pitfalls and overrides: `long-poll-interaction.md`.
 
 ## 3. Transition `triggerType`
 
@@ -131,55 +116,20 @@ How the transition fires.
 
 ## 3.1 Transition admission & locking — Busy-as-mutex (v0.0.79+)
 
-Since v0.0.79 (vnext PR #877) the execution mutex is the instance's **Busy status** itself: the first
-hop of a transition does an Active→Busy check-and-set under a short status lock (~5s lease); the rest
-of the pipeline runs lock-free. There is no long-lease distributed lock anymore. What a transition is
-allowed to do when the instance is Busy depends on its **kind**:
+The instance's **Busy** status is the execution mutex: the first hop does an Active→Busy
+compare-and-set under a short status lock, then the pipeline and its auto-chain run lock-free.
 
-| Transition kind | Status lock | Busy check | Behavior when instance is Busy |
-|---|---|---|---|
-| Shared / state transitions (normal) | yes | yes | **409** — request rejected while another execution runs |
-| `cancel` / `exit` (and timeouts) | yes | **exempt** | Admitted even while Busy (they must always be able to fire) |
-| `updateData` | **exempt** | **exempt** | Always admitted — never sets or settles Busy (status-neutral) |
+| Kind | Transitions | Busy instance → client sees |
+|------|-------------|-----------------------------|
+| Normal | state / shared | **409** `Instance:100031` |
+| BypassBusyCheck | `cancel`, `exit`, workflow `timeout` | accepted (flips Busy at accept) |
+| Unconditional | `updateData` | always accepted; no lock, no duplicate guard, status-neutral |
+| OwnerReentry | jobs, SubFlow resume, long-poll ack | n/a |
 
-### `updateData` — the reserve transition
-
-`updateData` is exempt from **all** lock and busy checks. Under parallel requests it is the **only
-way** to update instance data and advance the instance — normal transitions would 409 against each
-other.
-
-Behavior by instance situation:
-
-- **Plain instance (no active subflow):** updates the data and runs the **normal transition
-  pipeline** (data write, `$self` state change, auto-transition evaluation) — it advances the flow
-  like a regular transition.
-- **Active subflow:** if the instance defines `updateData`, the **parent answers the request
-  itself** — it does NOT forward to the subflow and never restarts it. It updates the **parent's
-  data** and leaves the flow where it is; auto transitions are still evaluated after every
-  `updateData`, and a satisfied auto reserves ownership at the continuation boundary (it can take
-  over a parked Busy when no live owner exists — fan-in states park Busy by design).
-- `updateData` can never strand an instance in Busy.
-
-### Design guidance — parallel and loop-heavy flows
-
-This behavior matters most when designing **parallel branches, fan-in states, and loop/cyclic
-sections**:
-
-- Expect **409s on normal transitions** whenever another execution is in flight. If clients must be
-  able to push data at any time (bursts, concurrent writers, IoT/stream-style updates), give the
-  workflow an **`updateData` definition** and route those writes through it — don't try to hammer a
-  shared transition.
-- `cancel`/`exit` always get through the busy check — users can abort a stuck or long-running
-  execution; don't design compensating "abort" states around a normal transition.
-- Two authoring rules that come with the new write model:
-  - **Mappings must return delta-only output.** Each accepted write is persisted immediately;
-    a mapping that echoes the full instance data back overwrites concurrent writers' fresher
-    values with stale ones. Return only the fields you changed.
-  - **Parallel branches at the same `order` need distinct task definitions** — the task journal's
-    execution key is `transition+task+order`, so two branches sharing the same task at the same
-    order collide.
-- Each accepted `updateData` produces two data rows (request payload + task output) — relevant when
-  reasoning about data-version history.
+`updateData` (`target: "$self"`) is the only transition that skips OnExit/OnEntry/Schedule; against
+a parent with an open SubFlow it is data-only and never forwarded. Route parallel writes through it,
+return **delta-only** mappings, and give parallel branches distinct task definitions. Step order,
+`+Self` profile, discovery and annotations: `transition-pipeline.md`.
 
 ## 4. State lifecycle hooks
 
@@ -204,15 +154,24 @@ State type check:
 
 ## 5. SubFlow vs SubProcess
 
-| Attribute | SubFlow (S) | SubProcess (P) |
-|-----------|-------------|----------------|
-| Started by | Explicit transition from parent state | Fire-and-forget from parent (no wait) |
-| Data context | Shared with parent | Independent instance, own data |
-| Return | Result merges into parent's instance data | Optional callback; parent doesn't block |
-| Lifecycle | Synchronous from parent's perspective | Parallel; runs to its own completion |
-| Cancellation | Parent cancel → child cancel | Independent; explicit cancel needed |
+| Attribute | SubFlow (`S`) | SubProcess (`P`) |
+|-----------|---------------|------------------|
+| Started by | state `stateType: 4` + `subFlow.type: "S"` (pipeline step 70) | **SubProcess task (type 14)** in `onExecutionTasks`/`onEntries`; state-level `"P"` is rejected at publish since 0.0.95 (#1026) |
+| Start / forward | **synchronous** in the parent's pipeline (#968, 0.0.91); a failed start **faults the parent** with an incident, retry repeats the start (#1026) | task executor starts the child and creates the correlation; parent continues |
+| Parent status | parent shows the child's status as `status` / `effectiveStatus` (#983); parent transitions are forwarded to the child (step 10) | independent; not projected upward |
+| Data | child input from `ISubFlowMapping.InputHandler`; output merged by `OutputHandler` | own data; results come back only via explicit tasks/events |
+| Discovery | `correlations[]` in the state body lists active + completed children with `terminalOutcome` (#856) | listed in `correlations[]` with `subFlowType: "P"`; not followed by state/long-poll/human-task descent |
+| Cancellation | parent cancel → child cancel (bypassed if the child has no `cancel`) | independent; explicit cancel |
+| Instance `metadata.type` | `S` | `P` (addressed by its own `id`; its `key` copies the parent's) |
 
-Decision: reusable nested sequence with shared data → `S`. Independent parallel work → `P`.
+Decision: reusable nested sequence whose progress the parent must show → `S`. Independent parallel
+work → `P` via task 14 (`task-types.md`).
+
+Parent-side tuning of a child (roles, queryRoles, long-poll window, view swaps, timeout) lives in
+`subFlow.overrides` — see `subflow-overrides.md`. Scripts reach related instances through
+`context.Related` (`ParentAsync`, `SubAsync`, `SubsAsync`): **one hop** up or down, read with the
+**system identity** — no `queryRoles`, no `x-roles` field filtering — so copy only fields you intend
+to expose.
 
 ## 6. Start transition
 
@@ -255,8 +214,16 @@ filtering its flexibility.
 so `$instance.X` resolves everywhere). Input/transition views need a transition-specific schema
 that carries `required` / `enum` / `x-lov` / `x-validation` for the input set — see `view-roles.md`.
 
+## 8. Annotations
+
+`annotations` (string-valued, namespaced keys such as `ui/visibility-channel`, `ui/priority`,
+`ui/intent`) may be declared on state transitions, `sharedTransitions`, `cancel`, `exit`,
+`updateData` and `timeout` — **not** on `startTransition`. The runtime passes them through untouched
+to `transitions[].annotations` and `timeout.annotations` in the state function. Declaration rules:
+`transition-pipeline.md` §4; wire shape: `state-function-response.md`.
+
 ## Sources
 
-- Canonical schema: `https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/workflow.json`
+- Canonical schema: `workflow-definition.schema.json` — resolve the URL per `component-schemas.md` (do not hard-code a raw GitHub path)
 - Docs portal: `https://burgan-tech.github.io/vnext-docs/docs/components/workflow`
 - Working examples: `vnext-example/core/Workflows/account-opening/`, `payment-process/`

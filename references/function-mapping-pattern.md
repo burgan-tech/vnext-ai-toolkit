@@ -387,7 +387,7 @@ Working examples in `core/Functions/account-opening/src/GetBranchesLovMapping.cs
 
 ## 9. Function BFF contract — verbs, inputSchema, outputSchema, inputView, outputView
 
-> Runtime support: added after v0.0.79 (vnext PRs #679, #858, #868). On older runtimes these fields are simply not enforced — check `vnext.config.json`'s `runtimeVersion` before relying on them.
+> Runtime support: `verbs` / `inputSchema` / `outputSchema` / `inputView` / `outputView` and `/info` landed in **v0.0.79** (vnext PRs #679, #858, #868); the `catalog` function and `functions.href` in the state response followed (`functionInfoEndpoint` feature in vnext-meta); multi-task `TaskResponse` isolation and duplicate-key rejection are **v0.0.95** (#1025). On older runtimes these fields are simply not enforced — check `vnext.config.json`'s `runtimeVersion` before relying on them.
 
 Functions are vNext's **BFF surface**, in two modes — settle the mode with the user before designing (`AskUserQuestion`):
 
@@ -410,7 +410,13 @@ Validation rule: declaring `inputSchema` alongside verbs that can never carry a 
 
 ### Rule-based contract slots
 
-Each of the four contract slots accepts either a single component reference or an **array of rule entries** — same concept as state/transition views: declaration order, **first match wins**, a trailing rule-less entry is the fallback. A rule that fails to evaluate is logged and skipped. A slot where nothing matches is "no contract", not an error (validation skips; content routes return 404).
+Each of the four contract slots accepts one of **three wire forms** that produce the same in-memory model (`definitions.viewSlot` / `definitions.schemaSlot` in `function-definition.schema.json`):
+
+1. a **single component reference** `{ key, domain, flow, version }` — the common case;
+2. an **array of rule entries** `[ { rule, view|schema, loadData? }, … ]`;
+3. the **wrapped array** `{ "views": [ … ] }` / `{ "schemas": [ … ] }` — what the runtime always writes back.
+
+Same concept as state/transition views: declaration order, **first match wins**, a trailing rule-less entry is the fallback. Publish-time rules (`FunctionComponentValidator`): **at most one rule-less entry and it must be last** (anything after it is unreachable); a function **view entry may not carry `extensions`** (there is no data function to apply them to); a schema entry has no `loadData`. A rule that fails to evaluate is logged at Warning and skipped — never fatal. A slot where nothing matches is "no contract", not an error (body validation skips; `/view` and `/schema` return 404 `Function:800004`). Rules run against one lazily built `ScriptContext` shared by all four slots; on `/info`, `/view`, `/schema` there is no request body, so rules see the instance's latest data as `Body`.
 
 ```jsonc
 "attributes": {
@@ -425,16 +431,40 @@ Each of the four contract slots accepts either a single component reference or a
 
 ### Discovery endpoints
 
-Clients discover a function's contract without invoking it:
+Clients discover a function's contract without invoking it. All routes are `GET`-only, carry **no `ETag` / no 304**, and run the **same** scope + role gate as execution (`IFunctionAccessPolicy`) — a caller who cannot invoke the function gets **403**, not a description.
 
 ```
+GET {domain}/functions                                                 # every function's full component JSON (tooling)
 GET {domain}/functions/{fn}/info
-GET {domain}/functions/{fn}/view?target=input|output
+GET {domain}/functions/{fn}/view?target=input|output                   # target defaults to input
 GET {domain}/functions/{fn}/schema?target=input|output
-GET {domain}/workflows/{wf}/instances/{id}/functions/{fn}/info      (+ view/schema variants)
+GET {domain}/workflows/{wf}/instances/{id}/functions/catalog          # built-in: functions this instance's workflow declares
+GET {domain}/workflows/{wf}/instances/{id}/functions/{fn}/info         (+ view / schema variants)
 ```
 
-`/info` answers "may I run this, with which verb, at which URL, and which view/schema applies right now" — scope and role checks apply (denial is **403**; an unauthorized caller learns nothing about the shape). Built-in system functions (`state`, `view`, `data`, …) have no component and 404 from `/info`. The instance **state response** also carries the workflow's function links (`functions` array / catalog href, version-dependent) so a polling client discovers them without an extra round trip.
+Careful: `GET {domain}/functions/{fn}` (no suffix) **invokes** the function — it is not a metadata route.
+
+**`/info` response** (`FunctionInfoAppService`): `key`, `domain`, `version`, `scope`, `rawResponse`, `cacheable`, `function { href, verbs[] }`, `inputView { href, hasView, loadData }`, `outputView { href, hasView, loadData }`, `inputSchema { href, hasSchema }`, `outputSchema { href, hasSchema }`. The `has*` flags say whether following the href *right now* returns content; the href is emitted either way because a rule can match on a later call.
+
+**`/catalog` response** (`CatalogFunctionHandler`): `{ "functions": [ { "name", "version", "scope", "href" } ] }` in declaration order, **role-filtered** — a function the caller could not invoke is not advertised; an unresolvable reference is logged and omitted. `href` points at `/info` and follows the scope: **`D` → domain route**, **`F` / `I` → instance route** (the domain route rejects `F`/`I` with 403). The state response points here via `functions: { hasFunctions, href }`; `hasFunctions` is not part of the state ETag. See `state-function-response.md`.
+
+**Error codes** (`WorkflowErrorCodes.cs`, `Function:8000xx`):
+
+| Code | HTTP | Meaning |
+|---|---|---|
+| `Function:800001` | access gate | function not declared by this workflow (`FunctionNotInWorkflow`) |
+| `Function:800002` | access gate (403 on the domain route for `F`/`I`) | scope not satisfied (`FunctionScopeNotSatisfied`) |
+| `Function:800003` | 405 | verb not in `verbs[]` — response carries `Allow: <declared verbs>` |
+| `Function:800004` | 404 | contract slot resolved to nothing on `/view` or `/schema` |
+| `Function:800005` | 400 | `target` is neither `input` nor `output` |
+
+Verb handling: comparison is case-insensitive (`"post"` == `"POST"`); the HTTP `QUERY` method is **deliberately rejected** at definition time — model body-carrying reads as `POST`. `inputSchema` failure is **400 with field-level errors**; `outputSchema` is never enforced.
+
+**Built-ins that 404 on `/info`** (no `sys-functions` component behind them — `FunctionTypeConst.cs`): `state`, `view`, `data`, `schema`, `extensions`, `authorize`, `permissions`, `hierarchy`, `human-task`, `master`, `catalog`, `tasks`, `actions`.
+
+### Multi-task functions — response slots and key collisions
+
+With `onExecutionTasks[]`, each task files its result under **`TaskResponse[ToVariableName(task.key)]`** (and the same slot in `OutputResponse`) — `user-info` → `userInfo`. Since **0.0.95** (#1025) every slot is an **isolated copy**; on ≤ 0.0.94 all `TaskResponse` slots carried the *last* task's payload (`function-multi-task-taskresponse-slot-collision`) — read `OutputResponse[variable]` there. Because normalisation is lossy, `user-info` and `user_info` both become `userInfo`; since 0.0.95 `FunctionComponentValidator.ValidateTaskKeysDistinct` **rejects such a function at publish** (`function-multi-task-duplicate-keys-rejected-at-publish`), even on republish of a previously accepted definition. Give every task a key that normalises to a distinct variable name.
 
 ### Designing a BFF View
 

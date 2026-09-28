@@ -45,23 +45,35 @@ Inspect the working directory:
 
 ## Step 2 — Version check (both modes)
 
-`vnext.config.json` now exists. Look up the latest published versions:
+`vnext.config.json` now exists. Compare its `runtimeVersion` / `schemaVersion` with what the toolkit
+**knows** (offline, deterministic) and, optionally, with what is **published**:
 
-- `schemaVersion` — latest release of `burgan-tech/vnext-schema`
-  (`gh api repos/burgan-tech/vnext-schema/releases/latest`, or the releases page).
-- `runtimeVersion` — latest `BBT.Workflow.Scripting` on NuGet (and/or the runtime image tag).
+1. **Known versions** — `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `.vnext.knownRuntimeVersion`
+   and `.vnext.knownSchemaVersion`. These are the runtime/schema the toolkit's references, skills and
+   `references/runtime-feature-matrix.md` describe. A workspace **below** them cannot use every
+   feature the toolkit will suggest (check `since` in the matrix); a workspace **above** them means
+   the toolkit itself is behind — say so and suggest `claude plugin marketplace update burgan-tech`.
+2. **Published versions** (only if network is available and the user wants "latest"):
+   - `schemaVersion` — latest release of `burgan-tech/vnext-schema`
+     (`gh api repos/burgan-tech/vnext-schema/releases/latest`, or the releases page).
+   - `runtimeVersion` — latest `@burgan-tech/vnext-meta` on npm (`npm view @burgan-tech/vnext-meta version`;
+     the package version tracks the runtime release) or the runtime image tag.
 
-If either differs from the values in `vnext.config.json`, use `AskUserQuestion` to ask whether to
-update each (mark "update to latest" as Recommended). **Only edit `vnext.config.json` on
-confirmation.** This is the only place this command touches the CLI-owned config.
+If either value in `vnext.config.json` differs, use `AskUserQuestion` to ask whether to update each
+— offer the **known** version as "(Recommended)" and the published one as an alternative when it is
+newer. **Only edit `vnext.config.json` on confirmation.** This is the only place this command touches
+the CLI-owned config. `runtimeVersion` and `schemaVersion` must stay a pair that appears together in
+the matrix's "Runtime → schema versions" table.
 
 ## Steps 3+ — Layer / revise the toolkit-owned files
 
 These files are **not** produced by the CLI; they are the toolkit's value-add. For each one: resolve
 its target path, render the matching `${CLAUDE_PLUGIN_ROOT}/templates/*.tmpl` (the templates live in
 the **plugin's install directory**, never in the workspace) by substituting ONLY these placeholders:
-`{{domain}}` and `{{workflowKey}}` from `vnext.config.json`, and `{{toolkitVersion}}` from
-`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `.version`.
+`{{domain}}` and `{{workflowKey}}` from `vnext.config.json`; `{{toolkitVersion}}` from
+`${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `.version` and `{{knownRuntimeVersion}}` from
+`.vnext.knownRuntimeVersion`; and the agent-file pair `{{agentFile}}` / `{{agentAudience}}` /
+`{{peerFile}}` / `{{peerAudience}}` (values in Step 3).
 
 > **Placeholder allowlist — do not blanket-replace `{{...}}`.** Tokens like `{{baseUrl}}`,
 > `{{apiVersion}}`, `{{instanceId}}`, `{{start.response.body.$.id}}` in `.http` content are VS Code
@@ -73,10 +85,17 @@ Then:
 - **Already exists** → **diff** the existing file against the rendered template, show what differs,
   and ask per file whether to **overwrite**, **skip**, or merge. **Never overwrite silently.**
 
-### 3 — `CLAUDE.md` and `AGENTS.md`
-- `CLAUDE.md` ← `${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md.tmpl`; `AGENTS.md` ←
-  `${CLAUDE_PLUGIN_ROOT}/templates/AGENTS.md.tmpl` (same content, Codex-friendly header). Keep the
-  two mirrored — if only one exists, offer to mirror to the other.
+### 3 — `CLAUDE.md` and `AGENTS.md` (one template, rendered twice)
+Both come from `${CLAUDE_PLUGIN_ROOT}/templates/CLAUDE.md.tmpl`; there is no separate AGENTS template.
+Render it twice with these fixed placeholder sets (everything else identical):
+
+| Target | `{{agentFile}}` | `{{agentAudience}}` | `{{peerFile}}` | `{{peerAudience}}` |
+|---|---|---|---|---|
+| `CLAUDE.md` | `CLAUDE.md` | `Claude Code (claude.ai/code)` | `AGENTS.md` | `Codex` |
+| `AGENTS.md` | `AGENTS.md` | `Codex (and any AGENTS.md-compatible agent)` | `CLAUDE.md` | `Claude Code` |
+
+If only one of the two exists, offer to create the other. The bodies are identical by construction;
+`diff CLAUDE.md AGENTS.md` must show only lines 1, 4 and 6.
 
 ### 4 — `docker-compose.yml` + MockLab seed + Dapr config
 - `docker-compose.yml` ← `${CLAUDE_PLUGIN_ROOT}/templates/docker-compose.yml.tmpl` (MockLab + `mocklab-dapr` sidecar).
@@ -86,13 +105,20 @@ Then:
 - Remind: after editing seed files later, run `docker compose down -v && docker compose up -d mocklab`
   to force a re-import (MockLab skips collections that already exist by name).
 
-### 5 — `.claude/references/` pattern guides
-Copy these four guides from `${CLAUDE_PLUGIN_ROOT}/templates/` (no substitution) so the AI has
-in-repo pattern context even if the plugin is uninstalled:
-- `view-author-guide.md`
-- `function-mapping-pattern.md`
-- `mocklab-seed-format.md`
-- `csx-contracts.md` (the `.csx` interface contracts, `ScriptContext` surface, dynamic type model, and `ScriptBase` helper reference — without it a workspace has no interface-contract source)
+### 5 — `.claude/references/` — runtime knowledge copied into the workspace
+Read the list `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `.vnext.workspaceReferences[]`
+(plugin-relative paths such as `references/concepts/task-types.md`). Copy **each** file verbatim (no
+substitution) to `.claude/references/<basename>` so the AI has in-repo runtime context even if the
+plugin is uninstalled. Do not hard-code the list here — the manifest is the single source. The set
+covers: `.csx` contracts, function mapping pattern, MockLab seed format, view author guide, workflow
+types, transition pipeline / `updateData`, roles & `authorize`, component choice, schema vocabularies,
+mapping types, task types 1–23, FanOut, state function response, long-poll `interaction`, human task,
+subflow `overrides`, instance query / `x-indexed`, incidents & retry, observability, runtime operations,
+schema↔runtime gaps, and the generated runtime feature matrix.
+
+Since the set is large, ask **once** ("copy N reference guides into `.claude/references/`?") rather
+than once per file. Existing files that differ are handled like any other toolkit-owned file (diff,
+then overwrite/skip) — but batch the question: "M of N differ — update all / review one by one / skip".
 
 ### 6 — `api-tests/` + `.http`
 If missing, create `api-tests/` with a `.gitkeep` and a short README pointing at
@@ -129,16 +155,14 @@ staleness later (create `.claude/` if needed):
 ```json
 {
   "toolkitVersion": "<version from ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json>",
+  "knownRuntimeVersion": "<.vnext.knownRuntimeVersion from the same manifest>",
   "updatedAt": "<today, YYYY-MM-DD>",
   "files": [
     "CLAUDE.md",
     "AGENTS.md",
-    ".claude/references/view-author-guide.md",
-    ".claude/references/function-mapping-pattern.md",
-    ".claude/references/mocklab-seed-format.md",
-    ".claude/references/csx-contracts.md",
     "docker-compose.yml",
-    "etc/dapr/config.yaml"
+    "etc/dapr/config.yaml",
+    ".claude/references/<basename>   // one entry per workspaceReferences item actually written"
   ]
 }
 ```
@@ -158,6 +182,9 @@ carry the matching `<!-- vnext-ai-toolkit vX.Y.Z -->` comment via `{{toolkitVers
   dotnet test tests/{Domain}.IntegrationTests   # if tests scaffolded (Testcontainers + .NET 10 SDK)
   docker compose up -d mocklab                   # if you'll develop with mocked endpoints
   ```
+- If `runtimeVersion` in `vnext.config.json` is below the toolkit's `knownRuntimeVersion`, say which
+  it is and point at `.claude/references/runtime-feature-matrix.md` for the features that are not
+  available on that runtime.
 - Suggest: `/vnext-design-process "<your first workflow name>"` to start designing.
 - Remind: after updating the plugin later (`claude plugin marketplace update burgan-tech`), run
   **`/vnext-update`** to refresh these toolkit-owned files.

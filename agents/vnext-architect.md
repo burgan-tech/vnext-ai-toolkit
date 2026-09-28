@@ -60,9 +60,9 @@ Recommended). Two Function shapes to offer:
 If the user confirms Function, delegate to the `component-function` skill and skip the workflow
 phases entirely. Only continue below when the process genuinely has states/instance data.
 
-Fetch `vnext-schema/schemas/workflow.json` to populate the next question's enum options. Then ask:
+Load `node_modules/@burgan-tech/vnext-schema/schemas/workflow-definition.schema.json` (rules: `references/concepts/component-schemas.md`) to populate the next question's enum options. Then ask:
 
-4. **What kind of workflow is this?** Render options from `workflow.json` `attributes.type.enum`. Annotate the most common choices ("F — top-level user flow (Recommended for most cases)"; "S — reusable sub-procedure"; "P — parallel background work").
+4. **What kind of workflow is this?** Render options from the workflow schema `attributes.type.enum`. Annotate the most common choices ("F — top-level user flow (Recommended for most cases)"; "S — reusable sub-procedure started as a SubFlow state"; "P — SubProcess, an independent child started only via a SubProcessTask (type 14) — never as a state-level `subFlow.type: "P"`, the runtime rejects that at publish since 0.0.95").
 
 Capture: `workflowKey`, `businessGoal`, `actorModel` (single/multi), `workflowType`.
 
@@ -72,24 +72,29 @@ Goal: lay out the state machine.
 
 5. **Multi-actor?** **Roles require explicit user confirmation: always ask the user whether this flow should configure roles at all before adding any** (roles add real complexity for vNext newcomers — make "no roles" the default/Recommended option). Only if the user confirms, plan `queryRoles[]` (the canonical schema and `roles-and-authorization.md` describe the system role tokens — `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` — and JSONPath grants). For most flows the answer is "no" — skip if the user said single actor in Phase 1.
 
-6. **Are there reusable sub-procedures or parallel branches?**
-   - Reusable nested → SubFlow (S) — note the child workflow keys.
-   - Parallel background → SubProcess (P) — note the child workflow keys.
+6. **Are there reusable sub-procedures, independent child processes, or per-item parallel work?**
+   - Reusable nested procedure whose result flows back → **SubFlow** (`stateType: 4` + child of type `S`) — note the child workflow keys; ask whether the parent must override the child's timeout/roles/views/long-poll (`subFlow.overrides`, `references/concepts/subflow-overrides.md`).
+   - Independent child that outlives or runs beside the parent → **SubProcess** (child of type `P`) started by a **`SubProcessTask` (type 14)** on a transition or state hook — never as a state-level `subFlow.type: "P"` (rejected at publish since 0.0.95).
+   - "Do X for each item in a list" → **FanOut task** (type 21) inside a transition (`references/concepts/fan-out.md`), not a loop of auto transitions.
    - Neither → continue.
 
 7. **List the states.** Walk the user through their process step by step. For each state ask:
    - State key (kebab-case)
    - State kind — render `stateType.enum` from the schema. Annotations: "Initial — the starting point (exactly one per workflow)"; "Wizard — step-by-step form (single transition with the form on it)"; "Intermediate — most states"; "Final — workflow ends here".
    - Does this state show the user something (a view)? What kind — an input form, or read-only summary?
+   - **Does a person act here** (approve / review / complete a manual step)? → human task state: `subType: 6`, `queryRoles` (mandatory, fail-closed), and `humanTask: {title, description}` written into instance data on entry (`references/concepts/human-task.md`).
+   - **Must the engine wait for a specific client to render this state** before it continues (result screen, hand-over to another actor)? → `interaction.longPoll { terminate: true, fallbackTimeoutSeconds, roles|rule }` (`references/concepts/long-poll-interaction.md`).
    - **Initial-state input convention** — if this is the Initial state AND it gathers input, default to placing the form on `state.view` (not on the outgoing transition). Confirm with `AskUserQuestion`; mark state-view as Recommended. The runtime serves state views immediately on instance start — putting the form on the transition forces an extra discovery hop. Wizard states (5) are the exception: their form belongs on the single transition by design.
 
 8. **Map the transitions.** Keep the **admission model (v0.0.79+)** in mind while designing:
    normal shared/state transitions get a **409 while the instance is Busy**; `cancel`/`exit`
-   bypass the busy check; **`updateData` bypasses all lock/busy checks** — it is the only way to
-   write data and advance under parallel requests, and with an active subflow it updates the
-   *parent's* data without forwarding. For flows with parallel branches, fan-in states, loops, or
-   concurrent client writes, ask the user whether an `updateData` definition is needed
-   (`workflow-types.md` § 3.1). For each state, ask what happens to leave it:
+   bypass the busy check; **`updateData` is admitted unconditionally** (lock-free, `target: "$self"`,
+   trimmed pipeline) — it is the only way to write data and advance under parallel requests, and
+   with an active subflow it updates the *parent's* data without forwarding. For flows with
+   parallel branches, fan-in states, loops, or concurrent client writes, ask the user whether an
+   `updateData` definition is needed (`references/concepts/transition-pipeline.md`). Ask whether the
+   UI needs `annotations` on transitions/timeout (`ui/priority`, `ui/intent`, …). For each state,
+   ask what happens to leave it:
    - Target state
    - Trigger — render `triggerType.enum` from the schema. Annotate: "Manual — user clicks (Recommended for most)"; "Auto — engine evaluates a rule"; "Timer — fires after a duration"; "Event — external signal".
    - For auto transitions: warn that they must come in **complementary pairs** with mutually exclusive rules, OR be a single unconditional transition. Ask the user to specify both branches.

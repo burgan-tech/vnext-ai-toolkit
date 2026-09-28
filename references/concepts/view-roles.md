@@ -1,6 +1,6 @@
 # View Roles & pseudo-UI Data Binding
 
-> **Schema first.** View `attributes.type`, `display`, and `renderer` enum values come from the canonical `view.json` schema. Treat this file as a mental model; if it conflicts with the schema, the schema wins.
+> **Schema first.** View `attributes.type`, `display`, and `renderer` enum values come from the canonical `view-definition.schema.json` (see `component-schemas.md`). Treat this file as a mental model; if it conflicts with the schema, the schema wins.
 
 ## 1. View `type` and `renderer`
 
@@ -59,6 +59,8 @@ This is a **default with confirmation**: the skill should propose state-view pla
 fires automatically on instance creation. It *can* carry a `schema` to validate the initial payload
 (service-to-service flows). Client flows start with base info and collect input on the initial-state
 view. See `workflow-types.md` § Start transition.
+
+**SubFlow view swaps.** When a parent embeds a child SubFlow (`stateType: 4`), it replaces the child's views per state / per transition with `subFlow.overrides.states.<stateKey>.views.<viewKey>` and `subFlow.overrides.transitions.<transitionKey>.views.<viewKey>` (value = a `sys-views` reference). The older key-wide `subFlow.viewOverrides` map is **deprecated since 0.0.95** (`subflow-view-overrides-legacy`); do not author it. Shapes and examples: `subflow-overrides.md`. <!-- lint:allow -->
 
 ## 4. pseudo-UI vocabulary (high-level)
 
@@ -141,7 +143,7 @@ These `x-*` keywords live on schema properties and are consumed by the view laye
 
 ## Sources
 
-- Canonical schema: `https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/view.json`
+- Canonical schema: `view-definition.schema.json` — resolve it as described in `component-schemas.md`
 - Vocabulary: `https://burgan-tech.github.io/vnext-docs/docs/how-to/view-consept/view-yapisi`
 - Designer guide: `https://burgan-tech.github.io/vnext-docs/docs/how-to/view-consept/tasarimci-rehberi`
 - Data flow: `https://burgan-tech.github.io/vnext-docs/docs/how-to/view-consept/data-akisi`

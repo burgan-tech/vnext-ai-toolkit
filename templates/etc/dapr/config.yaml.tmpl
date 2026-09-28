@@ -3,10 +3,22 @@ kind: Configuration
 metadata:
   name: {{domain}}-config
 spec:
+  # Local name resolution: `mdns`, pinned explicitly (the cluster's `kubernetes` resolver cannot
+  # resolve in Docker, and daprd 1.16 ships no `nameformat` resolver). Same setting as the runtime's
+  # own etc/*/dapr/config.yaml, so this sidecar can be invoked by app-id from the runtime sidecars
+  # (vnext-{{domain}}-app / vnext-{{domain}}-execution-app) when they share a Docker network.
+  nameResolution:
+    component: "mdns"
   tracing:
     samplingRate: "1"
-    zipkin:
-      endpointAddress: "http://zipkin:9411/api/v2/spans"
+    # Key MUST be `otel` (Dapr's TracingSpec has no `otlp` field — an `otlp:` block is silently
+    # ignored and no exporter is built). `protocol` and `isSecure` are both required. The endpoint
+    # is the runtime compose stack's collector (fans out to OpenObserve :5080 and Elastic APM); if
+    # you run MockLab without the runtime stack, remove this block or point it at your collector.
+    otel:
+      endpointAddress: "otel-collector:4317"
+      protocol: "grpc"
+      isSecure: false
   features:
     - name: ServiceInvocationStreaming
       enabled: true
