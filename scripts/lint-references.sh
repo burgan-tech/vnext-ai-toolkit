@@ -81,7 +81,14 @@ if [ -f templates/CLAUDE.md.tmpl ]; then
 fi
 
 echo "== shell syntax"
-for s in hooks/*.sh scripts/*.sh; do sh -n "$s" || red "syntax error in $s"; done
+# Check each script with the interpreter its shebang names (bash scripts use arrays that POSIX sh/dash rejects).
+for s in hooks/*.sh scripts/*.sh; do
+  case "$(head -1 "$s")" in
+    *bash*) interp=bash ;;
+    *) interp=sh ;;
+  esac
+  "$interp" -n "$s" || red "syntax error in $s ($interp -n)"
+done
 
 if [ "$fail" -eq 0 ]; then [ "$warn" -eq 1 ] && echo "lint: OK (with warnings)" || echo "lint: OK"; exit 0; fi
 echo "lint: FAILED"; exit 1
