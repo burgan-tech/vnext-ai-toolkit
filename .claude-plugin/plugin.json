@@ -1,7 +1,7 @@
 {
   "name": "vnext-ai-toolkit",
   "version": "0.0.6",
-  "description": "AI tooling for the vNext platform: process designer (multi-turn architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration test scaffolding. Canonical schema-first — every component is generated from the official JSON Schema at the workspace's schemaVersion tag, never from hardcoded assumptions.",
+  "description": "AI tooling for product teams building on the vNext platform: process designer (multi-turn architect), component scaffolders (workflow/view/schema/task/function/extension), workspace bootstrap, integration and local e2e testing, runtime-cost audit (domain-check), and evidence-backed runtime issue reporting. Canonical schema-first — every component is generated from the official JSON Schema at the workspace's schemaVersion tag, never from hardcoded assumptions.",
   "author": {
     "name": "Burgan Tech vNext Team",
     "url": "https://github.com/burgan-tech"
@@ -39,7 +39,10 @@
     "./commands/validate.md",
     "./commands/review-components.md",
     "./commands/build.md",
-    "./commands/security-audit.md"
+    "./commands/security-audit.md",
+    "./commands/e2e.md",
+    "./commands/domain-check.md",
+    "./commands/report-issue.md"
   ],
   "skills": [
     "./skills/authoring-vnext-components",
@@ -52,7 +55,10 @@
     "./skills/component-mapping",
     "./skills/integration-test",
     "./skills/validate-and-fix",
-    "./skills/security-audit"
+    "./skills/security-audit",
+    "./skills/e2e-local",
+    "./skills/domain-check",
+    "./skills/report-runtime-issue"
   ],
   "references": [
     "references/decision-tree.md",
@@ -132,6 +138,7 @@
       "references/concepts/schema-runtime-gaps.md",
       "references/concepts/field-protection.md",
       "references/concepts/file-fields.md",
+      "references/concepts/integration-test-patterns.md",
       "references/runtime-feature-matrix.md"
     ]
   }

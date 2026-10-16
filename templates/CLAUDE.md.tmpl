@@ -12,11 +12,11 @@ npm run validate        # Validate all components against schemas (run before ev
 npm run build           # Build runtime package (default)
 npm run build:reference # Build reference package (exports only, for cross-domain usage)
 npm run build:runtime   # Explicitly build runtime package
-npm test                # Run tests
+npm test                # Structure/validation smoke test of the package (NOT the e2e suite)
 npm run sync-schema     # Sync schema version from dependencies
 ```
 
-For security review, use the security audit workflow in this repository or ask for a security review of the current domain.
+For security review, use the security audit workflow in this repository or ask for a security review of the current domain. For a runtime-cost audit run `/vnext-ai-toolkit:domain-check`; for a problem that is the runtime's, not this domain's, run `/vnext-ai-toolkit:report-issue`.
 
 ## Reference index — read the matching guide before acting
 
@@ -36,18 +36,21 @@ The toolkit copies its runtime knowledge into `.claude/references/`. This file o
 | [`long-poll-interaction.md`](./.claude/references/long-poll-interaction.md) | a client must render before the engine continues (`interaction.longPoll`, ack) |
 | [`human-task.md`](./.claude/references/human-task.md) | a person approves/acts in a state (`subType: 6`, `queryRoles`, `humanTask` data, `functions/human-task`) |
 | [`subflow-overrides.md`](./.claude/references/subflow-overrides.md) | a parent must change a child's timeout/roles/views/long-poll (`subFlow.overrides`) |
-| [`roles-and-authorization.md`](./.claude/references/roles-and-authorization.md) | anything with `roles`, `queryRoles`, `availableIn`, `x-roles`, the `authorize` function, the gateway |
+| [`roles-and-authorization.md`](./.claude/references/roles-and-authorization.md) | anything with `roles`, `queryRoles`, `availableIn`, `x-roles`, `$` roles, credential headers, morph-idm, the `authorize` function, the gateway |
+| [`field-protection.md`](./.claude/references/field-protection.md) | a field holds personal or sensitive data (`x-roles`, `x-masking`, `x-encryption`, `x-computed`, `DecryptAsync`) |
+| [`file-fields.md`](./.claude/references/file-fields.md) | a field carries a file (`x-storage`, `functions/file`, `GetFileAsync`, the blob binding) |
 | [`function-vs-extension-vs-task.md`](./.claude/references/function-vs-extension-vs-task.md) | decide which component type a requirement needs |
-| [`schema-vocabularies.md`](./.claude/references/schema-vocabularies.md) / [`instance-query.md`](./.claude/references/instance-query.md) | design a schema (`x-*` keywords) or query/filter/sort instances (`x-filterOperators` names, `x-indexed`, error codes) |
+| [`schema-vocabularies.md`](./.claude/references/schema-vocabularies.md) / [`instance-query.md`](./.claude/references/instance-query.md) | design a schema (role × `x-*` keyword matrix, `x-context-*`) or query/filter/sort instances (`x-filterOperators` names, `x-indexed`, error codes) |
 | [`mapping-types.md`](./.claude/references/mapping-types.md) | choose the `.csx` interface for a slot |
 | [`incidents-and-retry.md`](./.claude/references/incidents-and-retry.md) | an instance faulted (incident endpoints, retry rules) |
 | [`observability.md`](./.claude/references/observability.md) / [`runtime-operations.md`](./.claude/references/runtime-operations.md) | debug a transition end-to-end (EventIds, spans, correlation headers) or set up/understand discovery, cache, locks, 409 codes |
+| [`integration-test-patterns.md`](./.claude/references/integration-test-patterns.md) | write or run integration tests (SDK modes, `WorkflowTestBase`, authorization header scenarios, traps) |
 | [`schema-runtime-gaps.md`](./.claude/references/schema-runtime-gaps.md) | `npm run validate` and the runtime disagree |
-| [`runtime-feature-matrix.md`](./.claude/references/runtime-feature-matrix.md) | check *since which runtime version* a feature exists (generated from `@burgan-tech/vnext-meta`) |
+| [`runtime-feature-matrix.md`](./.claude/references/runtime-feature-matrix.md) | check *since which runtime version* a feature exists (offline snapshot of `vnext-meta`; the live copy is vnext master, see below) |
 
 ## Runtime version awareness
 
-The toolkit's knowledge describes runtime **v{{knownRuntimeVersion}}**. Read `runtimeVersion` from `vnext.config.json` first: if it is older, look the feature up in `runtime-feature-matrix.md` (`since`) before proposing it, and say so when it is unavailable; if it is newer, treat guidance about newer behaviour as unverified. Where the pinned JSON Schema and the runtime disagree (task types 22/23, `errorBoundary.action`, `longPoll` `roles`/`rule`, state-level `subFlow.type "P"`, `x-filterOperators` names), `schema-runtime-gaps.md` is the tie-breaker.
+The toolkit's knowledge describes runtime **v{{knownRuntimeVersion}}**. Read `runtimeVersion` from `vnext.config.json` first: if it is older, look the feature up in `runtime-feature-matrix.md` (`since`) before proposing it, and say so when it is unavailable; if it is newer, treat guidance about newer behaviour as unverified. `vnext-meta` is always current on vnext master — the toolkit reads it live (`scripts/vnext-meta-live.sh known-issues|features|deprecations`) before calling something a bug. Where the pinned JSON Schema and the runtime disagree (task type 23, legacy schema `attributes.type`, `errorBoundary.action`, state-level `subFlow.type "P"`), `schema-runtime-gaps.md` is the tie-breaker. This team has no write access to the vnext repositories: a runtime defect goes to `/vnext-ai-toolkit:report-issue`, never into a workaround in someone else's repo.
 
 ## Architecture Overview
 
@@ -98,16 +101,16 @@ The authoritative field list for every component is the pinned schema: `node_mod
 
 | Component | `paths` key | Required `attributes` | Detail source |
 |-----------|-------------|------------------------|---------------|
-| Workflow | `paths.workflows` | `type` (F/S/P/C), `startTransition`, `states`, `labels`; master `schema` (domain rule) | `workflow-types.md`, `/docs/components/workflow` |
+| Workflow | `paths.workflows` | `type` (F/S/P/C), `startTransition`, `states`, `labels`; master `schema` (domain rule); optional `executionType` (S/A), `history` (`none` for one-shot flows) | `workflow-types.md`, `/docs/components/workflow` |
 | View | `paths.views` | `display`, `renderer`, `content` | `view-author-guide.md`, `/docs/components/view` |
 | Task | `paths.tasks` | `type` (string number), `config` | `task-types.md`, `/docs/components/tasks/{subtype}` |
-| Schema | `paths.schemas` | `type`, `schema` (JSON Schema draft 2020-12) | `schema-vocabularies.md`, `/docs/components/schema` |
+| Schema | `paths.schemas` | `type` = **role** (`master`/`transition`/`function`/`component`, or omit), `schema` (JSON Schema draft 2020-12) | `schema-vocabularies.md`, `/docs/components/schema` |
 | Function | `paths.functions` | `scope` (D/F/I), `task` or `onExecutionTasks[]` + `output`, `rawResponse`; contract: `verbs[]`, `inputSchema`, `outputSchema`, `inputView`, `outputView`, `cache` | `function-mapping-pattern.md` § 9 |
 | Extension | `paths.extensions` | `type`, `scope`, `task` / `tasks` — runs on **read** surfaces only (0.0.93) | `/docs/components/extension` |
 | Mapping | `paths.mappings` | `name` (C# class), `location`, `code`, `encoding` (`B64`/`NAT`) — reusable `sys-mappings` helper | `/docs/components/mappings` |
 | Inline `.csx` | workflow folder `src/` | C# class (PascalCase) inside a `mapping`/`rule`/`timer` | `csx-contracts.md` |
 
-**Task `type` quick map:** `6` HTTP, `7` Script, `10` Notification, `11`/`12` Start/DirectTrigger, `13`/`19` GetInstanceData/GetInstance, `14` SubProcess (the only way to start a SubProcess), `15` GetInstances, `16` SOAP, `17` StateStore, `18` CacheAside, `20` DaprConversation, `21` **FanOut** (one inner task per collection item), `22` ExternalHttp (deprecated → 6), `23` Python (experimental). `3`/`6`/`16`/`17`/`18` run in-process on Orchestration by default. Type `5` is a stub — a human step is a *state* (`subType: 6`). The pinned schema validates `"1"`–`"21"` only.
+**Task `type` quick map:** `6` HTTP, `7` Script, `10` Notification, `11`/`12` Start/DirectTrigger, `13`/`19` GetInstanceData/GetInstance, `14` SubProcess (the only way to start a SubProcess), `15` GetInstances, `16` SOAP, `17` StateStore, `18` CacheAside, `20` DaprConversation, `21` **FanOut** (one inner task per collection item), `22` ExternalHttp (deprecated → 6), `23` Python (experimental). `3`/`6`/`16`/`17`/`18` run in-process on Orchestration by default. Type `5` is a stub — a human step is a *state* (`subType: 6`). Schema 0.0.55+ validates `"1"`–`"22"`; `23` does not validate. CacheAside (`18`) runs its `sourceTask` as a real task and takes a script `key` (no `keyExpression`, 0.0.99).
 
 ### Views — ask the renderer first, then follow the guide
 
@@ -115,7 +118,7 @@ The first question for any view is **which renderer** — `pseudo-ui` (recommend
 
 - **Wizard state (`stateType: 5`)** — `state.view = null`; the form sits on its single transition.
 - **Auto (`triggerType: 1`) and timer (`2`) transitions** — `view: null`; passive intermediate states usually have no view either.
-- **`dataSchema` follows the view's role** — transition/input views bind the transition payload schema; display/summary views bind the master schema (which deliberately has no `required` and `additionalProperties: true`).
+- **`dataSchema` follows the view's role** — transition/input views bind a `transition`-role schema; display/summary views bind the `master` schema (which deliberately has no `required` and `additionalProperties: true`); an embedded component's own schema is `component` (where `x-binding` lives).
 - **A parent changing a SubFlow child's view** — `subFlow.overrides.states.<s>.views` / `transitions.<k>.views`, never a fork of the child (`subflow-overrides.md`).
 
 ### Functions — `.csx` pattern and BFF modes
@@ -127,37 +130,39 @@ Functions wrap upstream task results as a `StandardTaskResponse` (`{ data, body,
 3. **GET calls carry no body** — read `context.QueryParameters` → `Headers` → `Body` (there is no `context.QueryString`).
 4. **Branch on `statusCode` and tag** the `ScriptResponse` (`success` / `failure` / `not-found` / `exception`).
 
-**Two BFF modes — settle with the user first.** *BFF API* (verbs + schemas, no view fields) or *BFF View* (a stateless single input→output page: the function declares `inputView`/`outputView`). A stateless page or pure API is a Function, not a workflow. Contract: `verbs[]` (mismatch → 405 + `Allow`, no `QUERY`), `inputSchema` (→ 400), `outputSchema` (declarative), rule-based slots (first match wins, one rule-less tail). Discovery: `GET …/functions/{fn}/info`, `…/view?target=`, `…/schema?target=`, per-instance `…/functions/catalog`. `roles` on a function only filters the catalog — enforcement is the gateway's `authorize?functionKey=`. Multi-task functions: task keys must normalise to distinct variable names.
+**Two BFF modes — settle with the user first.** *BFF API* (verbs + schemas, no view fields) or *BFF View* (a stateless single input→output page: the function declares `inputView`/`outputView`). A stateless page or pure API is a Function, not a workflow. Contract: `verbs[]` (mismatch → 405 + `Allow`, no `QUERY`), `inputSchema` (→ 400), `outputSchema` (declarative), rule-based slots (first match wins, one rule-less tail). Discovery: `GET …/functions/{fn}/info`, `…/view?target=`, `…/schema?target=`, per-instance `…/functions/catalog`. `roles` on a function only filters the catalog — enforcement is the gateway's `authorize?functionKey=`. Multi-task functions: response slots (`variableKey`, else camelCase task key) must be unique across all `onExecutionTasks`. `file`, `state`, `data`, `authorize` … are reserved function names. Opt into execution metrics with `attributes.executionLog: "E"`.
 
 ### Flow execution mental model
 
-1. **Start** — `POST …/instances/start` fires `startTransition` (no `view`, may carry `schema`; **no `annotations`**) and lands on its `target` state.
-2. **State entry** — the state view renders; `onEntry` tasks run (sequential by `order`, parallel at equal order — parallel branches need *distinct* task definitions). A **human step** is a state with `subType: 6` + `queryRoles` (mandatory — without them it is hidden from `GET /{domain}/functions/human-task`) + `humanTask: {title, description}` written into the data root ([`human-task.md`](./.claude/references/human-task.md)). A state may declare `interaction.longPoll { terminate, fallbackTimeoutSeconds, roles | rule }` (exactly one of `roles`/`rule`; write `"roles": []` for everyone) to pause until a client acks `POST …/longpoll/ack` ([`long-poll-interaction.md`](./.claude/references/long-poll-interaction.md)).
+1. **Start** — `POST …/instances/start` fires `startTransition` (no `view`, may carry `schema`; **no `annotations`**) and lands on its `target` — any declared state. An Initial state (`stateType: 1`) is optional since 0.0.99: without one the instance is born in the reserved implicit `$start`. `executionType` `S`/`A` on the flow or transition overrides the caller's `?sync` (0.0.99).
+2. **State entry** — the state view renders; `onEntry` tasks run (sequential by `order`, parallel at equal order — the same task twice at one order needs distinct `variableKey`s, 0.0.99). A **human step** is a state with `subType: 6` + `queryRoles` (mandatory — without them it is hidden from `GET /{domain}/functions/human-task`) + `humanTask: {title, description}` written into the data root ([`human-task.md`](./.claude/references/human-task.md)). A state may declare `interaction.longPoll { terminate, fallbackTimeoutSeconds, roles | rule }` (exactly one of `roles`/`rule`; write `"roles": []` for everyone) to pause until a client acks `POST …/longpoll/ack` ([`long-poll-interaction.md`](./.claude/references/long-poll-interaction.md)).
 3. **Triggers** — `triggerType` `0` manual, `1` auto (rule), `2` timer, `3` event. Auto transitions come in complementary mutually-exclusive pairs or one always-true rule. **Autos (order 80) are evaluated before timers are armed (order 90)** — a state passed through by an auto never schedules its timers.
-4. **Admission (Busy-as-mutex, v0.0.79+)** — a normal transition on a Busy instance gets **409 `Instance:100031`**; `cancel`/`exit`/timeout bypass the busy check; **`updateData` (`target: "$self"`) is admitted unconditionally** and runs a trimmed pipeline (OnExit/OnEntry/timers skipped); with an active SubFlow the **parent** stores the data and does not forward. Route concurrent writes, fan-in and loops through `updateData`; mappings return **deltas only** ([`transition-pipeline.md`](./.claude/references/transition-pipeline.md)).
+4. **Admission (Busy-as-mutex, v0.0.79+)** — a normal transition on a Busy instance gets **409 `Instance:100031`**; `cancel`/`exit`/timeout bypass the busy check; **`updateData` (`target: "$self"`) is admitted unconditionally** and runs a trimmed pipeline (OnExit/OnEntry/timers skipped); with an active SubFlow the **parent** stores the data and does not forward; other transitions are proxied unchanged to the SubFlow leaf, whose 400/403/409 now come back synchronously (0.0.100). Route concurrent writes, fan-in and loops through `updateData`; mappings return **deltas only** ([`transition-pipeline.md`](./.claude/references/transition-pipeline.md)).
 5. **`onExecutionTasks`** — run during the transition, each with a `.csx` mapping. "Do X for every item" is a **FanOut task** (`21`, `join.policy` default `allSettled`, branch on `{resultKey}Summary` with an order-80 auto), not an auto loop ([`fan-out.md`](./.claude/references/fan-out.md)).
 6. **SubFlow / SubProcess** — a SubFlow is a `stateType: 4` state whose child (`type S`) result merges back; a SubProcess (`type P`) is started **only** by a `SubProcessTask` (`14`) — a state-level `subFlow.type: "P"` is rejected at publish (0.0.95). The parent may override the child's timeout/roles/views/long-poll via `subFlow.overrides`. Clients read `metadata.effectiveStatus` (deepest active child) rather than `status`.
 7. **Annotations** — any transition (state, shared, `cancel`, `exit`, `updateData`) and the workflow `timeout` may carry `annotations: { "ui/priority": "high", … }`; they pass through to the state function's `transitions[]` / `timeout`.
 8. **Exit** — loop until a final state (`isFinal: true`). Failures create an **incident** (`GET …/incidents/active`, `POST …/retry` on a Faulted instance) — [`incidents-and-retry.md`](./.claude/references/incidents-and-retry.md).
 
-### Authorization model (0.0.95+)
+### Authorization model (0.0.95+, combinators 0.0.99)
 
 - The runtime **filters visibility** by roles (`transitions[]`, state aliases, `x-roles` field pruning, the human-task list, the function catalog). It does **not** 403 built-in reads (`state`/`data`/`view`/`schema`/`master`/`tasks`/`actions`/`incidents`) or `longpoll/ack` in-process.
 - **Enforcement is the `authorize` function**, called by the gateway (the "middle tier") before forwarding: `GET …/functions/authorize?transitionKey=|functionKey=|queryRoles=true|ack=true` → `{"allowed": bool}` (200/403). A local runtime without a gateway therefore never denies a read.
-- Grant rule: denies are AND-ed and win; allows are OR-ed; an empty set allows (except the human-task list, which hides); a roleless caller cannot clear a role-bound deny (0.0.96). `grant` values are lowercase `allow`/`deny`.
-- `availableIn` entries may carry `roles` (AND-ed with `transition.roles`). Caller roles come from `CallerRoleProvider` `default` (claims, else `role` header) or `morph-idm` (a `role` header overrides it since 0.0.97).
+- **Credential headers** (self-asserted; the gateway is the trust boundary): `act_sub` (actor → `CreatedBy`), `sub` (subject → `CreatedByBehalfOf`), `role`, `position`, `client_id`. Send `sub` **and** `act_sub` on every request — a start without `act_sub` means `$InstanceStarter` never matches. Headers such as `x-roles` or `user_reference` carry no roles.
+- Grant rule: each grant is exactly one of `role` / `allOf` / `anyOf` (depth 1). Denies win and fire on Yes **or Unknown** (a role-bound grant is Unknown for a role-less caller); allows admit only on Yes; an empty set allows (except the human-task list, which hides). `grant` values are lowercase `allow`/`deny`. Reserved roles start with `$`: `$InstanceStarter`, `$InstanceBehalfOfStarter`, `$PreviousUser`, `$PreviousBehalfOfUser`, `$user.$.context.…`, `$userBehalfOf.$.context.…`, `$role.$.context.…`.
+- `authorize?queryRoles=true` decides at the **SubFlow leaf only** (0.0.99) — a root-only `queryRoles` no longer protects the child. `x-roles` prunes **reads** only. Test authorization through `authorize` verdicts and the `transitions[]` list, not through 200s.
+- `availableIn` entries may carry `roles` (AND-ed with `transition.roles`). Caller roles come from `CallerRoleProvider` `default` (`role` header) or `morph-idm` (called with `act_sub`/`sub`/`position`/`client_id`; a `role` header overrides it since 0.0.97; failures yield an empty role set).
 - **Confirm-first:** never add `roles`/`queryRoles` without the user asking for them. Full model: [`roles-and-authorization.md`](./.claude/references/roles-and-authorization.md).
 
 ### Schema design — plan with the user
 
-Do not produce JSON before gathering: fields/types/required; validation (`x-validation`, regex, min/max); localization (`x-labels`); field-level access (`x-roles` with `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` or JSONPath grants — there is **no** `$CurrentUser`); query metadata on the master schema — `x-filterOperators` with the **schema-side names** (`eq, neq, gt, gte, lt, lte, between, contains, startsWith, endsWith, in, nin, isNull`; the wire names `ge`/`le`/`ne`/`like` are translated by the runtime and are *wrong* in a schema), `x-sortable`, `x-displayFormat`, and `x-indexed` (master schema only; no DDL — `wf indexes generate`); and the schema's role (workflow data / transition payload / task I/O). Output: JSON Schema draft 2020-12 with `$id` = `urn:vnext:res:schema:{{domain}}:{key}`; views reference the same URN in `dataSchema`. Details: [`schema-vocabularies.md`](./.claude/references/schema-vocabularies.md), [`instance-query.md`](./.claude/references/instance-query.md).
+Do not produce JSON before gathering: the schema's **role** (`attributes.type`: `master` / `transition` / `function` / `component`; split a schema that would serve two roles); fields/types/required; validation (`x-validation`, regex, min/max); localization (`x-labels`); field-level access (`x-roles` with the `$` roles or JSONPath grants — there is **no** `$CurrentUser`); **for every personal or sensitive field, an explicit decision** on `x-roles` / `x-masking` / `x-encryption` ([`field-protection.md`](./.claude/references/field-protection.md)); client context binding (`x-context-source` on input schemas, `x-context-target` on the master — applied by the client, never the runtime); file fields (`x-storage`, [`file-fields.md`](./.claude/references/file-fields.md)); query metadata on the master schema — `x-filterOperators` with the 14 declaration names (`eq, neq, gt, gte, lt, lte, between, contains, startsWith, endsWith, in, nin, isNull, includes`; publish rejects `ge`/`le`/`like`, which clients still send in queries), `x-sortable`, `x-displayFormat`, and **`x-indexed: true` on every filtered or sorted field** (master only; no DDL — `wf indexes generate`). Output: JSON Schema draft 2020-12 with `$id` = `urn:vnext:res:schema:{{domain}}:{key}`; views reference the same URN in `dataSchema`. Details: [`schema-vocabularies.md`](./.claude/references/schema-vocabularies.md), [`instance-query.md`](./.claude/references/instance-query.md).
 
 ### Knowledge access strategy
 
 1. **In-repo references** (`.claude/references/`, see the index) and the pinned schema in `node_modules/@burgan-tech/vnext-schema`.
 2. **Context7 MCP** (`mcp__context7__resolve-library-id` → `vnext-docs`, then `mcp__context7__query-docs` with a focused query).
 3. **WebFetch** for known pages under `https://burgan-tech.github.io/vnext-docs/docs/`:
-   `components/{workflow|view|schema|extension|mappings|interfaces}`, `components/tasks/{http|script|trigger|get-instances|get-instance|state-store|cache-aside|fan-out|python|external-http|dapr-conversation|notification|dapr-service|dapr-pubsub|dapr-binding|dapr-http-endpoint|soap}`, `components/functions/{built-in|custom}`, `concepts/{authorization|incidents|transition-pipeline|instance-data}`, `how-to/{human-task-approval|subflow-overrides|instance-filtering|attribute-indexes|observability|async-sync|error-handling|view-consept/*}`, `configuration/{service-discovery|task-invocation|caller-role-provider|caching|telemetry}`, `api-reference/rest-api`, and the release notes `…/blog/release-v0-0-NN`.
+   `components/{workflow|view|schema|extension|mappings|interfaces}`, `components/tasks/{http|script|trigger|get-instances|get-instance|state-store|cache-aside|fan-out|python|external-http|dapr-conversation|notification|dapr-service|dapr-pubsub|dapr-binding|dapr-http-endpoint|soap}`, `components/functions/{built-in|custom}`, `concepts/{authorization|schema-roles|incidents|transition-pipeline|instance-data}`, `how-to/{human-task-approval|subflow-overrides|instance-filtering|attribute-indexes|file-fields|observability|async-sync|error-handling|event-driven-workflows|view-consept/*}`, `configuration/{service-discovery|task-invocation|caller-role-provider|caching|telemetry}`, `api-reference/rest-api`, and the release notes `…/blog/release-v0-0-NN`.
 4. **Last resort** — example components under the components root and Forge-generated `docs/`.
 
 ### C# mapping files (`.csx`)
@@ -166,9 +171,10 @@ Workflows reference `.csx` files in `src/` next to the workflow JSON; the vNext 
 
 1. **No direct dynamic member access** — `ScriptBase` + `HasProperty` / `GetPropertyValue<T>` / `GetList`.
 2. **Use the `ScriptBase` helpers** (lists, `CreateObject`/`SetProperty`, XML, `Log*` with the required `args:` name, config, Dapr secrets — cached 30 s).
-3. **Repeated structures go to `sys-mappings` first** — wire helpers via `scripts.helpers` (+ `allowedAssemblies`); `encoding: "REF"` points `code` at a `sys-mappings` component. Non-default assemblies must be listed in `allowedAssemblies` (runtimes before 0.0.87 also dropped a script's own `using` lines; since 0.0.87 they are merged).
+3. **Repeated structures go to `sys-mappings` first** — wire helpers via `scripts.helpers` (+ `allowedAssemblies`); `encoding: "REF"` points `code` at a `sys-mappings` component. Non-default assemblies must be listed in `allowedAssemblies` — an unresolvable name fails publish with 400 (0.0.99); script plugins come from the platform team.
 4. **`context.Related` is for correlation data only** (`ParentAsync` / `SubAsync` / `SubsAsync`; one hop; system identity, `x-roles`-unfiltered — copy only what you intend to expose). Other cross-instance data comes through a Task.
-5. **Delta-only output** — `ScriptResponse.Data` carries changed fields only; a full echo overwrites concurrent writers. Numbers above 2^53 or beyond ~15 significant digits lose precision unless the operator enables `PreserveNumericPrecision` — carry money as strings.
+5. **`InputHandler` cannot stop a task** — its return value is audit-only; validate before the task or `throw`. Scripts see `x-encryption: encrypt` fields as tokens (`await context.Instance.DecryptAsync(path, context.CancellationToken)`); `GetFileAsync` performs no authorization check. Outbound tasks fill `sub`/`act_sub`/`position`/`client_id`/`role`/`X-Request-Id` when the mapping leaves them empty.
+6. **Delta-only output** — `ScriptResponse.Data` carries changed fields only; a full echo overwrites concurrent writers. Numbers above 2^53 or beyond ~15 significant digits lose precision unless the operator enables `PreserveNumericPrecision` — carry money as strings.
 
 ### Build outputs
 
@@ -179,8 +185,8 @@ Workflows reference `.csx` files in `src/` next to the workflow JSON; the vNext 
 
 | Server | Port | Purpose |
 |--------|------|---------|
-| vNext Runtime | `localhost:4201` | Workflow engine (instance start, transitions, state). No gateway in front → `authorize` is never called, reads are never 403'd; pass roles via the `role` header. |
-| MockLab | `localhost:3001` | External API mocks; all HTTP tasks point here (`ghcr.io/burgan-tech/mocklab`, seeds under `etc/docker/config/seed/`). Sidecar `mocklab-dapr` (app-id `mocklab`, HTTP `3500`) for Dapr service invocation. |
+| vNext Runtime | `localhost:4201` | Workflow engine (instance start, transitions, state). No gateway in front → `authorize` is never called, reads are never 403'd; send `sub` + `act_sub` and roles via the `role` header (or run with the morph-idm provider). |
+| MockLab | `localhost:3001` (host) / `mocklab:5000` (containers) | External API mocks (`ghcr.io/burgan-tech/mocklab`, seeds under `etc/docker/config/seed/`). Sidecar `mocklab-dapr` (app-id `mocklab`, HTTP `3500`) for Dapr service invocation. |
 | OpenObserve / Kibana | `5080` / `5601` | Logs and traces when the runtime compose stack's `otel-collector` is up ([`observability.md`](./.claude/references/observability.md)). |
 
 **Never** call MockLab for workflow operations, and **never** hardcode production URLs in task configs. After a component publish, other runtime pods may serve the previous version for up to the generation memo (5 s) — wait before smoke tests.
@@ -212,23 +218,34 @@ Contract details: [`state-function-response.md`](./.claude/references/state-func
 3. Search logs/APM by `x_request_id` (response header `X-Request-Id`) or the `traceId`; timer/timeout/ack jobs open new traces — follow `vnext.origin.trace_id`.
 4. Fix, then `POST …/retry` (Faulted instances only). Stuck Busy? check `metadata.effectiveStatus`, a pending `interaction` ack, scheduled entries; recover with `cancel`/`exit`. Full recipe: [`observability.md`](./.claude/references/observability.md).
 
+### Integration tests and local e2e
+
+- Every workflow is expected to have an xUnit integration test (`integration-test` skill): happy path to each Final state, one unhappy path per conditional auto pair, and authorization scenarios via `authorize` verdicts. Missing tests are **reported as warnings** (validator, reviewer, a PostToolUse reminder) — skipping is allowed, never silent.
+- `npm test` checks the package structure; the e2e suite is `dotnet test`, driven by `/vnext-ai-toolkit:e2e`. It defaults to Testcontainers pinned to `runtimeVersion` and asks before using a local runtime you already run (port, default `4201`).
+- Publishing is version-immutable: a changed component that answers 409 `Instance:100002` needs a patch-version bump.
+- Local file fields: `x-storage` needs the `etc/runtime` blob overlay (or the test project's `DaprComponents` binding); without it a start answers 503 `Instance:100047` ([`file-fields.md`](./.claude/references/file-fields.md)).
+- Domain-authored pub/sub topics are used verbatim; under Kafka they must follow `vnext.{domain}.{environment}.*`.
+
 ### MockLab — mock layer
 
-MockLab is the canonical mock API (Mockoon is gone). One collection file per domain under `etc/docker/config/seed/{collection}.json`; HTTP tasks call `http://localhost:3001/api/{domain}/{resource}/{action}` (task type stays `"6"`), or Dapr `http://localhost:3500/v1.0/invoke/mocklab/method/…`. Add mocks to the **existing** domain collection, then force a re-import (`docker compose down -v && docker compose up -d mocklab`) — MockLab skips collections whose name already exists. Envelope, rule operators, Scriban helpers and sequential responses: [`mocklab-seed-format.md`](./.claude/references/mocklab-seed-format.md).
+MockLab is the canonical mock API (Mockoon is gone). One collection file per domain under `etc/docker/config/seed/{collection}.json`; HTTP task URLs carry the `API_BASEURL` placeholder (`API_BASEURL/api/{domain}/{resource}/{action}`, task type `"6"`) resolved in the input mapping via `GetConfigValue("<Domain>:ApiBaseUrl", "http://mocklab:5000")` — never hard-code `localhost:3001`, which breaks under Testcontainers/vnext-runtime — or Dapr `http://localhost:3500/v1.0/invoke/mocklab/method/…`. Add mocks to the **existing** domain collection, then force a re-import (`docker compose down -v && docker compose up -d mocklab`) — MockLab skips collections whose name already exists. Envelope, rule operators, Scriban helpers and sequential responses: [`mocklab-seed-format.md`](./.claude/references/mocklab-seed-format.md).
 
 ## Skills
 
-When a user wants to build a component end-to-end, prefer the matching toolkit skill over freestyling: `workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `validate-and-fix`, `security-audit`; `/vnext-design-process` for a whole workflow.
+When a user wants to build a component end-to-end, prefer the matching toolkit skill over freestyling: `workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `e2e-local`, `validate-and-fix`, `security-audit`, `domain-check`, `report-runtime-issue`; `/vnext-design-process` for a whole workflow.
 
 ## Critical Rules
 
-- Each workflow has **exactly one** initial state (`startTransition.target`) and declares a master payload schema.
+- A workflow has **at most one** Initial state (optional since 0.0.99; `$start` is reserved); `startTransition.target` names a declared state; every workflow declares a master payload schema.
 - Auto transitions (`triggerType: 1`) come in complementary pairs with mutually exclusive conditions, or one always-true rule.
 - Never start a SubProcess from a state (`subFlow.type: "P"` is rejected at publish) — use a `SubProcessTask` (type 14).
-- Task types `22`/`23` do not pass `npm run validate` on the pinned schema; `22` is deprecated — use `6`.
-- `x-filterOperators` uses schema-side names (`gte`, `lte`, `neq`, `contains`), never the wire names; `x-indexed` only on the master schema.
+- Task type `23` does not pass `npm run validate`; `22` validates but is deprecated — use `6`. The same task twice at one `order` needs distinct `variableKey`s.
+- `history: "none"` only for one-shot, all-automatic flows that reach Finish (no human, wizard, timeout, long-poll, cancel/exit/updateData or shared transitions; no retry).
+- A schema's `attributes.type` is its role (`master`/`transition`/`function`/`component`); legacy values (`workflow`, `schema`, …) fail validate. `x-filterOperators` uses declaration names (`gte`, not `ge`); every filtered or sorted field carries `x-indexed: true` (master only).
+- Every personal/sensitive field gets an explicit `x-roles` / `x-masking` / `x-encryption` decision (`x-encryption`, runtime or client source).
 - A human state (`subType: 6`) without `queryRoles` is invisible in the human-task list — always declare them.
-- Roles are visibility + `authorize`; never rely on an in-process 403 for built-in reads, and never add roles without the user's confirmation.
+- Roles are visibility + `authorize`; never rely on an in-process 403 for built-in reads, and never add roles without the user's confirmation. Send `sub` + `act_sub` on every request.
+- A defect in the runtime (not this domain) goes to `/vnext-ai-toolkit:report-issue` — it checks known issues first and files only after your approval; never patch around it silently.
 - `updateData` mappings return deltas only; its `target` is `"$self"`.
 - Run `npm run validate` after any component change; JSON uses 2-space indentation, double quotes, no trailing commas; keys and file names are kebab-case, C# class names PascalCase.
 - **Never** hardcode component folder paths (resolve from `vnext.config.json`), **never** hand-encode `.csx` into `mapping.code`, **always** ask the renderer before creating a view, **always** gather schema requirements before producing a schema.
