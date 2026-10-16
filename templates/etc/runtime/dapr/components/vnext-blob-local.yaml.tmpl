@@ -1,0 +1,15 @@
+# Local x-storage binding for a domain run on vnext-runtime (released images).
+# Written by /vnext-ai-toolkit:vnext-init only when a master schema declares x-storage.
+# metadata.name MUST equal the schema's "x-storage": { "binding": ... } — one file per binding.
+# Loaded by the ORCHESTRATION daprd sidecar through docker-compose.blob.override.yml next to this
+# folder; the bytes land in <domain repo>/data/blobs (git-ignored).
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: vnext-blob-local
+spec:
+  type: bindings.localstorage
+  version: v1
+  metadata:
+    - name: rootPath
+      value: /blobs

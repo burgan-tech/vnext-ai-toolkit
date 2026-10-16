@@ -83,6 +83,10 @@ If new errors appeared (a fix uncovered another issue), loop back to step 2. Cap
 
 When green, summarize what was fixed (one line per error). When still red after 3 iterations, list the remaining failures with what's known and what's unclear.
 
+### 8. Runtime-side failures → offer an issue
+
+If a failure is classified as **runtime-side** — a schema↔runtime disagreement that is not in `references/concepts/schema-runtime-gaps.md` or the live vnext-meta known issues (`${CLAUDE_PLUGIN_ROOT}/scripts/vnext-meta-live.sh known-issues`), or runtime behaviour (publish 400, execution result) that contradicts vnext-docs — do not invent a component workaround. Say so, and offer `/vnext-ai-toolkit:report-issue` (skill `report-runtime-issue`), passing the error text, file, member path and versions as starting evidence. Never file without the user's approval.
+
 ## Anti-patterns (do not do these)
 
 - Editing `vnext.config.json` to relax `strictMode` / `validateSchemas` / `allowUnknownProperties`

@@ -1,7 +1,7 @@
 # Observability — Logs, Spans, Correlation, Debugging Recipes
 
 > Audience: domain authors debugging their own workflow against a local or shared runtime
-> (v0.0.97). What to search for, where, and in which order. For lock/cache/discovery behaviour see
+> (v0.0.100). What to search for, where, and in which order. For lock/cache/discovery behaviour see
 > `runtime-operations.md`; for the incident payload and `retry` rules see `incidents-and-retry.md`.
 
 ## 1. Log catalogue — `WorkflowLogs` EventIds
@@ -56,7 +56,7 @@ Activity sources: `BBT.Workflow.Pipeline`, `.BackgroundJobs`, `.SubFlow`, `.Task
 | `Transition.Continuation/{mode}` | Between hops (`Inline`) |
 | `Instance.Load` / `Create` / `AppendData` / `Fault` / `Persist` | Aggregate load, start, data version write (`vnext.data.version`, `vnext.data.size_bytes`), fault path |
 | `Instance.Activation/{key}` | **Synthetic**, one per activation episode, backdated to the request — "how long until the flow was available"; `vnext.activation.outcome` `active \| completed \| canceled \| faulted \| busy.parked \| busy.subtype` |
-| `Instance.Read/{kind}` | Built-in instance read (`state`, `data`, `view`, `schema`, `master`, `hierarchy`…); the 304 branch creates **no span** — see `vnext.read.fastpath` on the transaction |
+| `Instance.Read/{kind}` | Built-in instance read (`state`, `data`, `view`, `schema`, `master`, `instanceCorrelation`…; `hierarchy` is gone since 0.0.99); the 304 branch creates **no span** — see `vnext.read.fastpath` on the transaction |
 | `Task.Execute.{key}` → `Task.Resolve` / `PrepareInput` / `Invoke` / `ProcessOutput` / `Journal.*` | One task; children are the mapping phases |
 | `Script.Compile/{identity}` / `Script.Execute` / `Script.Invoke` | Compile (hit or miss, `vnext.script.cache.hit`), subflow/function output scripts |
 | `Cache.Get/{key}` / `Cache.Write` / `Cache.Set` / `Cache.Remove` / `Cache.GenerationGet/{key}` | Component cache path (`cache.hit`, `cache.source` l1 \| l2 \| backend, `cache.generation`) |
@@ -82,6 +82,7 @@ Activity sources: `BBT.Workflow.Pipeline`, `.BackgroundJobs`, `.SubFlow`, `.Task
 | `vnext.discovery.resolution` (`convention` \| `registry` \| `cache`), `vnext.dapr.app_id` | Cross-domain routing |
 | `vnext.origin.trace_id`, `vnext.origin.span_id` | Link from a job's fresh trace back to the request that armed it |
 | `x_request_id`, `correlation.id`, `workflow.instance.id` | Correlation (below) |
+| `vnext.execution.requested`, `vnext.execution.effective`, `vnext.execution.overridden` | Sync/async mode: what the caller asked vs. what ran; `overridden=true` only when an `executionType` changed it (0.0.99) |
 
 ## 3. Correlation
 
@@ -94,9 +95,16 @@ Activity sources: `BBT.Workflow.Pipeline`, `.BackgroundJobs`, `.SubFlow`, `.Task
 
 Every response returns `X-Request-Id` (echoed or generated), `X-Trace-Id` / `X-Span-Id` /
 `traceparent`, and `X-Workflow: {domain},{workflow},{version},{instanceId}` — the instance id is
-available from the **start** response before the body is parsed. Task bindings do **not** forward
-`traceparent`, `tracestate`, `baggage`, `x-request-id`, `X-Correlation-Id`, `X-Workflow-Instance-Id`
-from `headers` — the runtime injects them itself.
+available from the **start** response before the body is parsed.
+
+**Task bindings.** `traceparent`, `tracestate`, `baggage`, `X-Correlation-Id` and
+`X-Workflow-Instance-Id` are **reserved**: a value in a task's `headers` is skipped and the runtime
+injects the live one. **`X-Request-Id` is fill-if-absent since 0.0.99 (#1059):** a non-empty value set
+in the task headers or input mapping is sent as is; otherwise vNext sends its own request id (per
+client request, not per call; nothing on a timer/event hop without one). An API that needs a UUID
+unique **per call** (OHVPS/BKM) must set `Guid.NewGuid()` in the mapping. (0.0.80–0.0.98 dropped the
+mapping's value and sent nothing.) `sub` / `act_sub` / `position` / `client_id` / `role` are likewise
+filled from the caller when the mapping leaves them empty (0.0.99).
 
 **Jobs open a new trace.** Timer, timeout and ack-fallback firings, and outbox → inbox event
 deliveries (`EventTraceMode.IsolatedDelivery`) root their **own** trace; follow
@@ -137,13 +145,27 @@ Typical lookups: OpenObserve/Kibana logs `x_request_id = '<id>'`; APM transactio
    `POST …/instances/{id}/retry?sync=true` (optional body merges attributes before OnExecute).
    200 `status: "F"` means it faulted again and can be retried; success closes all open incidents.
 
+## 5.1 Metrics endpoints (0.0.99, #1030)
+
+| Call | Returns |
+|---|---|
+| `GET …/instances/{id}/transitions/{key}/metrics` | `{ element, count, attempts[] }` — one attempt per firing: `durationMs`, `triggerType`, `triggeredBy`, `tasks[]` (`taskKey`, `hook` OnExecute/OnEntry/OnExit, `order`, `status`, `durationMs`, `error`) |
+| `GET …/instances/{id}/states/{key}/metrics` | Same grammar; one attempt per **visit** (entering → leaving transition), `durationMs` = dwell; an open visit has null `finishedAt` |
+| `GET /{domain}/functions/{f}/metrics`, `GET /{domain}/workflows/{wf}/functions/{f}/metrics` | Paged execution series (`page`, `pageSize` ≤ 100, `from`, `to`, `succeeded`) + `summary { count, p50Ms, p95Ms, failureRate }` |
+
+- Transition/state metrics read the existing journal — nothing to enable; empty for `history: "none"` instances.
+- **Function metrics are opt-in per function: `attributes.executionLog: "E"`** (`"D"` or absent = not recorded). Written asynchronously into `sys_metrics` (`Workflow:FunctionExecutionJournal` `QueueCapacity` 50000, `BatchSize` 1000) — best effort, no effect on the function's latency. Built-in reads (`state`, `data`, …) are never journaled; they stay in APM. Turn it on for functions whose latency/failure rate you want to watch (lookups behind `x-lov`, BFF endpoints), not for every function.
+- The `functions/tasks` items also carry `hook` and `order` since 0.0.99.
+- **Instance data history** (`GET …/instances/{id}/data/history`, 0.0.100, #1079) is an **internal** tooling read (Forge Instance Monitor): paged, newest first, same field exposure as the data function. It is hidden from Swagger but not blocked — keep it off the public gateway; do not build client features on it.
+
 ## 6. Recipe — instance looks stuck (Busy)
 
 1. `GET …/instances/{id}` → compare `metadata.status` and `metadata.effectiveStatus`. A parent is
    Busy for its child's whole life; `effectiveStatus` shows the **deepest active SubFlow**.
    `EffectiveStatusDrift` 20445 in logs means the projection disagreed with the live read.
-2. State body: is `interaction` present (long-poll `terminate: true` waiting for
-   `POST …/longpoll/ack`)? Ack it, or wait for `fallbackTimeoutSeconds` (default 60).
+2. State body: is `interaction` present **with `ack.href`** (long-poll `terminate: true` waiting for
+   `POST …/longpoll/ack`)? Ack it, or wait for `fallbackTimeoutSeconds` (default 60). An `interaction`
+   block without `ack` (`terminate: false`, 0.0.98+) never holds the instance.
 3. Any `transitions[]` entry with `kind: "scheduled"` and a future `executeAtUtc`, or a `timeout`
    block? It is waiting by design. Remember ETag gap #864: a stale `executeAtUtc` behind a 304 is
    possible — poll once **without** `If-None-Match`.
@@ -164,16 +186,29 @@ Typical lookups: OpenObserve/Kibana logs `x_request_id = '<id>'`; APM transactio
 Domain business events are **not** in this list — publish them explicitly with a **DaprPubSub task**
 (type 4) from a transition; they inherit `traceparent` and `x_request_id` from the task envelope.
 
+### Topic names (0.0.100, #1095 — breaking)
+
+- Runtime topics are `vnext.{APP_DOMAIN}.{environment}.{event}.v{n}` (e.g.
+  `vnext.core.production.instance.sub.completed.v1`; `environment` = lower-cased
+  `ASPNETCORE_ENVIRONMENT`, `production` when unset). Dashboards/alarms bound to the old
+  `development.instance.…` names must move. Operators drain the outbox before upgrading — messages on
+  old topics are not consumed.
+- **Domain topics** (`DaprPubSubTask.topic`, domain `Subscription`s) are used **verbatim**. Helm chart
+  1.0.123 can run pub/sub on Kafka, where the broker ACL grants each domain only `vnext.{domain}.*`:
+  name domain topics `vnext.{domain}.{environment}.{event}` (e.g. `vnext.my-domain.production.order-flow`)
+  or get the topic granted explicitly. Redis/RabbitMQ have no such ACL, so a non-conforming name works
+  locally and fails on Kafka.
+
 ## Sources
 
-- Runtime `vnext` @ `eca5b466` (0.0.97): `src/BBT.Workflow.Domain/Logging/{WorkflowLogs,WorkflowEventIds,TelemetryConstants,WorkflowTraceLane,ActivationEpisode}.cs`,
+- Runtime `vnext` @ `f06961ec` (0.0.100): `src/BBT.Workflow.Domain/Logging/{WorkflowLogs,WorkflowEventIds,TelemetryConstants,WorkflowTraceLane,ActivationEpisode}.cs`,
   `src/BBT.Workflow.Application/BackgroundJobs/Handlers/BackgroundJobActivityHelper.cs`,
   `src/BBT.Workflow.Application/Instances/DTOs/{GetInstanceStateOutput,InstanceTimeoutOutput}.cs`,
   `test/BBT.Workflow.Domain.Tests/Logging/WorkflowLogEventIdUniquenessTests.cs`,
-  `docs/runtime/{correlation-and-tracing,trace-span-tree,trace-lanes,trace-elastic-queries,event-trace-chain,event-publish-modes}.md`,
+  `docs/runtime/{correlation-and-tracing,trace-span-tree,trace-lanes,trace-elastic-queries,event-trace-chain,event-publish-modes,execution-type,transition-and-state-metrics,function-execution-metrics}.md`,
   `etc/{orchestration,execution}/dapr/config.yaml`, `etc/docker/docker-compose.dev.yml`.
-- Scripting package `BBT.Workflow.Scripting` 0.0.93 (`IScriptServices.Logger`, scope keys `ScriptFile` / `ScriptMethod` / `ScriptLine`).
-- PRs: #864 (ETag scheduled-entry gap), #927 (outbox-only), #978 (post-commit relay), #1017 (unique EventIds).
-- vnext-docs @ `adf9bf4`: `how-to/observability.md`, `configuration/telemetry.md`, `how-to/async-sync.md`, `concepts/incidents.md`.
-- vnext-meta 0.0.53: `stateIncident` (0.0.92), `instanceEffectiveStatus`, known issue `pre-reserved-job-failure-can-strand-busy`.
+- Scripting package `BBT.Workflow.Scripting` (`IScriptServices.Logger`, scope keys `ScriptFile` / `ScriptMethod` / `ScriptLine`).
+- PRs: #864 (ETag scheduled-entry gap), #927 (outbox-only), #978 (post-commit relay), #1017 (unique EventIds), #1030 (metrics, `executionLog`), #1037 (`vnext.execution.*` tags), #1059 (`X-Request-Id` fill-if-absent), #1067 (`instance-correlation`), #1079 (data history), #1095 (topic names).
+- vnext-docs: `how-to/{observability,event-driven-workflows,async-sync}.md`, `components/tasks/dapr-pubsub.md`, `configuration/telemetry.md`, `concepts/incidents.md`; release notes v0.0.99 / v0.0.100.
+- vnext-meta (master): `stateIncident` (0.0.92), `instanceEffectiveStatus`, `transitionStateMetrics` / `functionExecutionMetrics` (0.0.99), `instanceDataHistory` (0.0.100), known issue `pre-reserved-job-failure-can-strand-busy`.
 - Toolkit: `csx-contracts.md` (script `Log*` signature), `incidents-and-retry.md`, `runtime-operations.md`.

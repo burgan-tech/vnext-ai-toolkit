@@ -43,6 +43,10 @@ node_modules/@burgan-tech/vnext-schema/schemas/<schema-file>.json
 If `node_modules` is absent, run `npm install` first, or read the schema via
 `npm pack @burgan-tech/vnext-schema && tar -xzf *.tgz`.
 
+This toolkit is aligned to **runtime 0.0.100 / schema 0.0.56**. When the workspace pins older
+`runtimeVersion` / `schemaVersion` values in `vnext.config.json`, check a feature's since-version in
+`references/runtime-feature-matrix.md` before using it.
+
 ## Knowledge access — fetch docs only when needed
 
 Resolve questions in this order; **stop at the first source that answers it**:
@@ -132,16 +136,23 @@ Confirm the exact shape against the schema each time; this is the gist:
   version }`), even though the JSON schema marks it optional. `npm run validate`
   enforces this. Author the referenced schema component first, and normally point the
   `startTransition.schema` at the same schema so the start payload is validated.
-- **task** — required `type` (string number; the schema validates `"1"`–`"21"`, the runtime knows
-  `"22"` ExternalHttp (deprecated) and `"23"` Python (experimental) as well — e.g. `"6"`=HTTP,
-  `"7"`=Script, `"15"`=GetInstances, `"18"`=CacheAside, `"21"`=FanOut; full catalog and default
-  execution location in `references/concepts/task-types.md`) and `config`.
+- **task** — required `type` (string number; since schema 0.0.55 the schema validates `"1"`–`"22"`
+  (`"22"` ExternalHttp, deprecated); `"23"` Python (experimental) is runtime-only and not
+  schema-validated — e.g. `"6"`=HTTP, `"7"`=Script, `"15"`=GetInstances, `"18"`=CacheAside,
+  `"21"`=FanOut; full catalog and default execution location in `references/concepts/task-types.md`)
+  and `config`.
 - **view** — required `type` (integer) and `content`; optional `labels`, `display`.
 - **function** — required `scope` (enum `D`/`F`/`I`) and `task` (object with
   `order`, `task`, `mapping`); optional `labels`, `roles`.
 - **extension** — required `type` (integer), `scope` (integer), `task`; optional `labels`.
-- **schema** — required `type` (enum `workflow`/`task`/`function`/`view`/`schema`/
-  `extension`/`headers`) and `schema`; optional `labels`.
+- **schema** — required `schema`; optional `labels`. Since schema 0.0.56 `attributes.type` is the
+  schema's **role**, which selects the vocabulary it is validated against: `master` (a flow's master
+  schema — the only role that allows `x-indexed`), `transition` (a transition body), `function` (a
+  function input), `component` (an embedded view's dataSchema), or absent/`""` (no role vocabulary — last
+  resort; prefer one schema per role). The legacy values (`workflow`, `task`, `view`, `headers`, …) are
+  rejected by the 0.0.56 package. Per-role keywords: `references/concepts/schema-vocabularies.md`;
+  sensitive fields (`x-roles` / `x-masking` / `x-encryption`): `references/concepts/field-protection.md`;
+  file fields (`x-storage`): `references/concepts/file-fields.md`. Use the `schema-design` skill.
 - **mapping** (`sys-mappings`) — a reusable C# class shared via `scripts.helpers` / `REF`. Required
   `name` (the C# class name, e.g. `RsaCryptoHelper`), `code`, `encoding`; optional `location`.
   `encoding` is **`B64` or `NAT` only** — a mapping can't be `REF` (it's the ref target). See
@@ -177,7 +188,9 @@ kept in a `src/` folder next to the workflow JSON. Every script reference (`mapp
 - Interfaces: mappings implement `IMapping` (`InputHandler`/`OutputHandler` →
   `ScriptResponse`); auto-transition rules implement `IConditionMapping`
   (`Handler` → `bool`); scheduled-transition timers implement `ITimerMapping`
-  (`Handler` → `TimerSchedule`). **Class names are PascalCase.**
+  (`Handler` → `TimerSchedule`). **Class names are PascalCase.** `InputHandler`'s return value
+  never stops a task — validate before the task or `throw`. Encrypted fields, file reads, the
+  cancellation token and outbound header filling: `references/concepts/csx-contracts.md`.
 
 ## Transitions: triggers, rules, and timers
 

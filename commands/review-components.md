@@ -1,7 +1,7 @@
 ---
 description: Audit the vNext components already created in this domain — dispatch hierarchical reviewer & security-reviewer sub-agents: main agents per workflow/function, each spawning sub-agents for sub-components
 argument-hint: "[type|component-key]  (empty = all workflows & functions; type = all of that type; key = that component & closure)"
-allowed-tools: Bash(npm run validate), Bash(node validate.js), Read, Grep, Glob
+allowed-tools: Bash(npm run validate), Bash(node validate.js), Bash(*/scripts/check-test-coverage.sh*), Read, Grep, Glob
 ---
 
 > **Freshness check (non-blocking, first).** If `vnext.config.json` exists, compare the workspace toolkit stamp — `.claude/vnext-toolkit.json` `toolkitVersion`, falling back to the `<!-- vnext-ai-toolkit vX.Y.Z -->` comment in `CLAUDE.md` — against `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` `.version`. If the stamp is missing or older, tell the user once: "Workspace toolkit files are from vX (plugin is vY) — run `/vnext-update` to refresh". Also compare `vnext.config.json` `runtimeVersion` with the plugin manifest's `.vnext.knownRuntimeVersion`: if the workspace is older, mention once that features newer than its runtime (see `.claude/references/runtime-feature-matrix.md` `since`) are unavailable here; if newer, that the toolkit's knowledge lags the runtime. Then continue with the command below. Never block on this.
@@ -63,6 +63,15 @@ still exists), the project is not initialized — stop and tell the user to run
    `/validate` does — component file as a clickable `file://...:line` link, the JSON
    pointer, and the violated schema rule, grouped by file.
 
+2b. **Integration-test coverage (warn-only).** Run
+   `${CLAUDE_PLUGIN_ROOT}/scripts/check-test-coverage.sh` (add `--workflow <key>` for a single-key
+   audit). Turn every `WARN` line into a **Warning** row of the affected workflow — never a Blocker:
+   - G1 no test project / does not build → "Warning: no integration test project (integration-test skill)";
+   - G2 → "Warning: `<key>` has no integration test class";
+   - G3 → "Warning: Final state `<s>` not asserted" / "Warning: no unhappy path for `<state>→<target>`";
+   - G4 → "Warning: e2e stamp stale (<reason>) — run `/vnext-ai-toolkit:e2e`".
+   Pass these rows to each workflow's reviewer sub-agent so they appear under that workflow.
+
 3. **Hierarchical sub-agent review dispatch.** Dispatch sub-agents based on scope:
 
    **When auditing all components or a type:**
@@ -92,11 +101,14 @@ still exists), the project is not initialized — stop and tell the user to run
    (sub-component reviewers). Merge everything into one audit, grouped by:
    - **Main component** (workflow or function key)
    - **Within each main**: findings for the main component itself, then findings from
-     its sub-components, grouped by severity (**Blocker / Suggestion / Nit** from
-     reviewer, **High / Medium / Low** from security)
+     its sub-components, grouped by severity (**Blocker / Warning / Suggestion / Nit** from
+     reviewer, **High / Medium / Low** from security); the step 2b test-coverage rows are
+     **Warning**s of their workflow
 
    Each finding cites the file path and JSON pointer. Include the inventory table from
-   step 1. End with a one-line verdict: **"Clean"** or **"N issues need attention"**.
+   step 1 and a one-line test coverage summary ("N workflows, M without tests, e2e stamp green/stale").
+   End with a one-line verdict: **"Clean"** or **"N issues need attention"** — missing tests alone
+   never make the verdict worse than "Clean (with test warnings)".
 
 Do not edit any component. If the user wants fixes, point them at `/new-component`
 (to re-author) or `validate-and-fix` for schema errors.

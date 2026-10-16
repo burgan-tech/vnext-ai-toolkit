@@ -54,6 +54,20 @@ Target folder: `{componentsRoot}/{paths.workflows}/{workflow-key}/`. Inside it: 
 
 Verify the current set against Context7 (`"workflow attributes type values"`) if the user's case doesn't fit cleanly.
 
+**History mode (ask for `F`/`S` flows, runtime ≥ 0.0.100).** *"Is this a one-shot, fully automatic
+flow that runs often and nobody inspects afterwards (quote, lookup, validation)?"* If yes, offer
+`attributes.history: "none"` — no transition/task history and a single data write, i.e. lower storage
+and write cost. Only valid when **every** state transition is automatic, every state reaches a Final
+state, and there is no human/Wizard/Suspended/Busy state, long poll, timeout, `cancel`/`exit`/
+`updateData` or shared transition; retry is not available (409 `Instance:100045`) and a SubFlow child
+must be `none` too. Default: omit (full history). Rules: `references/concepts/workflow-types.md` §8.
+
+**Sync/async (`executionType`, runtime ≥ 0.0.99).** Ask whether the caller should keep choosing
+`?sync` (default — omit the field) or the flow/transition must pin it: `"S"` (always 200 + instance)
+or `"A"` (always 202). Set on `attributes.executionType` and/or individual state, shared or start
+transitions (transition beats flow beats `?sync`; not on `cancel`/`exit`/`updateData`; ignored for
+auto/timer transitions). Clients must then branch on the status code.
+
 **Roles gate (mandatory question).** Before designing any state or transition, **ask the user whether this flow should configure roles (`queryRoles`/`roles`) at all** — via `AskUserQuestion`, with "no roles" as the Recommended default. Roles add real complexity, especially for vNext newcomers; never add role configuration without explicit user confirmation. If confirmed, follow `references/concepts/roles-and-authorization.md` — and remember the 0.0.95 model: the runtime only *filters visibility* by roles; the **`authorize` function** (called by the gateway) is the single enforcement point, so a local runtime without a gateway will not 403 on reads.
 
 ### 3. Map the states
@@ -61,7 +75,7 @@ Verify the current set against Context7 (`"workflow attributes type values"`) if
 Walk through the flow with the user. For each state capture:
 
 - **Key** (kebab-case)
-- **stateType** (Initial / Intermediate / Final / SubFlow / Wizard — values from the fetched schema)
+- **stateType** (Initial / Intermediate / Final / SubFlow / Wizard — values from the fetched schema). An Initial state is **optional, at most one** (0.0.99): without one the instance starts in the implicit `$start` and enters `startTransition.target`. Never use `$start` as a key.
 - **Is it final?** (`isFinal: true` ends the instance)
 - **Has a view?** (if yes, note the view key — will resolve in step 6)
 - **`onEntry` tasks?** (anything that must run when entering the state)
@@ -81,7 +95,7 @@ Walk through the flow with the user. For each state capture:
   `subFlow.overrides` (`references/concepts/subflow-overrides.md`; the old `viewOverrides` /
   `views`-by-key forms are deprecated since 0.0.95).
 
-**Initial state input pattern** — if the Initial state needs user input before anything happens, **propose placing the form on `state.view`** (not on the outgoing transition) and confirm with the user via `AskUserQuestion`. Reason: the runtime serves the state view immediately on instance start; the user fills it and submits via a `view: null` transition. The reverse (form on transition) forces an extra discovery step with no UX benefit. Make state-view the Recommended option; only switch if the user wants an intentional "intro screen → tap → form" two-step. See `references/concepts/workflow-types.md` for the pattern note.
+**First-state input pattern** — if the first state (Initial, or the start target) needs user input before anything happens, **propose placing the form on `state.view`** (not on the outgoing transition) and confirm with the user via `AskUserQuestion`. Reason: the runtime serves the state view immediately on instance start; the user fills it and submits via a `view: null` transition. The reverse (form on transition) forces an extra discovery step with no UX benefit. Make state-view the Recommended option; only switch if the user wants an intentional "intro screen → tap → form" two-step. See `references/concepts/workflow-types.md` for the pattern note.
 
 Visualize back to the user as a list before moving on.
 
@@ -96,7 +110,9 @@ with an active SubFlow the **parent** stores the data and does **not** forward o
 Its `target` must be `"$self"`. Mappings must return **deltas only**. If the flow has parallel
 branches, fan-in states, loops, or clients that push data concurrently, ask whether an `updateData`
 definition is needed. Auto transitions (order 80) are evaluated **before** timers are armed (order
-90, since 0.0.90) — a state passed through by an auto never schedules its timers. Details:
+90, since 0.0.90) — a state passed through by an auto never schedules its timers. While a SubFlow
+is active, other parent transitions are **proxied to the leaf** (0.0.100): leaf 400/403/409 come back
+synchronously, and a just-completed child answers 409 — retry. Details:
 `references/concepts/transition-pipeline.md`.
 
 **Annotations.** Any transition (state, shared, `cancel`, `exit`, `updateData`) and the workflow
@@ -110,12 +126,19 @@ For each transition capture:
 - **`triggerType`**: `0` (manual / user action), `1` (auto / condition-evaluated), `2` (timer), `3` (event)
 - **For auto transitions**: confirm complementary pair (mutually exclusive `rule` conditions) — a lone conditional auto transition is invalid; if there's only one, it must be unconditional.
 - **For timer**: `duration` (ISO 8601, e.g. `PT15M`)
-- **`onExecutionTasks`**: which tasks run during the transition, and which `.csx` mapping shapes each task's input/output. Parallel tasks at the same `order` must be **distinct task definitions** (the journal key is transition+task+order). "Do X for each item in a list" → a **FanOut task** (type 21), not an auto loop — `references/concepts/fan-out.md`.
+- **`onExecutionTasks`**: which tasks run during the transition, and which `.csx` mapping shapes each task's input/output. Entries at the same `order` run in parallel and merge by slot `variableKey ?? camelCase(task.key)`; if the **same task** is bound twice at one order (e.g. two SubProcess starts), give at least one a `"variableKey"` (0.0.99; publish rejects a slot collision — same rule for `onEntries` / `onExits`). "Do X for each item in a list" → a **FanOut task** (type 21), not an auto loop — `references/concepts/fan-out.md`.
+- **`executionType`** (optional, `"S"` / `"A"`) if this transition must not depend on the caller's `?sync`.
 - **`annotations`** (optional, see above)
 
 ### 5. Identify the start transition
 
-Exactly one initial transition; its `target` is the first state. Encode as `attributes.startTransition`.
+Exactly one `attributes.startTransition`. Its `target` is **required** and must name a declared
+state — the Initial state if there is one, otherwise any state (the instance is born in the implicit
+`$start` and enters it). `$self`, `$start` and an empty target are rejected at publish (0.0.99,
+#1068). No `view`; an optional `schema` validates the start payload; optional `executionType`.
+If the flow should also start **on a schedule**, note that runtime 0.0.100 exposes
+`POST …/instances/schedule?scheduleId=…` for a Dapr `bindings.cron` component (seed values arrive as
+query-string **strings**) — `references/concepts/workflow-types.md` §6.
 
 ### 6. Spin off dependencies (chain skills)
 
@@ -152,6 +175,7 @@ Envelope:
   "tags": [],
   "attributes": {
     "type": "F",
+    // optional: "history": "none" (one-shot), "executionType": "S" | "A"
     "timeout": {
       "key": "timeout", "target": "{final-or-expired-state}", "versionStrategy": "None",
       "timer": { "reset": "N", "duration": "PT15M" },
@@ -177,6 +201,9 @@ Create `{workflow-key}.http` next to the workflow JSON:
 ### Start instance
 POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{workflow-key}/instances/start
 
+### Start instance — explicit mode (ignored if the flow/start transition sets executionType)
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{workflow-key}/instances/start?sync=true
+
 ### Get state
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{workflow-key}/instances/{instanceKey}/functions/state
 
@@ -193,15 +220,27 @@ Run `npm run validate`. Hand off failures to the `validate-and-fix` skill.
 
 ### 12. (Optional) MockLab seed update
 
-If transitions call HTTP tasks pointing at `localhost:3001`, append a `mocks[]` entry to the domain's existing seed file at `etc/docker/config/seed/{collection}.json` — one collection per domain; do not split. Endpoint pattern stays `api/{domain}/{resource}/{action}`. Capture 2xx and 4xx/5xx scenarios via `rules[]` (`conditionField: "query.X" | "body.X"`, operators `equals | regex | exists | greaterThan | ...`) and use `sequenceItems[]` for retry/rate-limit demos (`isSequential: true`). Add 200–500 ms `delayMs` for realistic latency.
+If transitions call HTTP tasks pointing at MockLab (`API_BASEURL/…`, resolved via `GetConfigValue`), append a `mocks[]` entry to the domain's existing seed file at `etc/docker/config/seed/{collection}.json` — one collection per domain; do not split. Endpoint pattern stays `api/{domain}/{resource}/{action}`. Capture 2xx and 4xx/5xx scenarios via `rules[]` (`conditionField: "query.X" | "body.X"`, operators `equals | regex | exists | greaterThan | ...`) and use `sequenceItems[]` for retry/rate-limit demos (`isSequential: true`). Add 200–500 ms `delayMs` for realistic latency.
 
 **Re-import gotcha** — MockLab skips collections whose name already exists in its DB on restart. After editing a seed, run `docker compose down -v && docker compose up -d mocklab` to force a clean import, or push the new mocks via MockLab's admin API.
 
 Full reference: [`.claude/references/mocklab-seed-format.md`](../../references/mocklab-seed-format.md).
 
+### 13. Integration test (default: yes)
+
+Every workflow is expected to have an integration test class (warn-only gates G1–G4). Offer it now —
+default **yes** — and hand off to the `integration-test` skill with the state/transition graph from
+steps 3–5 (full scope: every Success/Error Final state, one unhappy path per conditional auto pair,
+`authorize` verdicts when transitions carry roles). It scaffolds the test project if missing.
+
+If the user skips: end the scaffold report with
+"**Warning:** `<workflow-key>` has no integration test (G2) — run the `integration-test` skill later; validate
+and review will keep reporting it." Running the tests is `/vnext-ai-toolkit:e2e <workflow-key>`.
+
 ## Notes
 
-- Exactly **one** initial state per workflow (enforced by validator).
+- **At most one** Initial state (0.0.99+; none → implicit `$start`). `startTransition.target` must be a declared state; `$start` is a reserved key.
 - Auto transitions must come in complementary pairs (or be unconditional) — the validator catches this; the skill should catch it earlier in step 4.
+- `history: "none"` flows: automatic transitions only, no human states, no retry — reject the option as soon as the design needs any of them.
 - Never hardcode `core/Workflows/...` — always resolve from `vnext.config.json`.
 - For component references, the shape is `{ "key", "domain", "flow", "version" }` — strict mode is on, so a wrong `flow` value will fail validation.

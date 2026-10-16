@@ -79,7 +79,8 @@ On `rollback`/`notify` a brief `hasActiveIncident: true` window is visible while
 | One incident per failure | See §3. |
 | Active subflow | Retry on the parent probes the child; a `Faulted` child is retried through the gateway (cross-domain OK). A **missing** child is restarted. |
 | Failed subflow start (#1026, 0.0.95) | `StartSubflowJob` failure no longer strands the parent in `Busy`: parent → `Faulted` + incident; `POST …/retry` **re-runs the subflow start**. Same release: a pre-reserved transition job failing with a non-lock error faults the instance (`JOB_EXECUTION_FAILED`). |
-| `?sync=true` | Waits for the retried transition to settle; default async returns as soon as the retry is accepted. |
+| `?sync=true` | Waits for the retried transition to settle; default async returns as soon as the retry is accepted. `executionType` does not apply to retry. |
+| `history: "none"` (0.0.100) | Retry is **not available**: **409 `Instance:100045`**. A one-shot instance that faults (incl. `Instance:100046`, rest at a non-Final state) must be started again. |
 
 Known issue `pre-reserved-job-failure-can-strand-busy`: a job re-entry failing with a non-lock
 `Result` error can still leave `Busy` with no owner — retry requires `F`, so recover with
@@ -90,6 +91,11 @@ cancel/exit (see `runtime-operations.md`).
 Mappings read `ScriptIncidentInfo`: `HasActiveIncident`, `ActiveIncident` (newest unresolved),
 `TotalIncidentCount` (materialized only — not full history), `IncidentsLoaded`. Useful in a
 compensation transition's mapping to branch on `errorCode`/`boundaryAction`.
+
+**Requires 0.0.99+ (#1060).** On 0.0.93–0.0.98 a mapping running inside error-boundary handling saw
+`HasActiveIncident = true` but `ActiveIncident = null` and `TotalIncidentCount = 0` (the upward
+`InstanceSubFaultedEvent` payload had the same gap). On those runtimes branch on `HasActiveIncident`
+only, or read `GET …/incidents/active`.
 
 ## 6. Debugging hand-off
 
@@ -128,7 +134,7 @@ GET {{baseUrl}}/api/v1/{{domain}}/workflows/{{workflow}}/instances/{{instanceId}
   `src/BBT.Workflow.Application/Instances/DTOs/{RetryInstanceInput,RetryInstanceOutput,GetInstanceInput}.cs`,
   `src/BBT.Workflow.Domain/Definitions/InstanceUrlTemplates.cs`, `src/BBT.Workflow.Domain/WorkflowErrorCodes.cs` (`Instance:100027`, `Instance:100037`)
 - vnext-docs: `concepts/incidents.md`, `how-to/error-handling.md`, `components/functions/built-in.md`
-- PRs: #972 (0.0.92 incidents table + link block), #1026 (0.0.95 failed subflow start faults parent)
+- PRs: #972 (0.0.92 incidents table + link block), #1026 (0.0.95 failed subflow start faults parent), #1060 (0.0.99 `context.Incident` populated), #1082 (0.0.100 `history: none` retry 409)
 - vnext-meta: feature `stateIncident`; migrations `instance-incidents-moved-to-separate-table`,
   `incident-and-retry-behaviour-corrections`; known issue `pre-reserved-job-failure-can-strand-busy`
 - Related: `observability.md` (trace recipe), `runtime-operations.md` (lock model, Busy recovery),

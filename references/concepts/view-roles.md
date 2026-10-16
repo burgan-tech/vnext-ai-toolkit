@@ -42,8 +42,21 @@ How the view is presented on screen:
 
 | Context | Role | User input? | Recommended `display` | `dataSchema` |
 |---------|------|-------------|------------------------|--------------|
-| **State view** (`state.view`) | Shows the user where they are; read-only summary | No | `full-page` | Master / instance schema (covers full instance shape so `$instance.X` resolves everywhere) |
-| **Transition view** (`transition.view`) | Form for input, or confirmation dialog | Yes | `popup` (confirmation) or `full-page` (complex form) | Transition payload schema (carries `enum`/`x-lov`/`x-validation`/`x-conditional` for the input set) |
+| **State view** (`state.view`) | Shows the user where they are; read-only summary | No | `full-page` | The flow's **`master`** schema (`attributes.type: "master"`; covers the full instance shape so `$instance.X` resolves everywhere) |
+| **Transition view** (`transition.view`) | Form for input, or confirmation dialog | Yes | `popup` (confirmation) or `full-page` (complex form) | That transition's **`transition`** schema (carries `required`/`x-lov`/`x-validation`/`x-conditional`/`x-context-source` for the input set) |
+| **Embedded component** (`Component` node inside another view) | Reusable fragment; the host binds data into it | Via the host | — | Its own **`component`** schema (`x-binding: required\|optional` per field) |
+
+**`dataSchema` ↔ schema role (schema package 0.0.56+).** A schema component's `attributes.type` is its
+role and limits its `x-*` keywords (`schema-vocabularies.md`). Match the view to the role:
+
+- state view → `master` (record role: `x-roles`/`x-masking`/`x-encryption` shape what the view receives);
+- transition view, function form, or any view that **submits a move of its own** — including an
+  initial-state form submitted by the outgoing transition → `transition` (or `function`);
+- embedded component that sends nothing itself → `component`. It does not inherit the host's role; if it
+  submits, it uses the command the host passes in (`$param.submitCommand`).
+
+A schema used by two kinds of view is split per role (toolkit rule). A legacy `attributes.type`
+(`workflow`, `view`, `schema` …) fails `npm run validate` on 0.0.56 — map it (`schema-vocabularies.md` §2).
 
 **Pattern: don't point a transition view at the master schema** "just to keep things uniform." You lose the input-side semantics — required fields, LOV options, validation rules — because those live on the transition payload schema. (The master schema deliberately uses **no `required`** and **`additionalProperties: true`** so instance data can expand across states — see `workflow-types.md` § Master schema.)
 
@@ -93,13 +106,20 @@ pseudo-UI expressions reference data through namespaces:
 
 These `x-*` keywords live on schema properties and are consumed by the view layer:
 
+Every role (base + view hints):
+
 - **`x-labels`** — `{ "tr": "…", "en": "…" }` localized field labels
-- **`x-lov`** — LOV datasource for a **selectable dropdown** bound to an input: static list or function reference + JsonPath
-- **`x-lookup`** — read-time enrichment used to **render**: function reference + `resultField` (JsonPath). Resolves to a **single object** (`$lookup.{name}.{field}`) **or an array** (iterate with `ForEach` over `$lookup.{name}`, element via `$item.*`). A `filter` that references a binding makes it **reactive** — it re-loads when that bound value changes (cascade)
-- **`x-validation`** — Runtime validation rules beyond standard JSON Schema (e.g. cross-field)
-- **`x-conditional`** — Field visibility/requirement conditions (`if X then required Y`)
-- **`x-enum`** — Enum values with display metadata
-- **`x-roles`** — Field-level access (`{ "role": "$PreviousUser", "grant": "allow" }`). System role tokens (`$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`) and JSONPath grants are documented in `roles-and-authorization.md`.
+- **`x-enum`** — an object keyed by enum value → localized label (`{ "TRY": { "tr": "…", "en": "…" } }`)
+- **`x-order`** — number; field order in a generated form
+- **`x-lov`** — options for a **selectable input**: exactly one of `source` (function URN, may interpolate `{{$form.x}}`) or `items` (an in-scope array expression, no request), plus `valueField` / `displayField` / optional `imageField` / `filter[]`
+- **`x-lookup`** — read-time enrichment used to **render**: function URN + `resultField` (JsonPath). Resolves to a **single object** (`$lookup.{name}.{field}`) **or an array** (iterate with `ForEach` over `$lookup.{name}`, element via `$item.*`). A `filter` that references a binding makes it **reactive** — it re-loads when that bound value changes (cascade)
+- **`x-validation`** — `{ rule, parameters?, errorMessages? }`, a client-delegate rule (the runtime never runs it)
+- **`x-conditional`** — `showIf`/`hideIf`/`enableIf`/`disableIf` visibility and enablement conditions (not requirement — use JSON Schema `if`/`then`)
+- **`x-errorMessages`**, **`x-displayFormat`**, view hints **`x-helpText`**, **`x-placeholder`**, **`x-uiHint`**, **`x-uiNote`**, **`x-group`**
+
+Role-specific: **`x-roles`** / **`x-masking`** / **`x-encryption`** / **`x-computed`** on `master` (what a state view
+receives; `field-protection.md`), **`x-context-source`** and client `x-encryption` on `transition`/`function`,
+**`x-binding`** on `component`. System role tokens and grants for `x-roles`: `roles-and-authorization.md`.
 
 `$lookup.{propertyName}` access uses **property name** — to expose `$lookup.branchDetail.X`, the `x-lookup` must sit on a schema property literally named `branchDetail`, and that name must be listed in the view's root `lookups` array. Multiple lookups are disambiguated by property name (`$lookup.branchDetail.*` vs `$lookup.customerDetail.*`).
 
@@ -144,6 +164,7 @@ These `x-*` keywords live on schema properties and are consumed by the view laye
 ## Sources
 
 - Canonical schema: `view-definition.schema.json` — resolve it as described in `component-schemas.md`
+- Schema roles: `schema-vocabularies.md`; vnext-schema v0.0.56 `vocabularies/{record,input,component}-vocab.json`; vnext-docs `concepts/schema-roles.md`
 - Vocabulary: `https://burgan-tech.github.io/vnext-docs/docs/how-to/view-consept/view-yapisi`
 - Designer guide: `https://burgan-tech.github.io/vnext-docs/docs/how-to/view-consept/tasarimci-rehberi`
 - Data flow: `https://burgan-tech.github.io/vnext-docs/docs/how-to/view-consept/data-akisi`

@@ -104,6 +104,16 @@ Skip this step entirely for plain LOV/lookup functions — they need none of the
 `authorize?functionKey={fn}` before forwarding. So `roles` is a *visibility + authorize* contract,
 not an in-process 403 (`references/concepts/roles-and-authorization.md`).
 
+**Function key.** Never use a reserved system function name — `state`, `view`, `data`, `schema`,
+`extensions`, `authorize`, `permissions`, `instance-correlation`, `human-task`, `master`, `catalog`,
+`tasks`, `actions`, and **`file`** (reserved since 0.0.100). A domain function with such a key is shadowed.
+
+**Execution metrics (runtime ≥ 0.0.99).** Ask: *"Do you want per-call metrics (count, p50/p95,
+failure rate) for this function?"* → `attributes.executionLog: "E"` (opt-in journal read by
+`GET /{domain}/functions/{fn}/metrics`); omit or `"D"` for none. Recommend `"E"` for view-bound
+lookups and latency-sensitive BFF endpoints. Writing is async — no latency cost
+(`references/concepts/observability.md` §5.1).
+
 ### 6. Single-task or multi-task?
 
 Ask: "Does this function call one upstream system, or does it aggregate multiple?"
@@ -203,9 +213,12 @@ Envelope (single-task):
 ```
 
 For multi-task: `onExecutionTasks[]` array + `output` field. Every task's result lands in
-`context.TaskResponse[<camelCase(key)>]` as an isolated copy (0.0.95); task keys that normalise to the
-same variable name (`user-info` and `user_info` → `userInfo`) are **rejected at publish**, so pick
-distinct keys. Contract fields (`verbs`, `inputSchema`, `outputSchema`, `inputView`, `outputView`) go in `attributes` alongside `scope` when step 5 selected them. The exact shape comes from the schema.
+`context.TaskResponse[<variableKey ?? camelCase(key)>]` as an isolated copy (0.0.95). The effective
+slot must be **unique across all `onExecutionTasks`** (not only within one `order`): keys that
+normalise to the same name (`user-info` / `user_info` → `userInfo`) or the same task listed twice are
+**rejected at publish** — give one of them a `variableKey` (0.0.99, schema ≥ 0.0.55;
+`^[A-Za-z_][A-Za-z0-9_]*$`, ≤ 100 chars), e.g. `"variableKey": "eurRate"`, and read
+`context.TaskResponse["eurRate"]` in the output handler. Contract fields (`verbs`, `inputSchema`, `outputSchema`, `inputView`, `outputView`) go in `attributes` alongside `scope` when step 5 selected them. The exact shape comes from the schema.
 
 `mapping.code` is left empty — the vNext VS Code extension auto-encodes the `.csx` file on save. **Never manually base64-encode.**
 
@@ -219,22 +232,34 @@ Run `npm run validate`. Hand failures to `validate-and-fix`.
 
 ### 12. (If a view calls this function) Wire up the `x-lov` / `x-lookup`
 
-If this function backs a view's LOV or lookup, the schema field that references it needs:
+If this function backs a view's LOV or lookup, the schema field that references it needs (shape per
+vnext-schema 0.0.56 `view-vocab`; `additionalProperties: false`):
 
 ```jsonc
 "x-lov": {
-  "source": {
-    "function": { "domain": "{domain}", "key": "{function-key}", "version": "1.0.0" },
-    "method": "GET",
-    "params": [ { "name": "...", "value": "$form.X" } ],
-    "responsePath": "$.data[*]",
-    "valueField": "code",
-    "labelField": "name"
-  }
+  "source": "urn:vnext:fn:{domain}:{function-key}",   // URN string — exactly one of source | items
+  "valueField": "$.data[*].code",                      // JSONPath into the fetched envelope (required)
+  "displayField": "$.data[*].name",                    // required
+  "imageField": "$.data[*].icon",                      // optional, pickers that draw an image
+  "filter": [                                          // optional request parameters
+    { "param": "currency", "value": "$form.currency", "required": true },
+    { "param": "status:in", "value": ["active", "pending"] }  // operator after ':'; literal array only for in/nin
+  ]
 }
 ```
 
-(For `x-lookup`, similar shape but `responsePath` selects one object and the consumer reads via `$lookup.{propertyName}.field`.)
+- **`source` XOR `items`.** `items` names an array already in scope (`"$instance.accounts"` /
+  `"$form.x"`) — no request is made, and `valueField` / `displayField` become plain property names
+  (or `""` for the element itself). `source` may interpolate `{{$form.x}}` / `{{$instance.x}}` /
+  `{{$param.x}}` to pick the source; an unresolved placeholder skips the load.
+- **`filter[]`**: `{ param, value, required? }`; `value` is a literal or a `$form.` / `$instance.` /
+  `$param.` reference. Renderer calls are typically GETs, so filter params arrive as query
+  parameters — resolve them from `context.QueryParameters` (see Notes).
+- **`x-lookup`** (single record): `{ "source": "urn:vnext:fn:…", "resultField": "$.data", "filter": [ … ] }`
+  — `source` and `resultField` required; the consumer reads `$lookup.{propertyName}.field`.
+- There is **no** `function` object, `method`, `params`, `responsePath` or `labelField` — those are
+  pre-0.0.55 shapes and fail validation. URN formats: vnext-docs `components/urn-catalog`. Path roots
+  depend on the envelope the renderer receives (`rawResponse`, step 3) — check one real response.
 
 See `references/concepts/schema-vocabularies.md` for the full vocabulary.
 

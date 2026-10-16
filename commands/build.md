@@ -1,7 +1,7 @@
 ---
 description: Build the vNext domain package (runtime or reference) and report output
 argument-hint: "[runtime|reference] [extra build.js flags]"
-allowed-tools: Bash(npm run build:*), Bash(node build.js:*), Read
+allowed-tools: Bash(npm run build:*), Bash(node build.js:*), Bash(*/scripts/check-test-coverage.sh*), Read
 ---
 
 > **Freshness check (non-blocking, first).** If `vnext.config.json` exists, compare the workspace toolkit stamp — `.claude/vnext-toolkit.json` `toolkitVersion`, falling back to the `<!-- vnext-ai-toolkit vX.Y.Z -->` comment in `CLAUDE.md` — against `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` `.version`. If the stamp is missing or older, tell the user once: "Workspace toolkit files are from vX (plugin is vY) — run `/vnext-update` to refresh". Also compare `vnext.config.json` `runtimeVersion` with the plugin manifest's `.vnext.knownRuntimeVersion`: if the workspace is older, mention once that features newer than its runtime (see `.claude/references/runtime-feature-matrix.md` `since`) are unavailable here; if newer, that the toolkit's knowledge lags the runtime. Then continue with the command below. Never block on this.
@@ -17,3 +17,8 @@ Build the domain package using the repo's build script.
 After building, report the build type, output directory, and a short summary of
 what was produced. If the build runs validation and it fails, surface those errors
 the same way `/validate` does.
+
+Finally run `${CLAUDE_PLUGIN_ROOT}/scripts/check-test-coverage.sh` and list its `WARN` lines as
+**Integration tests (warnings)** — e.g. "G4 e2e stamp stale: components changed since the last e2e run →
+`/vnext-ai-toolkit:e2e`". A package built without a green e2e run is still built; this is a reminder,
+never a build failure.

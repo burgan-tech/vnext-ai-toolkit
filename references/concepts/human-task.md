@@ -2,7 +2,7 @@
 
 > A human task is **not** task type 5 (`Human` task is a stub that answers 202 "Pending"). It is a
 > **state** with `subType: 6` plus a domain-level function that lists such states for the caller.
-> Runtime 0.0.97.
+> Runtime 0.0.100 (identity-aware leaf decision and combinators since 0.0.99).
 
 ## 1. Model
 
@@ -18,17 +18,22 @@ instance; channel-specific screens come from view rules, not from separate state
 
 ## 2. Author checklist
 
-1. State: `stateType: 2`, `subType: 6`.
+1. State: `stateType: 2`, `subType: 6`. Not allowed in a flow with `attributes.history: "none"`
+   (publish rejects Human, Suspended and Busy states there).
 2. State `queryRoles` (or workflow-level `attributes.queryRoles`). Missing on both → the task is
    **dropped** (log 20459), no error. This is the only read surface where an empty grant set means
-   "hide", not "allow".
+   "hide", not "allow". Give the approve/cancel transitions the **same** audience in `roles` (§3.1).
 3. Write `humanTask.title` / `humanTask.description` at the **data root** in the mapping of the
    transition that enters the state (or in an `onEntries` task). If the human state is in a SubFlow
    child, write it into the **child's** data (the parent's `ISubFlowMapping.InputHandler` output).
 4. Optional: channel-based `view.rules` on the state; `interaction.longPoll.terminate: false` on the
-   approval state (nobody stops polling); a rule-gated `terminate: true` on the **result** state
+   approval state (nobody stops polling — since 0.0.98 the state function serves
+   `interaction { terminateLongPoll: false, fallbackTimeoutSeconds }` with no `ack`, and the client
+   uses that window); a rule-gated `terminate: true` on the **result** state
    (`long-poll-interaction.md`).
-5. Do **not** put a long-poll `rule` on the approval state — it is the most-polled state and a rule
+5. The starting client/gateway must send **`act_sub`** (and `sub` when acting for someone): starter
+   grants compare with `Instance.CreatedBy` (= `act_sub`) and `Instance.CreatedByBehalfOf` (= `sub`).
+6. Do **not** put a long-poll `rule` on the approval state — it is the most-polled state and a rule
    disables the shared body cache.
 
 ```json
@@ -67,10 +72,47 @@ Resolution order at the **leaf** (deepest active SubFlow child):
 3. leaf workflow's root `attributes.queryRoles`
 4. none → **dropped**
 
-Evaluation over the caller's whole role set: `DenyGroupOk AND AllowGroupOk` — any role hitting a
-deny removes the task; allows are OR. A caller with `ht-approver,ht-blocked` sees **0** tasks with
-the fixture above. Transition `roles` play no part (they did before 0.0.94 — migration
-`human-task-list-matches-transition-execution`).
+Intermediate flows between root and leaf are **not** evaluated. Evaluation is the standard grant rule
+(`roles-and-authorization.md`): any firing deny removes the task, allows are OR, combinators and the
+three-valued logic apply. A caller with `ht-approver,ht-blocked` sees **0** tasks with the fixture
+above. Transition `roles` play no part in the list (they did before 0.0.94 — migration
+`human-task-list-matches-transition-execution`), but they decide what the opened instance offers.
+
+**Identity at the leaf (0.0.99).** The leaf hop now carries the caller's `act_sub` and `sub` beside the
+roles and evaluates them against the **leaf instance's own** starter and history, so
+`$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` and
+`$user.` / `$userBehalfOf.` grants **work on the list** (before 0.0.99 they never matched there). Like
+the roles, the identity is self-asserted — the gateway is the trust boundary. The list cache key
+includes `sub`, so two callers differing only in the user they act for never share a list.
+
+### 3.1 Pattern: role **and** acting for the starter
+
+"An approver may act only for the customer the case was started for" — depth is 1, so
+"(A OR B) AND starter" is **two `allOf` allows**. Put the same set on the human state's `queryRoles`
+**and** on the approve/cancel transitions' `roles`, so the list, the offered buttons and `authorize`
+agree:
+
+```json
+"queryRoles": [
+  { "grant": "allow", "allOf": [ { "role": "idmFirstApprover" }, { "role": "$InstanceBehalfOfStarter" } ] },
+  { "grant": "allow", "allOf": [ { "role": "idmSuperUser" },     { "role": "$InstanceBehalfOfStarter" } ] }
+]
+```
+
+Fixture: vnext-example `core/Workflows/human-task-chain/ht-idm-approval.json` (verified under
+`morph-idm` with no `role` header; started with `act_sub` = agent, `sub` = customer).
+
+| Idiom | Grants |
+|---|---|
+| Four eyes — the maker who submitted may not approve | `allow maker`, `deny allOf[maker, $PreviousUser]` |
+| Starter or the person they act for | `allow anyOf[$InstanceStarter, $InstanceBehalfOfStarter]` |
+| Owner recorded in data | `allow $user.$.context.Instance.Data.ownerUserId` |
+
+- `CreatedBy` = `act_sub`, `CreatedByBehalfOf` = `sub`. The path is
+  `$.context.Instance.CreatedBy` — **not** `Instance.Data.CreatedBy` (never matches).
+- A start request with only `sub` leaves `CreatedBy` empty → `$InstanceStarter` never matches.
+- In a parent-stamped override, predefined roles mean the **child's** starter/history.
+- Combinators need every pod on ≥ 0.0.99 (`roles-and-authorization.md` § Combinators).
 
 ## 4. How the scan works
 
@@ -81,7 +123,7 @@ the fixture above. Transition `roles` play no part (they did before 0.0.94 — m
    `POST {domain}/workflows/{wf}/internal/human-task-leaf/batch`).
 3. Read leaf `queryRoles` + stamped overrides → authorize; read leaf `humanTask` text.
 4. Merge, `CreatedAt DESC`, cut at `ResultCap` 500 → header `X-VNext-HumanTask-Truncated: true`.
-5. Cache per `domain + caller scope + auth-header hash`, TTL 60 s.
+5. Cache per `domain + caller scope (roles, act_sub, sub) + auth-header hash`, TTL 60 s.
 
 ## 5. Response
 
@@ -130,15 +172,22 @@ Headers: `X-VNext-HumanTask-Truncated` (response, list was capped), `X-VNext-Cac
 - Type-5 `Human` task in `onExecutionTasks` does **not** create a human task; it just returns 202.
 - No in-process `queryRoles` gate on the state/view/data functions since 0.0.95 — the list filters,
   but reading a task's instance directly is gated by the gateway (`roles-and-authorization.md`).
+- Root-only `queryRoles` does not protect a human state inside a SubFlow: the list and
+  `authorize?queryRoles=true` decide at the **leaf** (leaf-only since 0.0.99). Declare `queryRoles` on
+  the leaf or stamp `subFlow.overrides.states.<s>.queryRoles`.
+- Starter/behalf-of grants on the list before 0.0.99 never matched — upgrade instead of working around.
+- `humanTask.title` / `description` are not field-protected (`x-roles` / `x-masking` do not apply):
+  never put PII there that the schema hides elsewhere.
 
 ## Sources
 
-- Runtime `vnext` @ `eca5b466` (0.0.97): `src/BBT.Workflow.Application/Instances/HumanTask/{HumanTaskLeafResolver,HumanTaskFunctionOptions}.cs`,
+- Runtime `vnext` @ `f06961ec` (0.0.100): `src/BBT.Workflow.Application/Instances/HumanTask/{HumanTaskLeafResolver,HumanTaskFunctionOptions,HumanTaskLeafContracts}.cs`, `Instances/Caching/CallerScopeHash.cs`,
+  `WorkflowValidator` (history `none` forbids Human states),
   `src/BBT.Workflow.Infrastructure/Instances/HumanTaskQuerySql.cs`, `EfCoreInstanceRepository.ScanBatchAsync`,
   `src/BBT.Workflow.Application/Instances/Caching/{HumanTaskFunctionCache,HumanTaskFunctionCacheOptions}.cs`,
   `src/BBT.Workflow.Domain/Instances/DTOs/GetInstanceOutput.cs` (`HumanTaskItemOutput`),
   `orchestration/.../Controllers/Functions/Handlers/HumanTaskFunctionHandler.cs`, `docs/runtime/human-task-function.md`
-- Schema `vnext-schema` @ `ac42026` (0.0.54): `#/definitions/stateSubType` (6 = Human)
+- Schema `vnext-schema` 0.0.56: `#/definitions/stateSubType` (6 = Human), `#/definitions/roleGrant` (combinators)
 - vnext-docs @ `adf9bf4`: `how-to/human-task-approval.md`, `components/functions/built-in.md` §Human Task Fonksiyonu
-- Fixture `vnext-example` @ `3b5ebab`: `core/Workflows/human-task-chain/{ht-a,ht-b,ht-c}.json`
-- PR #1016 (0.0.94); vnext-meta `roleGrantAuthorization.apiEndpoints`, migration `human-task-list-matches-transition-execution` (0.0.79)
+- Fixtures `vnext-example`: `core/Workflows/human-task-chain/{ht-a,ht-b,ht-c,ht-idm-approval}.json`, `tests/Core.IntegrationTests/Tests/HumanTaskChain/IdmBehalfOfGrantTests.cs`
+- vnext-docs `blog/2026-10-05-v0-0-99.md`; PRs #1016 (0.0.94), #1051 (0.0.98), #1071 (0.0.99), #1082 (history none); vnext-meta `roleGrantAuthorization.apiEndpoints`, migration `human-task-list-matches-transition-execution` (0.0.79)

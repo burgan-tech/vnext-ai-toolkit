@@ -203,13 +203,15 @@ A view declares:
 
 ```jsonc
 "x-lov": {
-  "source": {
-    "function": { "key": "get-branches", ... },
-    "responsePath": "$.data[*]",
-    "valueField": "code"
-  }
+  "source": "urn:vnext:fn:{{domain}}:get-branches",   // URN string (see vnext-docs urn-catalog)
+  "valueField": "$.data[*].code",                      // JSONPath into the fetched envelope
+  "displayField": "$.data[*].name"
 }
 ```
+
+(Shape per vnext-schema 0.0.56 `view-vocab` — `x-lov` is **`source` XOR `items`**, `valueField` /
+`displayField` required, optional `imageField` and `filter[]`; `x-lookup` is `{ source, resultField,
+filter? }`. There is no `function` object or `responsePath`.)
 
 If `get-branches.attributes.rawResponse` is missing (or `false`):
 - Runtime envelope: `{ "get-branches": { "data": [ ... ] } }`
@@ -460,11 +462,19 @@ Careful: `GET {domain}/functions/{fn}` (no suffix) **invokes** the function — 
 
 Verb handling: comparison is case-insensitive (`"post"` == `"POST"`); the HTTP `QUERY` method is **deliberately rejected** at definition time — model body-carrying reads as `POST`. `inputSchema` failure is **400 with field-level errors**; `outputSchema` is never enforced.
 
-**Built-ins that 404 on `/info`** (no `sys-functions` component behind them — `FunctionTypeConst.cs`): `state`, `view`, `data`, `schema`, `extensions`, `authorize`, `permissions`, `hierarchy`, `human-task`, `master`, `catalog`, `tasks`, `actions`.
+**Built-ins that 404 on `/info`** (no `sys-functions` component behind them — `FunctionTypeConst.cs`, 0.0.100): `state`, `view`, `data`, `schema`, `extensions`, `authorize`, `permissions`, `instance-correlation` (replaced `hierarchy` in 0.0.99 — the old path is 404), `human-task`, `master`, `catalog`, `tasks`, `actions`, `file` (0.0.100). These keys are **reserved**: a domain function with one of them is shadowed — never name a function `file`, `tasks`, `data`, ….
 
 ### Multi-task functions — response slots and key collisions
 
-With `onExecutionTasks[]`, each task files its result under **`TaskResponse[ToVariableName(task.key)]`** (and the same slot in `OutputResponse`) — `user-info` → `userInfo`. Since **0.0.95** (#1025) every slot is an **isolated copy**; on ≤ 0.0.94 all `TaskResponse` slots carried the *last* task's payload (`function-multi-task-taskresponse-slot-collision`) — read `OutputResponse[variable]` there. Because normalisation is lossy, `user-info` and `user_info` both become `userInfo`; since 0.0.95 `FunctionComponentValidator.ValidateTaskKeysDistinct` **rejects such a function at publish** (`function-multi-task-duplicate-keys-rejected-at-publish`), even on republish of a previously accepted definition. Give every task a key that normalises to a distinct variable name.
+With `onExecutionTasks[]`, each task files its result under **`TaskResponse[variableKey ?? ToVariableName(task.key)]`** (and the same slot in `OutputResponse`) — `user-info` → `userInfo`. `variableKey` (0.0.99, #1072; `^[A-Za-z_][A-Za-z0-9_]*$`, ≤ 100 chars, schema ≥ 0.0.55) names the slot explicitly, so the same task can run twice: `{ "order": 1, "task": {…"get-rate"…}, "variableKey": "usdRate" }`, `{ "order": 1, "task": {…"get-rate"…}, "variableKey": "eurRate" }`. For functions the effective slots must be **unique across all `onExecutionTasks`** (not just within one order) — publish rejects a collision or a malformed `variableKey`. Since **0.0.95** (#1025) every slot is an **isolated copy**; on ≤ 0.0.94 all `TaskResponse` slots carried the *last* task's payload (`function-multi-task-taskresponse-slot-collision`) — read `OutputResponse[variable]` there. Because normalisation is lossy, `user-info` and `user_info` both become `userInfo`; since 0.0.95 `FunctionComponentValidator.ValidateTaskKeysDistinct` **rejects such a function at publish** (`function-multi-task-duplicate-keys-rejected-at-publish`), even on republish of a previously accepted definition. Give every task a key that normalises to a distinct variable name, or set `variableKey`.
+
+### Execution journal — `executionLog` (0.0.99, #1030)
+
+`attributes.executionLog: "E"` opts the function into the execution journal read by
+`GET /{domain}/functions/{fn}/metrics` (and the flow-scoped `…/workflows/{wf}/functions/{fn}/metrics`):
+paged runs plus `summary { count, p50Ms, p95Ms, failureRate }`. `"D"` or absent records nothing. The
+write is asynchronous and best-effort (no latency cost). Recommend `"E"` for view-bound lookups and
+BFF endpoints whose latency matters; see `references/concepts/observability.md` §5.1.
 
 ### Designing a BFF View
 

@@ -1,0 +1,1 @@
+{ "key": "ext-cities", "version": "1.0.0", "domain": "dc", "flow": "sys-extensions", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": 3, "scope": 1, "task": { "order": 1, "task": { "key": "http-get-cities", "domain": "dc", "flow": "sys-tasks", "version": "1.0.0" }, "mapping": { "location": "./src/CitiesMapping.csx", "code": "" } } } }

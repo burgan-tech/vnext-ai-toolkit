@@ -40,7 +40,11 @@ Capture `paths.componentsRoot`, `paths.mappings` (e.g. `Mappings`), `domain`. Ta
 - **Kind**: a *helper* (plain `public static class` with utility methods) or a *reusable mapping*
   (implements a mapping interface — see `csx-contracts.md`).
 - **External assemblies** it needs (e.g. `System.Security.Cryptography`, `Newtonsoft.Json`) — consumers
-  must list these in `allowedAssemblies`.
+  must list these in `allowedAssemblies` (simple name, no `.dll`). Since runtime 0.0.99 every listed name
+  must resolve in the target environment (framework assembly or a DLL in its plugin directory), or the
+  consumer's **publish fails with 400 naming the field**. A third-party DLL (e.g. a DB driver) is a
+  *script plugin*: the platform team mounts it — ask the platform team / environment owner; product
+  teams don't control runtime config.
 
 ### 3. Scaffold the `.csx`
 A helper is a plain static class (no `IMapping`):
@@ -90,6 +94,14 @@ the VS Code extension encodes the `.csx` into `code` on save.
 
 ## Notes
 - `sys-mappings` `encoding` is **`B64` or `NAT` only** — it cannot be `REF` (no self-reference).
+- **Plugin wrappers are optional since 0.0.100** (#1090): a mapping may call a plugin type directly, and
+  plugins load once per process. Extract a helper for *reuse*, not to make a plugin loadable — unless the
+  workspace's `runtimeVersion` is below 0.0.100, where a helper-less plugin call fails at run time with
+  `FileNotFoundException`. A helper that does I/O should take a `CancellationToken` parameter and receive
+  `context.CancellationToken` from the caller (0.0.100+). See `csx-contracts.md` § Runtime notes.
+- A helper is plain code — it cannot see `ScriptContext` unless a caller passes it. Don't pass decrypted
+  `x-encryption` values or `GetFileAsync` bytes through a helper into logs or responses.
 - Register in `exports.mappings` (vnext.config.json) only if shared cross-domain.
 - The sandbox/security model for `allowedAssemblies` and helper runtime linking is documented on the
-  vNext docs portal — fetch it if a consumer's script fails to resolve a helper or assembly.
+  vNext docs portal (`docs/configuration/scripting`) — fetch it if a consumer's script fails to resolve a
+  helper or assembly. If the runtime itself misbehaves, draft an issue with `/vnext-ai-toolkit:report-issue`.

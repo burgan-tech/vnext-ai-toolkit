@@ -1,7 +1,7 @@
 # Long-Poll Interaction — `interaction.longPoll`
 
 > A **state-level** declaration that tells the polling client "stop, render, then acknowledge".
-> Runtime 0.0.97, state-function shape v12. Transitions cannot carry `interaction`.
+> Runtime 0.0.100, state-function shape v14. Transitions cannot carry `interaction`.
 
 ## 1. When to use
 
@@ -11,8 +11,10 @@
 | Handover to another actor; everyone keeps waiting for a state change (approval state polled by web + mobile) | `terminate: false` (or no block) |
 | Only one channel should stop while others keep polling | `terminate: true` + `roles` or `rule` |
 
-`terminate: false` produces **no** `interaction` block in the response — it is documentation for the
-author, not a client directive. The pause is armed only for `terminate: true`.
+The pause (Busy + ack token + fallback job) is armed **only** for `terminate: true`.
+`terminate: false` arms nothing server-side, but since 0.0.98 (PR #1051, shape v13) the state function
+serves its `interaction` block again — **without `ack`** — as a client directive: "keep long polling
+for `fallbackTimeoutSeconds`" (§3a). It was missing on 0.0.95–0.0.97.
 
 ## 2. Definition
 
@@ -64,6 +66,23 @@ Use lowercase `allow`/`deny`.
 
 ErrorBoundary and AutoChain profiles never pause at 75.
 
+## 3a. Semantics (`terminate: false`, 0.0.98+)
+
+Nothing is paused, the instance is not Busy, no fallback job exists. Whenever the instance is in the
+declaring state and the caller passes the gate (`rule`, else `roles`, else allow), the state function
+returns:
+
+```json
+"interaction": { "terminateLongPoll": false, "fallbackTimeoutSeconds": 120 }
+```
+
+- No `ack` — there is nothing to acknowledge; `POST …/longpoll/ack` and `authorize?ack=true` act only
+  on an armed `terminate: true` token.
+- **Client contract:** `fallbackTimeoutSeconds` (default 60; a parent override applies) **replaces the
+  client's own long-poll window** — a client defaulting to 60 s polls for 120 s here. Keep polling;
+  do not stop or render a terminal screen.
+- Typical use: the human approval state everyone (web, mobile, backoffice) keeps polling.
+
 ### `fallbackTimeoutSeconds` guidance
 
 - Default 60 s. The instance is Busy the whole time: **every other transition 409s** until ack or
@@ -109,8 +128,10 @@ gate through `authorize?ack=true`, not by expecting a 403 from the ack endpoint.
 - SubProcess children are not followed.
 - **Runtime-started children see only the headers the parent's `ISubFlowMapping.InputHandler`
   forwards.** A `roles`-gated pause in a child never arms unless the mapping returns the caller's
-  role headers (`x-roles`, `role`, `user_reference`, …) in `ScriptResponse.Headers`. Fixture:
-  `subflow-override-lab/src/OverrideLabSubFlowMapping.csx`.
+  credential headers in `ScriptResponse.Headers`: `role`, `sub`, `act_sub` (plus `position`,
+  `client_id` under morph-idm). Those are the only headers the runtime reads for roles and identity;
+  `x-roles`, `user_reference`, `x-device-id` are **not** role sources (they only feed scripts and
+  `$.context.Headers.*` grants). Fixture: `subflow-override-lab/src/OverrideLabSubFlowMapping.csx`.
 
 ## 7. Parent override (`subFlow.overrides.states.<s>.interaction.longPoll`)
 
@@ -121,23 +142,28 @@ Details in `subflow-overrides.md`.
 
 ## 8. Author checklist
 
-1. Which client must render before continuing? If none → no block (or `terminate: false` with
-   `"roles": []` for the schema).
+1. Which client must render before continuing? If none → no block, or `terminate: false` with
+   `"roles": []` when clients should poll with a longer/shorter window than their default.
 2. `terminate: true` states: keep them short-lived; set `fallbackTimeoutSeconds` for the slowest
    acceptable render.
 3. Choose the arm: roles when the channel is a role; rule when it is a header. Never both.
-4. In a SubFlow child, forward role headers from the parent mapping.
+4. In a SubFlow child, forward the credential headers (`role`, `sub`, `act_sub`) from the parent mapping.
 5. Client contract: on `interaction.terminateLongPoll === true` → stop polling → render → POST
-   `ack.href` → resume polling.
+   `ack.href` → resume polling. On `terminateLongPoll === false` → keep polling, using
+   `fallbackTimeoutSeconds` as the window.
+6. `roles` accept `allOf` / `anyOf` combinators (0.0.99); a role-less caller is refused by an allow-list
+   and by any role-bound deny (`roles-and-authorization.md`).
 
 ## Sources
 
-- Runtime `vnext` @ `eca5b466` (0.0.97): `src/BBT.Workflow.Domain/Definitions/States/LongPollInteraction.cs`,
+- Runtime `vnext` @ `f06961ec` (0.0.100): `src/BBT.Workflow.Domain/Definitions/States/LongPollInteraction.cs`,
+  `src/BBT.Workflow.Application/Instances/DTOs/InstanceInteractionOutput.cs`,
   `src/BBT.Workflow.Application/Execution/LongPoll/LongPollInteractionGate.cs`,
   `Pipeline/Steps/{HandleLongPollTerminationStep,ClearBusyOnResumeStep}.cs`,
   `InstanceQueryAppService.ResolveInteractionAsync`, `InstanceCommandAppService.AcknowledgeLongPollAsync`,
   `orchestration/.../InstanceController.cs` (`POST …/longpoll/ack`), `docs/domain/long-poll-termination.md`
-- Schema `vnext-schema` @ `ac42026` (0.0.54): `#/definitions/{interaction,longPoll,subFlowLongPollOverride}`
+- Schema `vnext-schema` 0.0.56: `#/definitions/{interaction,longPoll,subFlowLongPollOverride,roleGrant}`
 - vnext-docs @ `adf9bf4`: `components/workflow.md` §State Interaction, `how-to/async-sync.md`, `how-to/human-task-approval.md`
 - Fixture `vnext-example` @ `3b5ebab`: `core/Workflows/subflow-override-lab/subflow-override-lab-child.json` (`lp-wait`)
-- PRs: #936/#990 (rule arm), #1028 (overrides); vnext-meta `longPollTermination` 0.0.62, `longPollInteractionRule` 0.0.94, `queryRolesEnforcementMovedToGateway` 0.0.95
+- vnext-docs `blog/2026-10-01-v0-0-98.md`
+- PRs: #936/#990 (rule arm), #1028 (overrides), #1051/#1052 (`terminate: false` block restored, 0.0.98); vnext-meta `longPollTermination` 0.0.62, `longPollInteractionRule` 0.0.94, `queryRolesEnforcementMovedToGateway` 0.0.95

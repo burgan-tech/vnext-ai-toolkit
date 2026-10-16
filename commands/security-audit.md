@@ -28,9 +28,11 @@ and severity/confidence rubric in `references/concepts/security-review-checklist
    destinations, and where instance data reaches `.csx` logic. Write
    `security-report/architecture.md` (reuse it if it exists and is still current).
 2. **Hunt** — work through the checklist categories: secrets, authn/authz (`roles`,
-   `queryRoles`, `x-roles`, exports), injection and unsafe execution in `.csx`, SSRF and
-   untrusted hosts, path traversal and file handling, weak crypto and data exposure,
-   dependency/supply-chain risk, and misconfiguration. Collect raw candidates per category.
+   `queryRoles` incl. leaf-only SubFlow decisions, `allOf`/`anyOf`, credential headers, exports),
+   injection and unsafe execution in `.csx`, SSRF and untrusted hosts, path traversal and file
+   handling (`GetFileAsync`, `x-storage`), weak crypto and field protection (`x-roles` /
+   `x-masking` / `x-encryption` on PII), dependency/supply-chain risk, and misconfiguration.
+   Collect raw candidates per category.
 3. **Verify** — apply the rubric: reachability, existing mitigations, and context (MockLab
    seeds, test fixtures, and localhost dev URLs are usually not findings). Assign each
    surviving finding a confidence score (0–100) and cap severity by confidence. Merge

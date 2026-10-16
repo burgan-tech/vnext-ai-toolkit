@@ -19,6 +19,7 @@ vNext runs C# scripts (`.csx` files) as "mappings" — input/output adapters bet
 | `IStateNotificationMapping` | Enrich the platform-managed `state` channel's Dapr metadata (optional; same `.csx` file as `INotificationMapping`) | picked up automatically when the notification mapping class also implements it |
 | `IEventMapping` | Map an inbound pub/sub / binding payload to a correlation key + body (`EventMappingResult`) | `event.mapping` on a workflow or transition |
 | `ITransitionMapping` | Transform transition data (`Handler(ScriptContext)` → `dynamic`) | reusable transition mappings (e.g. `sys-mappings` `initial-mapping`) |
+| `ICacheKeyMapping` | Compute a CacheAside cache key (`Handler(ScriptContext)` → `Task<string?>`; null/blank keeps the earlier key). **0.0.99+** | `config.key` of a CacheAside task (type 18) when it is a `ScriptCode` whose `location` is not `dynamicExpresso`; default encoding `B64`, plain text needs `NAT` |
 
 ## Reuse: `sys-mappings` helpers + `REF` — the primary approach
 
@@ -41,6 +42,8 @@ These two confuse newcomers most often.
 
 **Rule.** A Function with one task uses `IMapping`. A Function with multiple `onExecutionTasks[]` uses one `IMapping` per task + an `IOutputHandler` for the final output. Don't mix.
 
+**`InputHandler` is not a validation gate** (#1087). Its returned `ScriptResponse` only goes into the task's audit record; the task runs regardless — a StartTrigger or HTTP POST still writes. Validate before the task (transition `rule`, auto transition to an error state, a preceding validation step) or `throw` from `InputHandler` to stop the invocation. Details: `csx-contracts.md` § `IMapping`.
+
 ## ScriptContext — the data surface
 
 Every mapping receives a `ScriptContext`. The fields you'll use most (there is **no `QueryString`** property — the query string is `QueryParameters`):
@@ -51,14 +54,17 @@ Every mapping receives a `ScriptContext`. The fields you'll use most (there is *
 | `context.Headers` | HTTP headers (lowercased keys) | InputHandler (auth tokens, correlation IDs) |
 | `context.QueryParameters` | URL query string (Function calls in GET mode) | InputHandler for GET-mode functions |
 | `context.RouteValues` | URL path segments / routing values | InputHandler |
-| `context.Instance.Data` | The workflow instance's current data (**dynamic — use `HasProperty`/`GetPropertyValue`**) | All handlers |
+| `context.Instance.Data` | The workflow instance's current data (**dynamic — use `HasProperty`/`GetPropertyValue`**). `x-encryption` `encrypt` fields hold a **token** since 0.0.99 — open with `await context.Instance.DecryptAsync(path, ct)` (own instance only) | All handlers |
 | `context.CurrentTransition` | The **original** transition request (`.Data`, `.Header`) — unaffected by task merges into `Body` | Any transition-pipeline handler |
 | `context.TaskResponse` | Each task's `StandardTaskResponse` (dictionary keyed by camelCase task key) | OutputHandler / IOutputHandler |
 | `context.OutputResponse` | Each task's own output-mapping result (not merged into `Body`) | IOutputHandler |
 | `context.EventPayload` | Raw inbound event payload (non-null only in `IEventMapping`) | IEventMapping |
 | `context.Related` | Correlated instance reads — parent / subflows / subprocesses (v0.0.79+; correlation data ONLY, otherwise use a task) | Any handler |
-| `context.Incident` | Active error-boundary incident info | Compensation / error-aware logic |
+| `context.Incident` | Active error-boundary incident info (`ActiveIncident` / `TotalIncidentCount` reliable since 0.0.99; empty on 0.0.93–0.0.98) | Compensation / error-aware logic |
 | `context.Mutations` | Atomic instance mutations API | OutputHandler when you want to patch instance data |
+| `context.CancellationToken` | Request / job token (**0.0.100+**) — pass to plugin driver calls and `DecryptAsync` | Any handler doing its own I/O |
+
+Two `ScriptBase` additions: **`GetFileAsync(domain, flow, instance, file)`** (0.0.100+) reads an `x-storage` file's bytes as a `ScriptFile` — **no authorization check, cross-domain**, so the mapping must enforce access itself. When a mapping sets outbound headers, the runtime fills `sub`, `act_sub`, `position`, `client_id`, `role` and `X-Request-Id` **only where the mapping leaves them empty** (0.0.99+); set `X-Request-Id` to `Guid.NewGuid().ToString()` for a per-call UUID. Both in `csx-contracts.md`.
 
 **All `dynamic` values are `ExpandoObject`/`List<object?>` with camelCase keys — a missing property access throws at runtime (`?.` does not save you).** Read via the `ScriptBase` helpers. See `csx-contracts.md` for the full verified surface, the dynamic type model, and the helper reference.
 

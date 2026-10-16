@@ -1,0 +1,67 @@
+{
+  "collection": {
+    "name": "morph-idm-roles",
+    "description": "OPTIONAL (vnext-ai-toolkit): get-roles endpoint for the morph-idm caller-role provider, used only when the runtime under test runs CallerRoleProvider__Provider=morph-idm with BaseUrl = MockLab and GetRolesPath=/api/1/morph-idm/functions/get-roles. Keyed on the `sub` header the provider sends (it also sends act_sub, position, client_id — never role). Replace the role names with exactly what your grants use.",
+    "color": "#0ea5e9"
+  },
+  "folders": [],
+  "mocks": [
+    {
+      "httpMethod": "GET",
+      "route": "api/1/morph-idm/functions/get-roles",
+      "queryString": null,
+      "requestBody": "",
+      "statusCode": 200,
+      "responseBody": "{\"roles\":[]}",
+      "contentType": "application/json",
+      "description": "Default: unknown user → empty role set. Accepted response shapes: roles | data.roles | getRoles.data.roles.",
+      "delayMs": null,
+      "isActive": true,
+      "isSequential": false,
+      "folderIndex": null,
+      "rules": [
+        {
+          "conditionField": "header.sub",
+          "conditionOperator": "equals",
+          "conditionValue": "idm-maker",
+          "statusCode": 200,
+          "responseBody": "{\"roles\":[\"maker\"]}",
+          "contentType": "application/json",
+          "priority": 0,
+          "responseHeaders": []
+        },
+        {
+          "conditionField": "header.sub",
+          "conditionOperator": "equals",
+          "conditionValue": "idm-approver",
+          "statusCode": 200,
+          "responseBody": "{\"roles\":[\"approver\"]}",
+          "contentType": "application/json",
+          "priority": 1,
+          "responseHeaders": []
+        },
+        {
+          "conditionField": "header.sub",
+          "conditionOperator": "equals",
+          "conditionValue": "idm-empty",
+          "statusCode": 204,
+          "responseBody": "",
+          "contentType": "application/json",
+          "priority": 2,
+          "responseHeaders": []
+        },
+        {
+          "conditionField": "header.sub",
+          "conditionOperator": "equals",
+          "conditionValue": "idm-broken",
+          "statusCode": 500,
+          "responseBody": "{\"error\":\"provider unavailable\"}",
+          "contentType": "application/json",
+          "priority": 3,
+          "responseHeaders": []
+        }
+      ],
+      "sequenceItems": []
+    }
+  ]
+}
