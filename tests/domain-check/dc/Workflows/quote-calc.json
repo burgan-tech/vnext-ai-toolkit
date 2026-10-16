@@ -1,0 +1,127 @@
+{
+  "key": "quote-calc",
+  "version": "1.0.0",
+  "domain": "dc",
+  "flow": "sys-flows",
+  "flowVersion": "1.0.0",
+  "tags": [
+    "fixture"
+  ],
+  "attributes": {
+    "type": "S",
+    "labels": [
+      {
+        "language": "en-US",
+        "label": "x"
+      }
+    ],
+    "startTransition": {
+      "key": "start",
+      "target": "calc",
+      "versionStrategy": "Minor",
+      "triggerType": 0,
+      "labels": [
+        {
+          "language": "en-US",
+          "label": "x"
+        }
+      ]
+    },
+    "states": [
+      {
+        "key": "calc",
+        "stateType": 2,
+        "subType": 0,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "onEntries": [
+          {
+            "order": 1,
+            "task": {
+              "key": "calc-script",
+              "domain": "dc",
+              "flow": "sys-tasks",
+              "version": "1.0.0"
+            },
+            "mapping": {
+              "location": "./src/SubmitMapping.csx",
+              "code": ""
+            }
+          },
+          {
+            "order": 1,
+            "task": {
+              "key": "calc-script",
+              "domain": "dc",
+              "flow": "sys-tasks",
+              "version": "1.0.0"
+            },
+            "mapping": {
+              "location": "./src/SubmitMapping.csx",
+              "code": ""
+            }
+          },
+          {
+            "order": 2,
+            "task": {
+              "key": "cache-cities",
+              "domain": "dc",
+              "flow": "sys-tasks",
+              "version": "1.0.0"
+            },
+            "mapping": {
+              "location": "./src/SubmitMapping.csx",
+              "code": ""
+            }
+          },
+          {
+            "order": 3,
+            "task": {
+              "key": "dapr-self-read",
+              "domain": "dc",
+              "flow": "sys-tasks",
+              "version": "1.0.0"
+            },
+            "mapping": {
+              "location": "./src/SubmitMapping.csx",
+              "code": ""
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "key": "done",
+            "target": "done",
+            "versionStrategy": "Minor",
+            "triggerType": 1,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ],
+            "executionType": "S"
+          }
+        ]
+      },
+      {
+        "key": "done",
+        "stateType": 3,
+        "subType": 1,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "transitions": []
+      }
+    ]
+  }
+}

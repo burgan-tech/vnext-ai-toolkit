@@ -1,0 +1,1 @@
+{ "key": "fn-cities", "version": "1.0.0", "domain": "dc", "flow": "sys-functions", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "scope": "I", "executionLog": "E", "task": { "order": 1, "task": { "key": "http-get-cities", "domain": "dc", "flow": "sys-tasks", "version": "1.0.0" }, "mapping": { "location": "./src/CitiesMapping.csx", "code": "" } } } }

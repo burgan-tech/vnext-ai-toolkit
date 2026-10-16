@@ -1,0 +1,1 @@
+{ "key": "submit-application", "version": "1.0.0", "domain": "dc", "flow": "sys-tasks", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": "6", "config": { "url": "https://core.example/applications", "method": "POST", "timeoutSeconds": 30 } } }

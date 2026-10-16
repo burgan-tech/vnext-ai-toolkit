@@ -1,0 +1,1 @@
+{ "key": "dapr-self-read", "version": "1.0.0", "domain": "dc", "flow": "sys-tasks", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": "3", "config": { "appId": "vnext-app", "methodName": "/dc/workflows/apply/instances/{id}/functions/hierarchy", "httpVerb": "GET", "timeoutSeconds": 10 } } }

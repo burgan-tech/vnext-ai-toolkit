@@ -1,0 +1,1 @@
+{ "key": "apply-view", "version": "1.0.0", "domain": "dc", "flow": "sys-views", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": 1, "target": "State", "content": {} } }

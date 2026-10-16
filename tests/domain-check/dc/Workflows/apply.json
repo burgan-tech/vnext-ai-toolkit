@@ -1,0 +1,234 @@
+{
+  "key": "apply",
+  "version": "1.0.0",
+  "domain": "dc",
+  "flow": "sys-flows",
+  "flowVersion": "1.0.0",
+  "tags": [
+    "fixture"
+  ],
+  "attributes": {
+    "type": "F",
+    "labels": [
+      {
+        "language": "en-US",
+        "label": "x"
+      }
+    ],
+    "schema": {
+      "key": "apply-master",
+      "domain": "dc",
+      "flow": "sys-schemas",
+      "version": "1.0.0"
+    },
+    "startTransition": {
+      "key": "start",
+      "target": "draft",
+      "versionStrategy": "Minor",
+      "triggerType": 0,
+      "labels": [
+        {
+          "language": "en-US",
+          "label": "x"
+        }
+      ],
+      "schema": null
+    },
+    "errorBoundary": {
+      "onError": [
+        {
+          "action": 0,
+          "errorTypes": [
+            "*"
+          ]
+        }
+      ]
+    },
+    "updateData": {
+      "key": "push-data",
+      "target": "$self",
+      "versionStrategy": "Minor",
+      "triggerType": 0,
+      "labels": [
+        {
+          "language": "en-US",
+          "label": "x"
+        }
+      ],
+      "schema": null
+    },
+    "states": [
+      {
+        "key": "draft",
+        "stateType": 1,
+        "subType": 0,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "view": {
+          "view": {
+            "key": "apply-view",
+            "domain": "dc",
+            "flow": "sys-views",
+            "version": "1.0.0"
+          },
+          "extensions": [
+            "ext-cities"
+          ],
+          "loadData": true
+        },
+        "transitions": [
+          {
+            "key": "submit",
+            "target": "checking",
+            "versionStrategy": "Minor",
+            "triggerType": 0,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ],
+            "schema": null,
+            "executionType": "A",
+            "onExecutionTasks": [
+              {
+                "order": 1,
+                "task": {
+                  "key": "get-token",
+                  "domain": "dc",
+                  "flow": "sys-tasks",
+                  "version": "1.0.0"
+                },
+                "mapping": {
+                  "location": "./src/SubmitMapping.csx",
+                  "code": ""
+                }
+              },
+              {
+                "order": 2,
+                "task": {
+                  "key": "submit-application",
+                  "domain": "dc",
+                  "flow": "sys-tasks",
+                  "version": "1.0.0"
+                },
+                "mapping": {
+                  "location": "./src/SubmitMapping.csx",
+                  "code": ""
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "checking",
+        "stateType": 2,
+        "subType": 0,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "transitions": [
+          {
+            "key": "to-quote",
+            "target": "quoting",
+            "versionStrategy": "Minor",
+            "triggerType": 1,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ]
+          },
+          {
+            "key": "to-rejected",
+            "target": "rejected",
+            "versionStrategy": "Minor",
+            "triggerType": 1,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "quoting",
+        "stateType": 4,
+        "subType": 0,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "subFlow": {
+          "type": "S",
+          "process": {
+            "key": "quote-calc",
+            "domain": "dc",
+            "flow": "sys-flows",
+            "version": "1.0.0"
+          },
+          "mapping": {
+            "location": "./src/SubmitMapping.csx",
+            "code": ""
+          }
+        },
+        "transitions": [
+          {
+            "key": "quoted",
+            "target": "approved",
+            "versionStrategy": "Minor",
+            "triggerType": 1,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "approved",
+        "stateType": 3,
+        "subType": 1,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "transitions": []
+      },
+      {
+        "key": "rejected",
+        "stateType": 3,
+        "subType": 2,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "transitions": []
+      }
+    ]
+  }
+}

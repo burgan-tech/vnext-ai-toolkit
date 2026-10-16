@@ -22,6 +22,18 @@ jobs:
       - name: Lint knowledge files (stale runtime facts, manifest/link integrity)
         run: scripts/lint-references.sh
 
+      - name: Compile domain-check scanner (stdlib only)
+        run: python3 -m py_compile skills/domain-check/scan.py
+
+      - name: Smoke-test domain-check scanner against the pinned vnext-schema
+        # Installs knownSchemaVersion into a throwaway prefix (nothing is saved to the repo)
+        # and scans tests/domain-check offline: every enum label must resolve.
+        run: |
+          v=$(node -p 'require("./.claude-plugin/plugin.json").vnext.knownSchemaVersion')
+          d=$(mktemp -d)
+          npm install --no-save --no-audit --no-fund --prefix "$d" "@burgan-tech/vnext-schema@$v"
+          scripts/test-domain-check.sh "$d/node_modules/@burgan-tech/vnext-schema/schemas"
+
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
