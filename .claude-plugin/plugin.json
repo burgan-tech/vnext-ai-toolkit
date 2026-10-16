@@ -87,8 +87,8 @@
     "references/concepts/schema-runtime-gaps.md"
   ],
   "vnext": {
-    "knownRuntimeVersion": "0.0.97",
-    "knownSchemaVersion": "0.0.54",
+    "knownRuntimeVersion": "0.0.100",
+    "knownSchemaVersion": "0.0.56",
     "metaPackageVersion": "0.0.53",
     "schemaSource": "node_modules/@burgan-tech/vnext-schema/schemas/{componentType}-definition.schema.json",
     "schemaFallbackUrl": "https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}-definition.schema.json",

@@ -3,18 +3,25 @@
 # and stamps the known runtime/schema versions into .claude-plugin/plugin.json (vnext.known*).
 #
 # Usage:
-#   scripts/sync-vnext-meta.sh [--from <vnext-meta dir>]   (default: ../vnext/vnext-meta)
-#   scripts/sync-vnext-meta.sh --npm [<version>]           (npm pack @burgan-tech/vnext-meta into a temp dir)
+#   scripts/sync-vnext-meta.sh [--github [<ref>]]           (default: burgan-tech/vnext@master, raw GitHub)
+#   scripts/sync-vnext-meta.sh --from <vnext-meta dir>      (a local vnext checkout, e.g. ../vnext/vnext-meta)
+#   scripts/sync-vnext-meta.sh --npm [<version>]            (npm pack @burgan-tech/vnext-meta into a temp dir)
 #   scripts/sync-vnext-meta.sh --check                      (exit 1 if the matrix would change; for CI)
 #
-# Needs: node >= 18. No jq. Idempotent: running twice produces no diff.
+# vnext master is the source of truth for vnext-meta; the npm package can lag behind it.
+# Needs: node >= 18 and curl (for --github). No jq. Idempotent: running twice produces no diff.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-src="$here/../vnext/vnext-meta"
+src=""
+ref=master
 mode=write
+META_FILES="package.json features.json version-manifest.json deprecations.json migrations.json known-issues.json security-policy.json performance-profiles.json component-registry.json"
 while [ $# -gt 0 ]; do
   case "$1" in
+    --github)
+      if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then ref="$2"; shift; fi
+      src=""; shift ;;
     --from) src="$2"; shift 2 ;;
     --npm)
       ver=""; if [ $# -gt 1 ] && [ "${2#-}" = "$2" ]; then ver="$2"; shift; fi
@@ -22,16 +29,26 @@ while [ $# -gt 0 ]; do
       ( cd "$tmp" && npm pack "@burgan-tech/vnext-meta${ver:+@$ver}" >/dev/null && tar xzf ./*.tgz )
       src="$tmp/package"; shift ;;
     --check) mode=check; shift ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 
-[ -f "$src/features.json" ] || { echo "vnext-meta not found at $src (use --from or --npm)" >&2; exit 1; }
+source_label="local $src"
+if [ -z "$src" ]; then
+  src=$(mktemp -d)
+  base="https://raw.githubusercontent.com/burgan-tech/vnext/$ref/vnext-meta"
+  for f in $META_FILES; do
+    curl -fsSL --max-time 20 "$base/$f" -o "$src/$f" || { echo "could not download $base/$f" >&2; exit 1; }
+  done
+  source_label="burgan-tech/vnext@$ref"
+fi
+
+[ -f "$src/features.json" ] || { echo "vnext-meta not found at $src (use --github, --from or --npm)" >&2; exit 1; }
 
 out="$here/references/runtime-feature-matrix.md"
 tmpout=$(mktemp)
-META_DIR="$src" OUT="$tmpout" PLUGIN_JSON="$here/.claude-plugin/plugin.json" MODE="$mode" node - <<'NODE'
+META_DIR="$src" META_SOURCE="$source_label" OUT="$tmpout" PLUGIN_JSON="$here/.claude-plugin/plugin.json" MODE="$mode" node - <<'NODE'
 const fs = require('fs'), path = require('path');
 const dir = process.env.META_DIR;
 const load = f => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -142,7 +159,8 @@ L.push('');
 L.push('## Sources');
 L.push('');
 L.push(`- \`@burgan-tech/vnext-meta\` ${pkg.version} (repo dir \`vnext/vnext-meta\`): features.json, version-manifest.json, deprecations.json, migrations.json, known-issues.json, security-policy.json, performance-profiles.json, component-registry.json`);
-L.push('- Regenerate: `scripts/sync-vnext-meta.sh --from ../vnext/vnext-meta` (or `--npm`).');
+L.push('- Regenerate: `scripts/sync-vnext-meta.sh` (reads vnext master; `--from <dir>` or `--npm` also work).');
+L.push('- This file is an offline snapshot. Skills read the live copy from vnext master through `scripts/vnext-meta-live.sh`.');
 L.push('');
 fs.writeFileSync(process.env.OUT, L.join('\n'));
 
@@ -157,7 +175,7 @@ if (process.env.MODE === 'write') {
   }
   fs.writeFileSync(pj, txt);
 }
-console.log(`vnext-meta ${pkg.version}: runtime ${runtime}, schema ${schema}`);
+console.log(`vnext-meta ${pkg.version} [${process.env.META_SOURCE}]: runtime ${runtime}, schema ${schema}`);
 NODE
 
 if [ "$mode" = check ]; then
