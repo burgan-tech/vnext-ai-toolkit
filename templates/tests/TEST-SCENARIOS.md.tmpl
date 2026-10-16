@@ -1,0 +1,67 @@
+# Test scenarios — {{domain}}
+
+Index of the integration suites in `tests/{{Domain}}.IntegrationTests/` and the record of every e2e
+run. Maintained by `/vnext-ai-toolkit:e2e` (run rows) and the `integration-test` skill (suite rows).
+Rows are never deleted — mark them deprecated and say why.
+
+Integration tests are expected for **every workflow** (vnext-ai-toolkit gates G1–G4, warn-only):
+G1 the test project builds · G2 every workflow has a test class · G3 every Final state is asserted and
+every conditional auto pair has an unhappy path · G4 the last e2e run is green, newer than the
+components and on the `runtimeVersion` in `vnext.config.json`.
+
+## Before a run — read this first
+
+The goal is to tell a red apart: **environment**, **fixture**, **domain** or **runtime**. A suite whose
+dependency is missing must **skip**, not fail; a known trap must not be read as a regression.
+
+### 1. Environment checklist
+
+`${CLAUDE_PLUGIN_ROOT}/scripts/e2e-preflight.sh --mode container|local` checks most of these.
+
+| # | Check | How | If missing |
+|---|---|---|---|
+| 1 | .NET 10 SDK, Docker running | `dotnet --list-sdks`, `docker info` | Cannot run |
+| 2 | Mode | `VNEXT_BASE_URL` unset → Testcontainers (default, same as CI); set in git-ignored `test.runsettings.local` → the runtime already running on this machine | Container mode with a stray `VNEXT_BASE_URL` silently tests another runtime |
+| 3 | Runtime version | Testcontainers: `VNextImageVersion` = `vnext.config.json` `runtimeVersion` (tag without `v`). Local: `curl localhost:4201/health` → `domain`, `version` | Image `latest` = a different runtime than the domain targets |
+| 4 | System package `@burgan-tech/vnext-core-runtime` loaded once per fresh DB | Testcontainers: `LoadSystemPackageAsync` in `VNextTestEnvironment` (log line `system package … loaded`). vnext-runtime: its `vnext-component-publisher` loads it | Components referencing `sys-*` fail to publish or run. The SDK publishes only this domain's components |
+| 5 | MockLab up **after** the runtime infra, seeds current | `docker compose up -d`; seed edits need `docker compose down -v && docker compose up -d` | HTTP tasks fault; MockLab-dependent tests should skip |
+| 6 | Task URLs not hard-coded to `localhost` | `API_BASEURL` placeholder + `GetConfigValue("{{Domain}}:ApiBaseUrl", …)` | `localhost` inside a container is the runtime itself → connection refused |
+| 7 | `x-storage` binding (if a master schema declares one) | Testcontainers: `Infrastructure/DaprComponents/orchestration/<binding>.yaml`. Local: `etc/runtime` overlay | Start/transition → 503 `Instance:100047` |
+| 8 | Script plugins (`allowedAssemblies`) | Runtime started with `Scripting__Sandbox__PluginDirectory` (local mode only) | Functions rejected at publish |
+| 9 | Caller-role provider | Default `default`. morph-idm suites need the runtime on `CallerRoleProvider__Provider=morph-idm` **and** `VNEXT_CALLER_ROLE_PROVIDER=morph-idm` | morph-idm tests skip — expected |
+| 10 | Optional domains / services | `OptionalDomainEndpoint.Resolve(...)` probes `/health` + `domain` | Dependent tests skip |
+
+### 2. Suite index and dependencies
+
+| Suite (folder) | Workflow(s) | Covers | Dependencies | If missing |
+|---|---|---|---|---|
+| _example_ `Tests/OrderApproval/` | `order-approval` | happy path → `completed`, rule-false → `rejected`, four-eyes on `approve` | MockLab `{{domain}}-collection` | HTTP task faults |
+
+### 3. Traps (not regressions)
+
+- **A parked auto-chain rests in Busy.** A state whose only exits are auto transitions with false rules
+  keeps the instance Busy by design. Wait for the **state**, not the status, and drive the
+  `updateData` / transition that opens the gate.
+- **409 `Failed to acquire lock` is retried by the client** (`WorkflowTestBase.RunAsync`, 5 × 200 ms).
+  Any other 409 — e.g. `Instance:100031` Busy — is real.
+- **Never discard `RunAsync`'s status.** A swallowed refusal turns into a 45 s "never reached state X".
+  Use `RunAcceptedAsync`, or `SubmitAsync` for a parent that stays Busy while its SubFlow runs.
+- **Reads do not enforce `queryRoles`.** `state`, `data`, `view`, `schema`, `incidents` answer every
+  caller; the rule is answered by `authorize?queryRoles=true`. A test expecting a 403 from a read is
+  stale. Assert `authorize` verdicts and the state function's `transitions[]`.
+- **A deny is not bought back** by another allowed role of the same caller.
+- **`$InstanceStarter` / `$PreviousUser` match `act_sub`.** A start without `act_sub` leaves
+  `CreatedBy` empty and those grants never match — always send `sub` and `act_sub`.
+- **Publish is version-immutable.** A changed component needs a patch bump (and every fully-versioned
+  reference updated), otherwise 409 `Instance:100002`.
+- **Cold MockLab** can make the first latency-sensitive run flaky — run that suite alone first.
+- **A green run is not proof by itself** when observability is down: say "not verified against traces".
+
+## Run record
+
+One row per `/vnext-ai-toolkit:e2e` run (newest first). Causes: `environment` · `fixture` · `domain` ·
+`runtime` (→ `/vnext-ai-toolkit:report-issue`).
+
+| Date | Mode | Runtime | Scope | Passed / Failed / Skipped | Reds and cause |
+|---|---|---|---|---|---|
+| _yyyy-mm-dd_ | container | _0.0.x_ | `--all` | 0 / 0 / 0 | — |

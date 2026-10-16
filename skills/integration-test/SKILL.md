@@ -1,207 +1,132 @@
 ---
 name: integration-test
-description: Use after a workflow is scaffolded (or to add coverage to an existing one). Generates an xUnit integration test class against the official VNext.Testing.Sdk that asserts the workflow's lifecycle — start, transitions, final state. If no test project exists, scaffolds one with the official VNext.Testing.Template (dotnet new vnext-integration-test) or hands off to /vnext-init.
+description: Use after a workflow is scaffolded or changed, or to add coverage to an existing one. Generates the xUnit integration test class for a workflow against the official VNext.Testing.Sdk — full scope by default (happy path to every Final state, one unhappy path per conditional auto pair, authorization verdicts when the flow has roles). Scaffolds the test project if missing (official template + toolkit infrastructure). Integration tests are expected for every workflow; a skipped or smoke-only test is reported as a warning, never a blocker.
 ---
 
 # Integration Test
 
-vNext ships an official integration testing **SDK** (`VNext.Testing.Sdk`) and a **dotnet project
-template** (`VNext.Testing.Template`), both maintained by the platform team. The SDK spins up the
-full Docker stack (PostgreSQL, Redis, Vault, Dapr, runtime, MockLab) via Testcontainers and drives a
-workflow through its API. The toolkit does **not** hand-roll the test project — it scaffolds with the
-official template, then writes test classes against the SDK.
+Every workflow is expected to have an integration test class (gates G1–G4, **warn-only**). This skill
+writes it. Running the suite end to end is `/vnext-ai-toolkit:e2e` (skill `e2e-local`).
 
-> **Source of truth — fetch when unsure.** The SDK/template evolve; verify package versions, the
-> `dotnet new` short name, override property names, and the API surface against
-> `https://github.com/burgan-tech/vnext-integration-test/blob/master/GETTING_STARTED.md`
-> (raw: `https://raw.githubusercontent.com/burgan-tech/vnext-integration-test/master/GETTING_STARTED.md`).
-> Full layout reference: `references/concepts/integration-test-patterns.md`.
+Reference: `references/concepts/integration-test-patterns.md` (modes, SDK surface, helpers, gates).
+Authorization scenarios: `references/concepts/roles-and-authorization.md` § *Authorization integration tests*.
 
-## Pre-check — does a test project exist?
+## Pre-check — test project
 
-```
-Look for a *.IntegrationTests.csproj (typically under tests/<DomainName>.IntegrationTests/).
+Look for a `*.csproj` referencing `VNext.Testing.Sdk` (usually `tests/<Domain>.IntegrationTests/`).
 
-If present:  Continue to Step 1.
-If missing:  Offer to scaffold it with the official template (below), OR hand off to /vnext-init
-             (which runs the same template). Do NOT hand-write the project files.
-```
+**Missing →** offer to scaffold it now (default **yes**; or hand off to `/vnext-ai-toolkit:vnext-init`
+Step 7, which does the same). If the user declines, say once: "No test project — G1/G2 will be reported
+as warnings by validate/review" and stop.
 
-### Scaffold (only if missing)
+Scaffold (needs the .NET 10 SDK; Docker only to run):
 
 ```bash
-# Once per machine:
-dotnet new install VNext.Testing.Template
-
-# In the workspace's tests/ folder:
-dotnet new vnext-integration-test \
-  --DomainName <PascalCaseDomain> \   # from vnext.config.json domain, PascalCased (e.g. MorphFx)
-  --AppDomain  <domain-slug>          # the lower-case vnext.config.json domain (e.g. morphfx)
-  # optional: --VNextImage ghcr.io/burgan-tech/vnext   --SdkVersion 1.0.0
+dotnet new install VNext.Testing.Template::0.0.6          # 1.0.0 in GETTING_STARTED is not published
+cd tests
+dotnet new vnext-integration-test --DomainName <Domain> --AppDomain <domain> --SdkVersion 0.0.6
+cd <Domain>.IntegrationTests && dotnet add package Xunit.SkippableFact
 ```
 
-This generates `<DomainName>.IntegrationTests/` with `Config/`, `Infrastructure/`
-(`IntegrationTestBase.cs`, `VNextTestEnvironment.cs`, `DaprComponents/`, `MocklabSeed/`),
-`Helpers/TestDataBuilder.cs`, `Tests/SmokeTests.cs`, and `test.runsettings`. Requires the **.NET 10
-SDK** and a running Docker Desktop. The SDK finds `vnext.config.json` by walking up the directory
-tree, so the test project must live inside the domain workspace.
+`<Domain>` = PascalCase of `vnext.config.json` `domain`. The project must live inside the workspace
+(the SDK walks up to `vnext.config.json`). Then add the toolkit layer — render each
+`${CLAUDE_PLUGIN_ROOT}/templates/tests/*.tmpl` with `{{domain}}`, `{{Domain}}` (and nothing else); a
+file the template already generated is **diffed and confirmed**, never overwritten silently:
+
+| Template | Target |
+|---|---|
+| `VNextTestEnvironment.cs.tmpl` | `Infrastructure/VNextTestEnvironment.cs` — image tag = `runtimeVersion`, daprd/MockLab pins, workspace seeds, system package, `<Domain>__ApiBaseUrl`, optional morph-idm |
+| `WorkflowTestBase.cs.tmpl` | `Infrastructure/WorkflowTestBase.cs` |
+| `OptionalDomainEndpoint.cs.tmpl` | `Infrastructure/OptionalDomainEndpoint.cs` |
+| `test.runsettings.tmpl` | `test.runsettings` (VNEXT_BASE_URL **commented** — Testcontainers default) |
+| `TEST-SCENARIOS.md.tmpl` | `TEST-SCENARIOS.md` at the workspace root |
+| `gitignore.tmpl` | append missing lines to `.gitignore` (`*.runsettings.local`, …) |
+| `DaprComponents/orchestration/vnext-blob-local.yaml.tmpl` | only if a master schema declares `x-storage` — one file per binding, `metadata.name` = binding |
+
+Check the csproj prefers `test.runsettings.local` when present (`RunSettingsFilePath` condition, as in
+vnext-example) and references `VNext.Testing.Sdk` **0.0.6**.
 
 ## Steps
 
-### 1. Read the target workflow
+### 1. Pick the workflow
 
-From `vnext.config.json`: `componentsRoot`, `paths.workflows`, `domain`. The workflow JSON is at
-`{componentsRoot}/{paths.workflows}/{workflow-key}/{workflow-key}-workflow.json`.
+From `vnext.config.json`: `paths.componentsRoot`, `paths.workflows`, `domain`. Default to the workflow
+just scaffolded/edited; otherwise ask. Read its JSON: `startTransition`, `states[]` (`stateType`,
+`subType`, `transitions[]`, `queryRoles`), `sharedTransitions`, master schema, transition schemas,
+tasks (HTTP → MockLab mocks), `roles` on transitions.
 
-Ask: "Which workflow should I generate tests for?" (Default to the most recently modified one if obvious.)
+### 2. Test surface
 
-Read the workflow JSON. Extract:
-- `attributes.startTransition` — the first transition fired automatically
-- `attributes.states[]` — every state with its `stateType`, `isFinal`, `view`
-- `attributes.transitions[]` — every transition with its `triggerType`, source/target, payload schema
+| Element | Test |
+|---|---|
+| Final state (`stateType: 3`), Success/Error | a path that reaches it — `WaitForInstanceStateAsync(wf, id, "<key>")` + status `C` |
+| Conditional auto pair (`triggerType: 1` with rules) | one test per branch; the false branch is the unhappy path |
+| Manual transition (`0`) | `RunAcceptedAsync` (async, lock-retry); refusals asserted via `RunAsync` status |
+| Timer (`2`) / event (`3`) | wait with a generous timeout / publish the event (Dapr) or mark as local-mode only |
+| Entry tasks on the first state | `AssertNotFaultedAsync` right after `StartAsync` |
+| HTTP task | MockLab mock in `etc/docker/config/seed/<domain>-collection.json` (success + one failure rule) |
+| Fault path | MockLab 500 → `incidents/active` (`errorCode`, `traceId`) → fix rule → `RetryInstanceAsync` |
+| Roles / grants | `AuthorizeAsync` verdicts + `GetOfferedTransitionsAsync` per the five scenarios (below) |
+| Human state (`subType: 6`) | `GET /api/v1/<domain>/functions/human-task` with an allowed vs a denied `Caller` |
+| SubFlow | `SubmitAsync` on the parent (it stays Busy), `WaitForObservedStateAsync` for the child |
+| Long-poll `terminate: true` | `interaction.ack` in the state body → `POST …/longpoll/ack` |
+| `x-storage` field | start with `{ name, mimeType, content }` → handle in `functions/data`; `functions/file?file=` |
 
-### 2. Identify the test surface
+### 3. Scope — full by default
 
-For each state and transition, note:
-- **Manual transitions (`triggerType: 0`)** — explicitly fired in tests via `RunTransitionAsync`
-- **Auto transitions (`triggerType: 1`)** — fire on their own; the test polls `GetInstanceAsync` until
-  the expected state settles
-- **Timer transitions (`triggerType: 2`)** — fire after a duration; poll with a generous timeout
-- **Event transitions (`triggerType: 3`)** — need an external signal
-- **Final states** — assert `GetCurrentState(...)` equals the final state key
-- **Human states (`subType: 6`)** — assert the instance appears in `GET /{domain}/functions/human-task` for an allowed role header and is absent for a denied one
-- **Long-poll `terminate: true` states** — assert the state body carries `interaction.ack.href`, `POST …/longpoll/ack`, then the pipeline resumes
-- **Busy / concurrency** — a second transition while Busy returns 409 `Instance:100031`; parallel `updateData` calls are all accepted
-- **Failures** — after a faulted task: `metadata.incident.hasActiveIncident`, `GET …/incidents/active` (fields `errorCode`, `errorLayer`, `traceId`), then `POST …/retry`
-- **Polling** — read `metadata.effectiveStatus` (deepest active subflow) rather than `status`; use `If-None-Match` and expect 304 on the state function
-  Reference: `references/concepts/integration-test-patterns.md` ("Surfaces added in 0.0.80–0.0.97") and `references/concepts/state-function-response.md`.
+Default **full**: every Success/Error Final state + one unhappy path per conditional auto pair +
+authorization tests when any grant exists. The user may choose **smoke-only** (start + first state):
+accept it, and state the warning "smoke-only: G3 will warn for <final states / branches>".
 
-### 3. Decide test scope with the user
+### 4. Generate the class
 
-Ask:
-- **Smoke-only?** Start instance → assert it moved past the initial state. (`SmokeTests.cs` already
-  covers health + ListInstances.)
-- **Happy path?** Fire every manual transition with valid payload → assert the expected Final state.
-  **(Recommended for the first test.)**
-- **Full coverage?** Happy path + one unhappy-path test per branch (auto transition's "false" branch,
-  error states).
+`tests/<Domain>.IntegrationTests/Tests/<WorkflowName>/<WorkflowName>Tests.cs` from
+`${CLAUDE_PLUGIN_ROOT}/templates/tests/WorkflowTests.cs.tmpl` (`{{workflowKey}}`, `{{WorkflowName}}`,
+`{{Domain}}`). Derive from `WorkflowTestBase`; the workflow key and every asserted state key appear as
+string literals (the coverage gate reads them). Each `[Fact]` starts its own instance. Payloads must
+satisfy the transition schemas (`StartAsync` fails with the runtime's 400 body otherwise).
 
-Default: Happy path.
+Authorization — always send `sub` **and** `act_sub` (`Caller`):
 
-### 4. Generate the test class
+| Scenario | Caller |
+|---|---|
+| role-header caller | `Caller.WithRole("maker", "u-ali")` |
+| morph-idm caller (optional) | `Caller.MorphIdm("idm-maker")` — no role header; `[SkippableFact]` + `Skip.If(Environment.GetEnvironmentVariable("VNEXT_CALLER_ROLE_PROVIDER") != "morph-idm")`; seed `templates/etc/docker/config/seed/morph-idm-roles-collection.json` |
+| behalf-of | start with `Caller.BehalfOf("u-agent", "c-acme")`; approver sends `sub: c-acme` → `$InstanceBehalfOfStarter` |
+| role-less | `Caller.RoleLess("u-x")` — allow-lists refuse, identity grants match |
+| four-eyes | `WithRole("maker","u-ayse")` submits → `authorize?transitionKey=approve` false for her, true for `WithRole("maker","u-bob")` |
 
-File path: `tests/<DomainName>.IntegrationTests/Tests/{WorkflowName}Tests.cs` (PascalCase from key).
+Never assert authorization through a read's 200/403 or a PATCH status.
 
-Skeleton (Happy path) — uses the **real** SDK API (`RunTransitionAsync`, `VNextApiResponse.Body`,
-`GetCurrentState`; no `ExecuteTransitionAsync`/`WaitForStateAsync`/`GetStateAsync`):
+### 5. Optional dependencies skip, never time out
 
-```csharp
-using <DomainName>.IntegrationTests.Infrastructure;
-// using <DomainName>.IntegrationTests.Helpers;   // TestDataBuilder, if you add builders
+Anything not always present (a partner domain, MockLab admin API, morph-idm provider, script plugins)
+is resolved with `OptionalDomainEndpoint.Resolve(...)` / an env check and `Skip.If(...)`
+(`[SkippableFact]`). Add the suite's dependencies as a row in `TEST-SCENARIOS.md` § *Suite index*.
 
-namespace <DomainName>.IntegrationTests.Tests;
+### 6. Companion `.http` (optional)
 
-public class {WorkflowName}Tests : IntegrationTestBase   // carries [Collection("VNextIntegration")]
-{
-    private const string Workflow = "{workflow-key}";
+`api-tests/<workflow-key>.http` from `${CLAUDE_PLUGIN_ROOT}/templates/.http.tmpl`
+(`@baseUrl = http://localhost:4201`) for manual probing. The xUnit class stays the source of truth.
 
-    public {WorkflowName}Tests(VNextTestEnvironment environment) : base(environment) { }
-
-    [Fact]
-    public async Task Happy_Path_Reaches_{FinalStateName}()
-    {
-        // Arrange + Act: start (startTransition fires automatically)
-        var started = await Api.StartInstanceAsync(Workflow, new
-        {
-            // initial payload — match the workflow's master schema
-        });
-        Assert.True(started.IsSuccessStatusCode);
-        var id = started.Body.GetProperty("id").GetString()!;
-
-        // Fire each manual transition with the payload its schema expects
-        await Api.RunTransitionAsync(Workflow, id, "{transition-key-1}", new { /* payload */ });
-        await Api.RunTransitionAsync(Workflow, id, "{transition-key-2}", new { /* payload */ });
-
-        // Read state. (Auto/timer transitions are NOT fired here — poll GetInstanceAsync until the
-        //  expected state if the flow auto-advances. Don't assume a built-in wait helper.)
-        var instance = await Api.GetInstanceAsync(Workflow, id);
-
-        // Assert
-        Assert.Equal("{final-state-key}", GetCurrentState(instance.Body));
-    }
-}
-```
-
-For Full coverage, add one `[Fact]` per branch — e.g. an auto transition's negative case reaching a
-different Final state.
-
-### 5. Generate a companion `.http` file (optional but useful)
-
-For manual exploration, drop a REST Client file at `api-tests/{workflow-key}.http`:
-
-```http
-@baseUrl = http://localhost:4201
-@apiVersion = 1
-@domain = {domain}
-@workflowKey = {workflow-key}
-
-### Start
-# @name start
-POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/start
-Content-Type: application/json
-
-{ /* initial payload */ }
-
-###
-@instanceId = {{start.response.body.$.id}}
-
-### Get state
-GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/state
-
-### Run transition: {transition-key-1}
-PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{transition-key-1}
-Content-Type: application/json
-
-{ /* transition payload */ }
-```
-
-These are for human debugging; the xUnit tests are CI's source of truth.
-
-### 6. Remind the user how to run
+### 7. Run (or hand over)
 
 ```bash
-# .NET 10 SDK + Docker Desktop required. Testcontainers manages the stack — no manual docker compose.
-dotnet test tests/<DomainName>.IntegrationTests --filter "FullyQualifiedName~{WorkflowName}Tests"
-
-# Against an external environment instead of Testcontainers:
-VNEXT_BASE_URL=http://localhost:5000 dotnet test
+dotnet build tests/<Domain>.IntegrationTests
+/vnext-ai-toolkit:e2e <workflow-key>     # preflight → Testcontainers (default) or your local runtime → triage
 ```
 
-If `VNext.Testing.Sdk` or the template fails to resolve, point the user at
-`https://github.com/burgan-tech/vnext-integration-test/blob/master/GETTING_STARTED.md` (feed /
-version guidance).
+Direct run: `dotnet test tests/<Domain>.IntegrationTests --filter "FullyQualifiedName~<WorkflowName>Tests"`.
+Component changes need a **patch bump** before re-running against the same runtime (publish is
+version-immutable: 409 `Instance:100002`).
 
-### 7. (Optional) Update CI
+### 8. CI (recommended, not required)
 
-If the repo has CI config (`.github/workflows/`, `.gitlab-ci.yml`), suggest adding a `dotnet test`
-step. Don't edit CI without explicit user confirmation.
+Offer `${CLAUDE_PLUGIN_ROOT}/templates/tests/integration-tests.github.yml.tmpl` (Testcontainers on the
+runner). Never edit CI without the user's confirmation.
 
-## Notes
+## Report
 
-- The template's `IntegrationTestBase` auto-applies `[Collection("VNextIntegration")]` — **one**
-  shared Docker stack across all test classes in the project (not per-domain collections).
-- `VNextTestEnvironment` overrides are `Domain`, `DatabaseName`, `VNextImage` (required) plus optional
-  `VNextImageVersion`, `MocklabImage`, `MocklabSeedDirectory`, `EnableMocklab`, `EnableDomainPublish`,
-  `OnAfterEnvironmentReadyAsync`, `GetVaultSecrets`, `GetOrchestratorEnvironment`.
-- Read instance state with `GetCurrentState(response.Body)`; read fields with
-  `response.Body.GetProperty("…")`. `VNextApiResponse` exposes `Body` (JsonElement), `RawBody`,
-  `StatusCode`, `IsSuccessStatusCode`, `Headers`.
-- For specific MockLab behavior (e.g. simulate a 500), push rules via MockLab's admin API at the start
-  of the test, or place seeds in the test project's `Infrastructure/MocklabSeed/`.
-- Each `[Fact]` should be independent — start a fresh instance; don't reuse IDs across tests.
-
-## References
-
-- `references/concepts/integration-test-patterns.md` — full SDK + template pattern reference
-- `https://github.com/burgan-tech/vnext-integration-test/blob/master/GETTING_STARTED.md` — official setup guide
-- Working examples: `vnext-example/tests/`
+- Files written; scope (full / smoke-only → **warning**); Final states and branches covered vs not.
+- Output of `${CLAUDE_PLUGIN_ROOT}/scripts/check-test-coverage.sh --workflow <key>` (WARN lines only).
+- If the user skipped the test entirely: "**Warning:** `<workflow-key>` has no integration test (G2)".

@@ -168,9 +168,10 @@ The published runtime images (vnext-runtime compose) ship **no** blob binding. A
 4. On the orchestration container, `FileStorage__AllowedBindings__0=vnext-blob-local` when files are handed
    across flows (SubFlow input, mappings copying a handle).
 
-The toolkit will ship this as a compose overlay (`/vnext-ai-toolkit:vnext-init` writes it when a master
-schema declares `x-storage`); until then add the four items to your local compose override. Integration
-tests: the e2e preflight checks the binding when a master schema uses `x-storage`.
+The toolkit ships this as a compose overlay under `etc/runtime/` (`/vnext-ai-toolkit:vnext-init` writes it
+when a master schema declares `x-storage`); for Testcontainers the test project's
+`DaprComponents/orchestration/vnext-blob-local.yaml` does the same. The e2e preflight checks the binding
+when a master schema uses `x-storage`.
 
 ## 5. Status codes
 

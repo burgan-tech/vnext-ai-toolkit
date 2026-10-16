@@ -80,7 +80,7 @@ Before continuing: if the workspace `runtimeVersion` is below a type's `since` i
 
 Once the user picks a type, the schema tells you the per-type `config` shape. For example, an HTTP task's config needs `url`, `method`, optional `headers`, `body`, `timeoutSeconds`, `validateSsl`. Walk the user through each required field.
 
-For URLs that hit external systems during development, default to MockLab: `http://localhost:3001/api/{domain}/{resource}/{action}`. Production URLs are hardcoded only when explicitly requested.
+For URLs that hit external systems, write the `API_BASEURL` placeholder (`API_BASEURL/api/{domain}/{resource}/{action}`) and resolve it in the input mapping with `GetConfigValue("<Domain>:ApiBaseUrl", "http://mocklab:5000")` — `localhost:3001` only works for a runtime run as a host process, never for Testcontainers or vnext-runtime (see `references/concepts/mocklab-spec.md` § URL conventions). Production URLs are hardcoded only when explicitly requested.
 
 **Error boundary reminders.** `errorBoundary.onError[].action` must be an **integer** (0–5) to pass the schema even though the runtime also accepts strings; `errorBoundary.onTimeout` is accepted by the schema but never read; a task timeout surfaces as `…:TaskCanceledException` with **no status code**, so only an `errorTypes` rule can catch it; `errorTypes` rules now match on the in-process path too (they silently never did on the remote path before 0.0.94) — dormant rules may fire for the first time after an upgrade.
 
@@ -152,7 +152,7 @@ Use `references/concepts/csx-contracts.md` for the exact interface signature, st
 
 ### 8. (HTTP/SOAP/Dapr tasks) Add a MockLab seed
 
-If the task calls `localhost:3001`, append a `mocks[]` entry to the domain's collection file at `etc/docker/config/seed/{domain}-collection.json`. **One collection per domain** — don't split.
+If the task calls MockLab (`API_BASEURL/…`), append a `mocks[]` entry to the domain's collection file at `etc/docker/config/seed/{domain}-collection.json`. **One collection per domain** — don't split.
 
 Mock entry pattern (see `references/concepts/mocklab-spec.md` for the full reference):
 

@@ -83,7 +83,7 @@ Checklist:
 - Tasks / functions / scripts:
   - CacheAside `keyExpression` or the `cacheaside` invocation mode — removed in
     0.0.99; use `key` (string or script) on a runtime ≥ 0.0.99 (`task-types.md`).
-  - any `functions/hierarchy` call or reference — 404 since 0.0.99; use
+  - any `functions/hierarchy` call or reference — 404 since 0.0.99; use <!-- lint:allow -->
     `functions/instance-correlation`.
   - task `type: "23"` (Python) fails validate; `"22"` validates but is deprecated (use `6`).
   - a custom function keyed `file` (reserved system function); an unresolvable
@@ -101,12 +101,21 @@ Checklist:
   (toolkit rule; the runtime does not enforce it).
 - `x-roles` / `x-masking` / `x-encryption` changed on a master schema without a
   version bump (stale data-function ETag).
+- Integration tests (expected for every workflow; warn-only, never a Blocker —
+  `scripts/check-test-coverage.sh` reports G1–G4):
+  - G1: no test project, or it does not build;
+  - G2: a changed workflow has no test class;
+  - G3: a Success/Error Final state is not asserted, or a conditional auto pair has no
+    unhappy path;
+  - G4: `.claude/vnext-e2e.json` is missing, red, on another `runtimeVersion`, or older
+    than the components;
+  - an authorization test that asserts read 200s or a PATCH status instead of
+    `authorize` verdicts / the `transitions[]` list.
 
 **Suggestions**: human states (`subType: 6`) without `queryRoles` (hidden from the
 human-task list) or without a `humanTask` write; `errorBoundary.onError[].action` given
 as a string (schema wants an integer); `timeout.timer.reset` relied upon (not
-implemented); `updateData` mappings that echo the whole document instead of a delta;
-missing integration tests for a changed workflow.
+implemented); `updateData` mappings that echo the whole document instead of a delta.
 
 - Exports: components meant to be shared are listed under `exports` in
   vnext.config.json, and every listed export exists on disk.

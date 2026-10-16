@@ -1,57 +1,68 @@
-#!/usr/bin/env bash
-# check-prerequisites.sh — invoked by /vnext-init to verify the workspace has the tooling we'll need.
-# Prints a summary; exits 0 if all required tools are present, exits 1 if any required tool is missing.
-
+#!/bin/sh
+# check-prerequisites.sh — invoked by /vnext-init to verify the workspace tooling.
+# Authoring needs node, npm and git (missing → exit 1). Local end-to-end tests additionally need
+# Docker (daemon running), docker compose and the .NET 10 SDK; those are reported as WARN for e2e and
+# never fail the check — authoring works without them.
 set -u
 
-# Tools we check. Required = the workspace cannot proceed without it. Optional = warn only.
-REQUIRED=("node" "npm" "git")
-OPTIONAL=("docker" "docker compose" "dotnet")
-
 missing_required=0
-missing_optional=0
+e2e_warn=0
 
-check_one() {
-  local cmd="$1"
-  if command -v "$cmd" >/dev/null 2>&1 || ($cmd --version >/dev/null 2>&1); then
-    local ver
-    ver=$($cmd --version 2>/dev/null | head -1)
-    printf "  ✓ %-20s %s\n" "$cmd" "$ver"
-    return 0
-  else
-    return 1
-  fi
-}
+ver() { "$@" 2>/dev/null | head -1; }
 
 echo "vnext-init prerequisite check"
 echo "------------------------------"
-
-echo "Required:"
-for cmd in "${REQUIRED[@]}"; do
-  if ! check_one "$cmd"; then
-    printf "  ✗ %-20s MISSING\n" "$cmd"
+echo "Required (authoring):"
+for cmd in node npm git; do
+  if command -v "$cmd" >/dev/null 2>&1; then
+    printf '  ok   %-16s %s\n' "$cmd" "$(ver "$cmd" --version)"
+  else
+    printf '  MISS %-16s required\n' "$cmd"
     missing_required=$((missing_required + 1))
   fi
 done
 
 echo
-echo "Optional:"
-for cmd in "${OPTIONAL[@]}"; do
-  if ! check_one "$cmd"; then
-    printf "  - %-20s not found (some steps will be skipped)\n" "$cmd"
-    missing_optional=$((missing_optional + 1))
+echo "Local e2e / integration tests (warn only):"
+if command -v docker >/dev/null 2>&1; then
+  printf '  ok   %-16s %s\n' docker "$(ver docker --version)"
+  if docker info >/dev/null 2>&1; then
+    printf '  ok   %-16s %s\n' "docker daemon" "running"
+  else
+    printf '  WARN %-16s %s\n' "docker daemon" "not running — start Docker Desktop before /vnext-ai-toolkit:e2e"
+    e2e_warn=$((e2e_warn + 1))
   fi
-done
+  if docker compose version >/dev/null 2>&1; then
+    printf '  ok   %-16s %s\n' "docker compose" "$(ver docker compose version)"
+  else
+    printf '  WARN %-16s %s\n' "docker compose" "missing — MockLab compose cannot start"
+    e2e_warn=$((e2e_warn + 1))
+  fi
+else
+  printf '  WARN %-16s %s\n' docker "missing — Testcontainers and MockLab need Docker"
+  e2e_warn=$((e2e_warn + 1))
+fi
+
+if command -v dotnet >/dev/null 2>&1; then
+  major=$(dotnet --list-sdks 2>/dev/null | sed -n 's/^\([0-9][0-9]*\)\..*/\1/p' | sort -n | tail -1)
+  if [ -n "$major" ] && [ "$major" -ge 10 ]; then
+    printf '  ok   %-16s %s\n' dotnet "SDK $major.x"
+  else
+    printf '  WARN %-16s %s\n' dotnet "SDK ${major:-none} found — the integration test project targets net10.0 (install the .NET 10 SDK)"
+    e2e_warn=$((e2e_warn + 1))
+  fi
+else
+  printf '  WARN %-16s %s\n' dotnet "missing — install the .NET 10 SDK to build and run the integration tests"
+  e2e_warn=$((e2e_warn + 1))
+fi
 
 echo
-if [[ $missing_required -gt 0 ]]; then
-  echo "✗ $missing_required required tool(s) missing — install them before running /vnext-init."
+if [ "$missing_required" -gt 0 ]; then
+  echo "FAIL $missing_required required tool(s) missing — install them before running /vnext-init."
   exit 1
 fi
-
-if [[ $missing_optional -gt 0 ]]; then
-  echo "⚠ $missing_optional optional tool(s) missing — vnext-init will skip the corresponding steps."
+if [ "$e2e_warn" -gt 0 ]; then
+  echo "WARN $e2e_warn e2e prerequisite(s) missing — authoring works; the test project can still be scaffolded, but /vnext-ai-toolkit:e2e cannot run yet."
 fi
-
-echo "✓ Prerequisites OK."
+echo "Prerequisites OK for authoring."
 exit 0

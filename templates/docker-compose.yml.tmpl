@@ -1,10 +1,15 @@
+# MockLab for the {{domain}} domain (vnext-ai-toolkit). Joins the network of a runtime started from the
+# released images (vnext-runtime: `make up-infra`, `make up-vnext DOMAIN={{domain}}`). Start it AFTER the
+# runtime infra — the network must exist. Not used by the Testcontainers test run (the SDK starts its
+# own MockLab from the same seed folder).
 networks:
-  bbt-development:
+  vnext:
+    name: ${VNEXT_NETWORK:-vnext-development}
     external: true
 
 services:
   mocklab:
-    image: ghcr.io/burgan-tech/mocklab:latest
+    image: ghcr.io/burgan-tech/mocklab:${MOCKLAB_VERSION:-0.0.10}
     container_name: mocklab
     ports:
       - "3001:5000"
@@ -13,10 +18,11 @@ services:
     volumes:
       - ./etc/docker/config/seed:/app/seed
     networks:
-      - bbt-development
+      vnext:
+        aliases: [mocklab]
 
   mocklab-dapr:
-    image: daprio/daprd:latest
+    image: daprio/daprd:${DAPR_RUNTIME_VERSION:-1.18.0}
     container_name: mocklab-dapr
     command:
       - ./daprd
@@ -42,16 +48,19 @@ services:
 
 # Notes
 # -----
-# - The `bbt-development` network is shared with the vNext runtime container.
-#   Create it once with: docker network create bbt-development
-# - MockLab seed files live in etc/docker/config/seed/{{domain}}-collection.json
-#   (one collection per domain — never split).
-# - After editing seed files, force re-import:
+# - Pins: MockLab 0.0.10 and daprd 1.18.0 (override with MOCKLAB_VERSION / DAPR_RUNTIME_VERSION).
+#   Keep them equal to the pins in tests/*/Infrastructure/VNextTestEnvironment.cs.
+# - Network: ${VNEXT_NETWORK:-vnext-development} is the vnext-runtime network; it must exist
+#   (vnext-runtime creates it; or: docker network create vnext-development).
+# - URLs: from a runtime CONTAINER, MockLab is http://mocklab:5000 — NOT http://localhost:3001
+#   (localhost inside a container is that container). Task URLs carry the API_BASEURL placeholder and the
+#   mapping resolves it with GetConfigValue("{{Domain}}:ApiBaseUrl", "http://mocklab:5000"); set
+#   {{Domain}}__ApiBaseUrl on the runtime for any other upstream. localhost:3001 is for your browser/curl.
+# - Seeds: etc/docker/config/seed/{{domain}}-collection.json (one collection per domain — never split).
+#   MockLab skips collections whose name already exists: after editing a seed run
 #     docker compose down -v && docker compose up -d mocklab
-# - The mocklab-dapr sidecar exposes Dapr service invocation:
-#     http://localhost:3500/v1.0/invoke/mocklab/method/api/{{domain}}/{resource}/{action}
-# - The runtime's own sidecars use the app-id convention vnext-{{domain}}-app (orchestrator) and
-#   vnext-{{domain}}-execution-app (execution); cross-domain calls resolve to those ids via Dapr
-#   name resolution (mdns locally). See .claude/references/runtime-operations.md.
-# - Logs/traces: the runtime compose stack ships an otel-collector → OpenObserve (:5080) and
-#   Elastic APM/Kibana (:5601); etc/dapr/config.yaml points this sidecar at the same collector.
+# - etc/dapr/components/ must exist (it can be empty — .gitkeep): daprd fails on a missing --resources-path.
+# - Dapr invocation of MockLab from a task: DaprService task with appId `mocklab` (goes through the
+#   runtime's own sidecar); :3500 is MockLab's sidecar, useful only for manual probing from the host.
+# - Logs/traces: vnext-runtime ships otel-collector → OpenObserve (:5080); etc/dapr/config.yaml points
+#   this sidecar at the same collector.

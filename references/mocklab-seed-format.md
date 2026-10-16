@@ -3,7 +3,7 @@
 > **Audience**: Anyone adding or editing mock endpoints for the vNext example. Pair with the in-repo workflow/HTTP task files.
 > **Goal**: Single source of truth for the MockLab seed JSON layout, rule semantics, Scriban helpers, dapr invocation, and the seed re-import behaviour.
 
-MockLab is the project's canonical mock API (repo: `https://github.com/burgan-tech/mocklab`, currently private; public at RC). The container is started by `docker-compose.yml` (`ghcr.io/burgan-tech/mocklab:latest`, port `3001:5000`) and recursively imports every `*.json` file under `/app/seed` (host path: `etc/docker/config/seed/`).
+MockLab is the project's canonical mock API (repo: `https://github.com/burgan-tech/mocklab`, currently private; public at RC). The container is started by `docker-compose.yml` (`ghcr.io/burgan-tech/mocklab:${MOCKLAB_VERSION:-0.0.10}`, host port `3001:5000`, network `${VNEXT_NETWORK:-vnext-development}`, alias `mocklab`) and recursively imports every `*.json` file under `/app/seed` (host path: `etc/docker/config/seed/`). The Testcontainers test run mounts the same folder into its own MockLab (`test-mocklab:5000`). From the host MockLab is `http://localhost:3001`; from a runtime container it is `http://mocklab:5000` — task URLs therefore never name a host (§8).
 
 ---
 
@@ -179,7 +179,7 @@ Always prefer (A) for permanent changes and (B) for quick exploration.
 
 ## 8. Calling MockLab from workflows
 
-### 8a. HTTP task (default, type `"6"`)
+### 8a. HTTP task (default, type `"6"`) — `API_BASEURL` placeholder
 
 ```jsonc
 {
@@ -190,7 +190,7 @@ Always prefer (A) for permanent changes and (B) for quick exploration.
   "attributes": {
     "type": "6",
     "config": {
-      "url": "http://localhost:3001/api/banking/lov/branches",
+      "url": "API_BASEURL/api/banking/lov/branches",
       "method": "GET",
       "headers": { "Accept": "application/json" },
       "body": {},
@@ -201,17 +201,32 @@ Always prefer (A) for permanent changes and (B) for quick exploration.
 }
 ```
 
-This is the convention for all existing tasks in `core/Tasks/{domain}/`.
+The task's input mapping resolves the placeholder:
+`http.SetUrl(http.Url.Replace("API_BASEURL", GetConfigValue("<Domain>:ApiBaseUrl", "http://mocklab:5000")))`.
+The base URL is per-environment configuration (`<Domain>__ApiBaseUrl` on orchestration and execution):
+Testcontainers `http://test-mocklab:5000` (toolkit `VNextTestEnvironment` sets it), vnext-runtime
+`http://mocklab:5000`, real environments the real upstream. A literal `http://localhost:3001` in a task
+works only when the runtime itself runs on the host — it fails in every container setup. Full
+convention: `mocklab-spec.md` (plugin reference) § URL conventions.
 
 ### 8b. Dapr service invocation (optional alternative)
 
-A `mocklab-dapr` sidecar runs alongside MockLab (`docker-compose.yml`), with app-id `mocklab` and dapr-http port `3500`. Any task can reach MockLab through the sidecar:
+A `mocklab-dapr` sidecar runs alongside MockLab (`docker-compose.yml`), app-id `mocklab`. From a
+workflow use the `DaprService` task with `appId: "mocklab"` — the runtime's own sidecar resolves it; the
+mock route stays the same. From the host you can probe through MockLab's sidecar:
 
 ```http
 GET http://localhost:3500/v1.0/invoke/mocklab/method/api/banking/lov/branches?currency=TRY
 ```
 
-To make a workflow task use dapr invocation, use the `dapr-service` task subtype (see `/docs/components/tasks/dapr-service` in the vNext docs) instead of plain HTTP. The mock route stays the same.
+### 8c. Optional: morph-idm `get-roles`
+
+For tests of the `morph-idm` caller-role provider, the toolkit ships
+`etc/docker/config/seed/morph-idm-roles-collection.json` (route `api/1/morph-idm/functions/get-roles`,
+rules on `header.sub`, plus a `204` and a `500` user). Point the runtime at MockLab with
+`CallerRoleProvider__Provider=morph-idm`, `CallerRoleProvider__MorphIdm__BaseUrl=<MockLab>`,
+`CallerRoleProvider__MorphIdm__GetRolesPath=/api/1/morph-idm/functions/get-roles` — see
+[`roles-and-authorization.md`](./roles-and-authorization.md) § *Local morph-idm recipe*.
 
 ---
 

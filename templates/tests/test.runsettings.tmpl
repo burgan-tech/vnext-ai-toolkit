@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Committed run settings for {{Domain}}.IntegrationTests (vnext-ai-toolkit).
+  Default = Testcontainers: VNEXT_BASE_URL stays UNSET here, so `dotnet test` (and CI) start the
+  runtime images pinned to vnext.config.json runtimeVersion.
+  A runtime already running on this machine (vnext-runtime or Forge) goes into the git-ignored
+  test.runsettings.local — never into this file. Precedence: process env > .local > this file.
+-->
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <!-- <VNEXT_BASE_URL>http://localhost:4201</VNEXT_BASE_URL>  ← put this in test.runsettings.local -->
+
+      <!-- MockLab admin API for tests that reset sequential mocks; unreachable ⇒ those tests skip. -->
+      <!-- <MOCKLAB_BASE_URL>http://localhost:3001</MOCKLAB_BASE_URL> -->
+
+      <!-- Set to morph-idm ONLY when the runtime under test runs CallerRoleProvider__Provider=morph-idm;
+           otherwise the morph-idm caller tests skip. -->
+      <!-- <VNEXT_CALLER_ROLE_PROVIDER>morph-idm</VNEXT_CALLER_ROLE_PROVIDER> -->
+
+      <!-- Testcontainers only: skip loading @burgan-tech/vnext-core-runtime (default: load). -->
+      <!-- <VNEXT_IT_SYSTEM_PACKAGE>skip</VNEXT_IT_SYSTEM_PACKAGE> -->
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

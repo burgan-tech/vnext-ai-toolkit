@@ -1,0 +1,32 @@
+# Recommended (not required) CI job for {{domain}} — copy to .github/workflows/integration-tests.yml
+# after review. Testcontainers mode: the runner's Docker starts the runtime images pinned to
+# vnext.config.json runtimeVersion; VNEXT_BASE_URL must stay unset (test.runsettings keeps it commented).
+name: integration-tests
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - run: npm ci
+      - name: Validate components
+        run: npm run validate
+      - name: Integration tests (Testcontainers)
+        run: dotnet test tests/{{Domain}}.IntegrationTests --logger "trx;LogFileName=results.trx" -v minimal
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-results
+          path: tests/{{Domain}}.IntegrationTests/TestResults

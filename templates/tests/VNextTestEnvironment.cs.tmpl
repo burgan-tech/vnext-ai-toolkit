@@ -1,0 +1,167 @@
+using System.Net.Http.Json;
+using System.Text.Json;
+using DotNet.Testcontainers.Builders;
+using DotNet.Testcontainers.Containers;
+using VNext.Testing.Sdk.Infrastructure;
+
+namespace {{Domain}}.IntegrationTests.Infrastructure;
+
+/// <summary>
+/// Test stack for the <c>{{domain}}</c> domain (rendered by vnext-ai-toolkit; replaces the
+/// <c>dotnet new vnext-integration-test</c> default after a diff).
+/// <para>
+/// Two modes, chosen by the SDK from <c>VNEXT_BASE_URL</c> (process env &gt; <c>test.runsettings.local</c>
+/// &gt; <c>test.runsettings</c>):
+/// <list type="bullet">
+/// <item><b>unset → Testcontainers</b> (default, same as CI): the SDK starts PostgreSQL, Redis, Vault,
+/// Dapr, the vNext images, MockLab, publishes this domain's components, then calls
+/// <see cref="OnAfterEnvironmentReadyAsync"/>.</item>
+/// <item><b>set → external runtime</b> (vnext-runtime released images or vNext Forge on this machine):
+/// no containers; the SDK only publishes this domain's components. <see cref="OnAfterEnvironmentReadyAsync"/>
+/// is <b>never called</b> in this mode — nothing below runs there.</item>
+/// </list>
+/// </para>
+/// </summary>
+public class VNextTestEnvironment : VNext.Testing.Sdk.Infrastructure.VNextTestEnvironment
+{
+    /// <summary>APP_DOMAIN of the runtime containers and the domain the publisher writes into components.</summary>
+    protected override string Domain => "{{domain}}";
+
+    protected override string DatabaseName => "vNext_{{Domain}}_Test";
+
+    protected override string VNextImage => "ghcr.io/burgan-tech/vnext";
+
+    /// <summary>
+    /// Image tag = <c>runtimeVersion</c> from <c>vnext.config.json</c> (tags carry no <c>v</c>, e.g.
+    /// <c>0.0.100</c>), so the containers always run the runtime the domain targets. The SDK default is
+    /// <c>latest</c>. Override per run with <c>VNEXT_IMAGE_VERSION</c>.
+    /// </summary>
+    protected override string VNextImageVersion =>
+        Environment.GetEnvironmentVariable("VNEXT_IMAGE_VERSION") is { Length: > 0 } pinned
+            ? pinned
+            : WorkspaceConfig.RuntimeVersion;
+
+    // Pinned infrastructure (the SDK defaults are :latest). Keep in step with docker-compose.yml.
+    protected override string DaprSidecarImage => "daprio/daprd:1.18.0";
+    protected override string DaprPlacementImage => "daprio/dapr:1.18.0";
+    protected override string DaprSchedulerImage => "daprio/scheduler:1.18.0";
+    protected override string MocklabImage => "ghcr.io/burgan-tech/mocklab:0.0.10";
+
+    /// <summary>The workspace's MockLab collections — the same seeds docker-compose.yml mounts.</summary>
+    protected override string MocklabSeedDirectory =>
+        Path.Combine(WorkspaceConfig.Root, "etc", "docker", "config", "seed");
+
+    protected override bool EnableDomainPublish => true;
+
+    /// <summary>
+    /// Configuration both hosts read from scripts: HTTP task URLs carry the <c>API_BASEURL</c>
+    /// placeholder and the mapping resolves it with <c>GetConfigValue("{{Domain}}:ApiBaseUrl", …)</c>.
+    /// Inside the test network MockLab is <see cref="VNextTestEnvironment.MocklabHost"/>:5000.
+    /// </summary>
+    private Dictionary<string, string> WithDomainSettings(Dictionary<string, string> env)
+    {
+        env["{{Domain}}__ApiBaseUrl"] = $"http://{MocklabHost}:5000";
+
+        // Optional morph-idm caller-role provider (MockLab seed morph-idm-roles-collection.json).
+        if (string.Equals(Environment.GetEnvironmentVariable("VNEXT_CALLER_ROLE_PROVIDER"), "morph-idm", StringComparison.OrdinalIgnoreCase))
+        {
+            env["CallerRoleProvider__Provider"] = "morph-idm";
+            env["CallerRoleProvider__MorphIdm__BaseUrl"] = $"http://{MocklabHost}:5000";
+            env["CallerRoleProvider__MorphIdm__GetRolesPath"] = "/api/1/morph-idm/functions/get-roles";
+        }
+
+        return env;
+    }
+
+    protected override Dictionary<string, string> GetOrchestratorEnvironment() => WithDomainSettings(base.GetOrchestratorEnvironment());
+
+    protected override Dictionary<string, string> GetExecutionEnvironment() => WithDomainSettings(base.GetExecutionEnvironment());
+
+    /// <summary>
+    /// Testcontainers mode only. SDK 0.0.6 starts no init container and never publishes the system
+    /// package <c>@burgan-tech/vnext-core-runtime</c>, which a fresh runtime needs (sys-* components).
+    /// This loads it through the released init image, then publishes the domain again so components
+    /// that reference system components land. Failures are reported, not thrown — set
+    /// <c>VNEXT_IT_SYSTEM_PACKAGE=skip</c> to turn it off.
+    /// </summary>
+    protected override async Task OnAfterEnvironmentReadyAsync()
+    {
+        if (string.Equals(Environment.GetEnvironmentVariable("VNEXT_IT_SYSTEM_PACKAGE"), "skip", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        try
+        {
+            await LoadSystemPackageAsync();
+            await LocalDomainPublisher.PublishAsync(OrchestratorBaseUrl, Domain, "vnext.config.json");
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"[{{domain}}-tests] WARNING system package not loaded: {exception.Message}");
+        }
+    }
+
+    /// <summary>Runs the released init image once, then removes it (the SDK's DisposeAsync is not overridable).</summary>
+    private async Task LoadSystemPackageAsync()
+    {
+        await using IContainer init = new ContainerBuilder()
+            .WithImage($"{VNextImage}/init:{VNextImageVersion}")
+            .WithNetwork(_network)
+            .WithNetworkAliases("test-vnext-init")
+            .WithEnvironment("VNEXT_APP_URL", "http://test-vnext-app:5000")
+            .WithEnvironment("PACKAGE_API_PORT", "3000")
+            .WithEnvironment("NPM_REGISTRY", "https://registry.npmjs.org/")
+            .WithEnvironment("DOMAIN_NAME", Domain)
+            .WithPortBinding(3000, true)
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilHttpRequestIsSucceeded(r => r.ForPort(3000).ForPath("/health")))
+            .Build();
+        await init.StartAsync();
+
+        using var http = new HttpClient
+        {
+            BaseAddress = new Uri($"http://{init.Hostname}:{init.GetMappedPublicPort(3000)}"),
+            Timeout = TimeSpan.FromMinutes(5)
+        };
+        using var accepted = await http.PostAsJsonAsync("/api/package/runtime/publish", new { appDomain = Domain });
+        var body = await accepted.Content.ReadAsStringAsync();
+        if (!accepted.IsSuccessStatusCode) throw new InvalidOperationException($"runtime/publish answered {(int)accepted.StatusCode}: {body}");
+
+        // The call is asynchronous on recent init images: it answers { statusUrl } — poll it.
+        using var doc = JsonDocument.Parse(body);
+        if (doc.RootElement.TryGetProperty("statusUrl", out var statusUrl) && statusUrl.GetString() is { } url)
+        {
+            var deadline = DateTime.UtcNow.AddMinutes(5);
+            while (DateTime.UtcNow < deadline)
+            {
+                var status = await http.GetStringAsync(url);
+                if (status.Contains("\"completed\"", StringComparison.OrdinalIgnoreCase)) break;
+                if (status.Contains("\"failed\"", StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("system package publish failed: " + status);
+                await Task.Delay(1000);
+            }
+        }
+
+        Console.WriteLine($"[{{domain}}-tests] system package @burgan-tech/vnext-core-runtime loaded into '{Domain}'");
+    }
+
+}
+
+/// <summary>Reads <c>vnext.config.json</c> by walking up from the test output directory.</summary>
+public static class WorkspaceConfig
+{
+    private static readonly Lazy<(string Root, JsonElement Config)> Loaded = new(() =>
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            var file = Path.Combine(dir.FullName, "vnext.config.json");
+            if (File.Exists(file)) return (dir.FullName, JsonDocument.Parse(File.ReadAllText(file)).RootElement.Clone());
+        }
+
+        throw new InvalidOperationException("vnext.config.json not found above " + AppContext.BaseDirectory);
+    });
+
+    public static string Root => Loaded.Value.Root;
+
+    public static string RuntimeVersion =>
+        Loaded.Value.Config.TryGetProperty("runtimeVersion", out var v) && v.GetString() is { Length: > 0 } s
+            ? s.TrimStart('v')
+            : throw new InvalidOperationException("vnext.config.json has no runtimeVersion");
+}

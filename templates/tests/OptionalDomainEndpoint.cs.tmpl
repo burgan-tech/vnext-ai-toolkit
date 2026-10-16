@@ -1,0 +1,64 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
+
+namespace {{Domain}}.IntegrationTests.Infrastructure;
+
+/// <summary>
+/// Resolves the base url of an OPTIONAL dependency (a second domain's runtime, MockLab's admin API, …)
+/// and returns it only when it is actually up — and, for a runtime, serves the expected domain.
+/// Dependent tests then <b>skip</b> instead of running into a 60-second timeout:
+/// <code>
+/// var partner = OptionalDomainEndpoint.Resolve("VNEXT_PARTNER_BASE_URL", "partner");
+/// Skip.If(partner is null, "partner runtime not running");   // Xunit.SkippableFact + [SkippableFact]
+/// </code>
+/// "The variable is set" is not enough: runsettings commit urls, and a live port can belong to another
+/// domain. The probe reads <c>GET {url}/health</c> once per url per run (2 s budget) and compares the
+/// <c>domain</c> field the runtime reports.
+/// </summary>
+public static class OptionalDomainEndpoint
+{
+    private static readonly ConcurrentDictionary<string, Lazy<string?>> Probes = new();
+
+    /// <param name="variable">Environment / runsettings variable holding the url.</param>
+    /// <param name="expectedDomain">Domain the runtime must report; <c>null</c> for non-runtime services
+    /// (then any 2xx <c>/health</c> — or, for MockLab, any answer on <paramref name="healthPath"/> — counts).</param>
+    /// <param name="healthPath">Probe path (MockLab: <c>/_admin/logs</c>).</param>
+    public static string? Resolve(string variable, string? expectedDomain, string healthPath = "/health")
+    {
+        var url = Environment.GetEnvironmentVariable(variable)?.Trim().TrimEnd('/');
+        if (string.IsNullOrEmpty(url)) return null;
+        return Probes.GetOrAdd($"{url}|{expectedDomain}|{healthPath}",
+            _ => new Lazy<string?>(() => Probe(variable, url, expectedDomain, healthPath))).Value;
+    }
+
+    private static string? Probe(string variable, string url, string? expectedDomain, string healthPath)
+    {
+        try
+        {
+            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
+            using var response = client.GetAsync(url + healthPath).GetAwaiter().GetResult();
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[optional-endpoint] {variable}={url} answered {healthPath} {(int)response.StatusCode} — dependent tests skip");
+                return null;
+            }
+
+            if (expectedDomain is null) return url;
+
+            using var body = JsonDocument.Parse(response.Content.ReadAsStringAsync().GetAwaiter().GetResult());
+            var domain = body.RootElement.TryGetProperty("domain", out var d) ? d.GetString() : null;
+            if (domain is not null && !string.Equals(domain, expectedDomain, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine($"[optional-endpoint] {variable}={url} is domain '{domain}', not '{expectedDomain}' — dependent tests skip");
+                return null;
+            }
+
+            return url;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            Console.WriteLine($"[optional-endpoint] {variable}={url} unreachable ({ex.GetType().Name}) — dependent tests skip");
+            return null;
+        }
+    }
+}

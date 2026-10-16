@@ -1,8 +1,8 @@
 ---
 name: vnext-update
-description: Refresh the toolkit-owned files in this vNext workspace (CLAUDE.md, AGENTS.md, .claude/references guides, docker-compose, dapr config) after a plugin update. Compares the workspace's stamped toolkit version against the installed plugin version, reports how the workspace runtimeVersion relates to the runtime the toolkit knows, diffs each file against the current templates, and confirms — nothing is overwritten silently.
+description: Refresh the toolkit-owned files in this vNext workspace (CLAUDE.md, AGENTS.md, .claude/references guides, docker-compose, dapr config, integration-test infrastructure, x-storage overlay) after a plugin update. Compares the workspace's stamped toolkit version against the installed plugin version, reports how the workspace runtimeVersion relates to the runtime the toolkit knows, diffs each file against the current templates, and confirms — nothing is overwritten silently.
 argument-hint: "[--force]"
-allowed-tools: Read, Write, Edit, Glob, Bash(cat *), Bash(diff *), Bash(ls *), Bash(date *), Bash(cmp *)
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash(cat *), Bash(diff *), Bash(ls *), Bash(date *), Bash(cmp *), Bash(mkdir *), Bash(*/scripts/check-test-coverage.sh*)
 ---
 
 # /vnext-update
@@ -61,6 +61,13 @@ that list and this canonical one):
 | `AGENTS.md` | same template, AGENTS placeholder set (see `/vnext-init` Step 3 table) | same decision as CLAUDE.md |
 | `docker-compose.yml` | `${CLAUDE_PLUGIN_ROOT}/templates/docker-compose.yml.tmpl` (rendered) | per file |
 | `etc/dapr/config.yaml` | `${CLAUDE_PLUGIN_ROOT}/templates/etc/dapr/config.yaml.tmpl` (rendered) | per file |
+| `etc/dapr/components/.gitkeep` | `${CLAUDE_PLUGIN_ROOT}/templates/etc/dapr/components/.gitkeep` | create if the folder is missing (no prompt) |
+| `etc/runtime/docker-compose.blob.override.yml`, `etc/runtime/README.md`, `etc/runtime/dapr/components/<binding>.yaml` | `${CLAUDE_PLUGIN_ROOT}/templates/etc/runtime/**` (rendered; component `metadata.name` = binding) | per file — **only** when a master schema declares `x-storage`; offer to create when missing |
+| `tests/<Domain>.IntegrationTests/Infrastructure/{VNextTestEnvironment,WorkflowTestBase,OptionalDomainEndpoint}.cs` | `${CLAUDE_PLUGIN_ROOT}/templates/tests/*.cs.tmpl` (rendered) | per file — only when the test project exists; user test classes are never touched |
+| `tests/<Domain>.IntegrationTests/test.runsettings` | `${CLAUDE_PLUGIN_ROOT}/templates/tests/test.runsettings.tmpl` | per file; **never** touch `test.runsettings.local` |
+| `tests/<Domain>.IntegrationTests/Infrastructure/DaprComponents/orchestration/<binding>.yaml` | `${CLAUDE_PLUGIN_ROOT}/templates/tests/DaprComponents/orchestration/vnext-blob-local.yaml.tmpl` | only with `x-storage`; offer when missing |
+| `TEST-SCENARIOS.md` | `${CLAUDE_PLUGIN_ROOT}/templates/tests/TEST-SCENARIOS.md.tmpl` | **merge only**: refresh *Before a run* (checklist, traps); keep the suite index and the run record |
+| `.gitignore` lines | `${CLAUDE_PLUGIN_ROOT}/templates/tests/gitignore.tmpl` | append missing lines only |
 | `.claude/references/<basename>` for **every** entry in `plugin.json` `.vnext.workspaceReferences[]` | `${CLAUDE_PLUGIN_ROOT}/<entry>` (verbatim) | **batched** (below) |
 
 Files that were in an older manifest but are no longer in `workspaceReferences` are left alone
@@ -68,8 +75,8 @@ Files that were in an older manifest but are no longer in `workspaceReferences` 
 
 **Rendering rule (allowlist).** Substitute ONLY these placeholders, with values from
 `vnext.config.json` and the plugin manifest:
-- `{{domain}}` → `domain`
-- `{{workflowKey}}` → only in per-workflow `.http` scaffolds (not part of this file set)
+- `{{domain}}` → `domain`; `{{Domain}}` → PascalCase of `domain` (compose notes, `etc/runtime/**`, `templates/tests/**`)
+- `{{workflowKey}}` / `{{WorkflowName}}` → only in per-workflow scaffolds (not part of this file set)
 - `{{toolkitVersion}}` → the plugin version from Step 0
 - `{{knownRuntimeVersion}}` → `.vnext.knownRuntimeVersion`
 - `{{agentFile}}` / `{{agentAudience}}` / `{{peerFile}}` / `{{peerAudience}}` → the fixed pairs
@@ -80,7 +87,10 @@ Every other `{{...}}` token — `{{baseUrl}}`, `{{apiVersion}}`, `{{instanceId}}
 `{{start.response.body.$.id}}`, … — is a **VS Code REST Client variable and must survive verbatim**.
 Never blanket-replace `{{...}}`.
 
-**Per-file files (CLAUDE.md, AGENTS.md, docker-compose, dapr config):**
+Go templates such as `{{json .Args}}` in `etc/runtime/README.md` and every `${VAR:-default}` compose
+expression also stay verbatim.
+
+**Per-file files (CLAUDE.md, AGENTS.md, docker-compose, dapr config, test infrastructure, overlays):**
 - **Missing in workspace** → offer to create it (default: yes).
 - **Exists** → render the source, `diff` against the workspace file, show a short summary of
   what changed, and ask: **overwrite / skip / merge**. If the user has local additions
@@ -112,10 +122,15 @@ After processing all files, write `.claude/vnext-toolkit.json` (create `.claude/
     "AGENTS.md",
     "docker-compose.yml",
     "etc/dapr/config.yaml",
+    "etc/dapr/components/.gitkeep",
+    "…every etc/runtime/** and tests/** toolkit file present in the workspace",
     ".claude/references/<basename>   // one entry per workspaceReferences item present in the workspace"
   ]
 }
 ```
+
+Then run `${CLAUDE_PLUGIN_ROOT}/scripts/check-test-coverage.sh` and append its WARN lines (G1–G4) to the
+final report — warnings only, nothing is blocked.
 
 List only files that actually exist in the workspace after this run. The
 `<!-- vnext-ai-toolkit vX.Y.Z -->` comment in CLAUDE.md/AGENTS.md is refreshed as part of their
@@ -134,7 +149,8 @@ the new version; the comment will catch up on the next accepted update).
 
 - Never touches CLI-owned files (`vnext.config.json`, `package.json`, component folders) or the
   user's domain components (`Workflows/`, `Tasks/`, `Schemas/`, …, `.csx` sources, MockLab seeds,
-  `api-tests/`).
+  `api-tests/`), the user's test classes (`tests/**/Tests/**`), `test.runsettings.local`, or
+  `.claude/vnext-e2e.json`.
 - Never updates the plugin itself — that's `claude plugin marketplace update burgan-tech`.
 - Never overwrites a file without showing the diff and getting a confirmation (per file, or once for
   the batched reference set).

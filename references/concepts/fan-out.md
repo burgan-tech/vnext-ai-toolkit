@@ -96,7 +96,7 @@ public class FanOutDocumentsMapping : ScriptBase, IFanOutMapping
     {
         if (task is HttpTask httpTask)
         {
-            var baseUrl = GetConfigValue("Example:ApiBaseUrl", "http://localhost:3001");
+            var baseUrl = GetConfigValue("Example:ApiBaseUrl", "http://mocklab:5000");
             var documentId = item.ItemKey;                                    // = item.Value.id when present
             var mime = HasProperty(item.Value, "mimeType")
                 ? GetPropertyValue<string>(item.Value, "mimeType", "application/pdf")
