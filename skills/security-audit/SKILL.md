@@ -44,8 +44,14 @@ significantly since it was written, reuse it. Otherwise map the target first:
   integrations), extensions, views, schemas
 - authorization model in use: transition `roles` (+ `availableIn[].roles`), state/flow `queryRoles`,
   function `roles`, schema `x-roles`, `interaction.longPoll.roles|rule`, `subFlow.overrides.*` role
-  overrides — and remember that since 0.0.95 the runtime only *filters visibility*; enforcement is
-  the gateway's `authorize` call (`references/concepts/roles-and-authorization.md`)
+  overrides, `allOf` / `anyOf` combinators, and which credential headers (`sub`, `act_sub`, `role`,
+  `position`, `client_id`) clients and the gateway send — and remember that since 0.0.95 the runtime
+  only *filters visibility*; enforcement is the gateway's `authorize` call
+  (`references/concepts/roles-and-authorization.md`)
+- sensitive data map: master-schema fields holding PII and their `x-roles` / `x-masking` /
+  `x-encryption`, `x-storage` file fields, and where those values are copied (transition payloads,
+  task bodies, `humanTask` text) (`references/concepts/field-protection.md`,
+  `references/concepts/file-fields.md`)
 - external touch points: HTTP/SOAP/Dapr task endpoints, `scripts.helpers` / `encoding: "REF"`
   sources, MockLab seeds, Docker/Dapr deployment assets
 
@@ -64,21 +70,34 @@ list. Categories (details and IS / IS-NOT rules in the checklist reference):
    `x-roles`, exported components broader than needed, privileged transitions reachable
    without role checks, IDOR-style access via instance keys; designs that assume an in-process
    403 on built-in reads (none since 0.0.95 — a gateway must call `authorize`); human states
-   without `queryRoles` (silently hidden from the human-task list); deny grants that a roleless
-   caller could bypass before 0.0.96; `grant` values not lowercase; a `role` header that would
-   override morph-idm resolution (0.0.97) on an internal route
+   without `queryRoles` (silently hidden from the human-task list); `grant` values not lowercase;
+   a `role` header that would override morph-idm resolution (0.0.97) on an internal route.
+   0.0.99+: root-only `queryRoles` over a SubFlow leaf that declares none (now **open** — the leaf
+   decides); malformed or too-deep `allOf` / `anyOf` (depth 1, children `{role}` only, none in
+   `x-masking` / `x-encryption` exemptions); an allow `$role.` grant expected to admit role-less
+   callers (it no longer does); instance start without `act_sub` (starter grants never match);
+   `$.context.Instance.Data.CreatedBy` instead of `Instance.CreatedBy`; `x-roles` / `user_reference`
+   treated as role headers
 3. **Injection and unsafe execution** — untrusted instance data reaching SQL, command
    execution, dynamic code evaluation, or template rendering inside `.csx` or task config
 4. **SSRF and untrusted hosts** — task URLs or webhook destinations built from instance
    data, hosts outside `referenceResolution.allowedHosts`, redirect/proxy patterns
 5. **Path traversal and file handling** — file paths derived from untrusted input,
-   unrestricted reads/writes, upload handling without validation
+   unrestricted reads/writes, upload handling without validation; `ScriptBase.GetFileAsync`
+   called without an authorization check (it evaluates no `queryRoles` / `x-roles`, works
+   cross-domain); a custom function keyed `file` (shadowed by the reserved system function)
 6. **Weak crypto and data protection** — weak hashing, homegrown crypto, plaintext secret
-   storage, `http://` where `https://` is expected, sensitive data in logs or view labels
+   storage, `http://` where `https://` is expected, sensitive data in logs or view labels;
+   PII without `x-roles` / `x-masking` / `x-encryption` (warning; Critical for regulated
+   identifiers); `encrypt` values copied into transition or task records (known issue
+   `field-encryption-plaintext-copies`); `x-roles`-hidden fields that are filterable/sortable
+   (`list-filter-probes-guarded-fields`); `hash` on low-entropy values
 7. **Dependency and supply chain** — risky or unpinned dependencies, untrusted `REF` /
    `allowedAssemblies` sources, build scripts leaking secrets
 8. **Misconfiguration and exposure** — weakened `strictMode`, over-broad `exports`,
-   permissive Docker/Dapr settings, MockLab or debug surfaces reachable in production config
+   permissive Docker/Dapr settings, MockLab or debug surfaces reachable in production config;
+   `…/data/history` or `internal/*` routes exposed on the public edge; credential headers not
+   owned by the gateway
 
 For an incremental re-run, skip a category whose findings were already verified in the current
 report and whose relevant files have not changed.
@@ -106,6 +125,8 @@ For each candidate finding:
 Rules that always apply:
 
 - Never print or echo a real secret value. Point to the file and the field only.
+- If the root cause is a runtime defect rather than the domain's own definitions, say so and point
+  to `/vnext-ai-toolkit:report-issue`; never propose edits to the vnext or vnext-example repos.
 - Distinguish a confirmed issue from a likely one; label uncertain items as warnings.
 - Record why a finding survived verification (or why candidates were dropped).
 
@@ -134,7 +155,11 @@ In addition to generic OWASP-style review, verify the following for this project
 - `.csx` logic and task mappings handle untrusted `ScriptContext` instance data safely and do
   not log or expose sensitive content
 - transition `roles`, state/flow `queryRoles`, and schema `x-roles` enforce the intended
-  actor model (see [roles-and-authorization.md](../../references/concepts/roles-and-authorization.md))
+  actor model (see [roles-and-authorization.md](../../references/concepts/roles-and-authorization.md)),
+  with `queryRoles` present on every SubFlow leaf that must stay restricted
+- every PII field has a deliberate `x-roles` / `x-masking` / `x-encryption` decision
+  (see [field-protection.md](../../references/concepts/field-protection.md)) and file fields follow
+  [file-fields.md](../../references/concepts/file-fields.md)
 - seed data and sample payloads do not include real credentials or privacy-sensitive content
 
 ## Output

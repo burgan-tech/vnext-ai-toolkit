@@ -2,9 +2,81 @@
 
 All notable changes to the vNext AI Toolkit will be documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Plugin uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 0.2.0
+## [Unreleased] — 0.0.8
 
-**Runtime coverage: vNext runtime 0.0.97 / schema 0.0.54 / `@burgan-tech/vnext-meta` 0.0.53** (previously 0.0.79). Closed milestones v0.0.80 … v0.0.97 folded in.
+**Runtime coverage: vNext runtime 0.0.100 / schema 0.0.56** (previously 0.0.97 / 0.0.54). Closed milestones v0.0.98, v0.0.99 and v0.0.100 folded in. `vnext-meta` is now read live from vnext master; the npm package (0.0.53) lags behind it, so `metaPackageVersion` stays 0.0.53.
+
+The toolkit's audience is now stated explicitly: product teams with no write access to the vNext runtime, vnext-schema, vnext-docs or vnext-example repositories. The toolkit only reads those repositories and sends runtime defects to `/vnext-ai-toolkit:report-issue`.
+
+### Added
+
+- **`domain-check` skill + `/vnext-ai-toolkit:domain-check`** (closes #27). A port of the runtime repo's `domain-performance-audit`:
+  - The scanner is stdlib-only and needs no runtime checkout. Enum labels (task, trigger, error action, extension type and scope, function scope) come from the pinned `@burgan-tech/vnext-schema`, falling back to the raw-GitHub tag; any label it cannot resolve prints `!! ENUM`.
+  - Checks 1–19 are adapted for domain teams and cite public docs only. Check 15 is corrected, since GetSecret has been cached since 0.0.80. A new check 20 covers `history: none` eligibility.
+  - Also flagged: 0.0.99/0.0.100 breaks (CacheAside `keyExpression`, `functions/hierarchy`), same-order `variableKey` collisions, and filtered fields without `x-indexed`.
+  - Output is a Turkish report written after the user triages the findings. A CI smoke test runs against the fixture in `tests/domain-check/`.
+- **`report-runtime-issue` skill + `/vnext-ai-toolkit:report-issue`**. It turns a suspected runtime problem into a detailed issue on `burgan-tech/vnext`, in this order:
+  1. Triage: known schema↔runtime gaps, live `vnext-meta` known issues, deprecations and migrations, the docs, and domain-side causes.
+  2. Duplicate search.
+  3. Evidence: versions, request and response, `X-Request-Id`, incidents, task and metrics endpoints.
+  4. Mandatory redaction of secrets, PII and internal hosts.
+  5. An English draft.
+  6. An approval gate. Nothing is filed without a yes.
+
+  Without `gh`, it writes the draft to `.vnext/issues/` and gives a prefilled new-issue URL. `validate-and-fix` offers it for runtime-side failures.
+- **`e2e-local` skill + `/vnext-ai-toolkit:e2e`**. It runs the integration suite end to end:
+  - Testcontainers by default, with the image pinned to `runtimeVersion`. On request, it runs against a local runtime you already have running, after asking for the port.
+  - Preflight script, failure triage (environment, fixture, domain, runtime), a `TEST-SCENARIOS.md` row and a `.claude/vnext-e2e.json` stamp.
+  - Test templates: `WorkflowTestBase` with the five authorization header scenarios, `OptionalDomainEndpoint`, runsettings, and a pre-run checklist. Also a MockLab morph-idm `get-roles` seed and a local blob-storage binding overlay for `x-storage`.
+  - Integration tests are expected for every workflow. Missing ones are reported as **warnings** by the validator, reviewer, `review-components`, `workflow-scaffold` and a PostToolUse reminder hook; they never block.
+- **`references/concepts/field-protection.md`**: `x-roles` (read-only pruning), `x-masking`, `x-encryption` (runtime `hash`/`encrypt`; client HPKE/RSA via `source`), `x-computed`, the order they apply in, read surfaces, `DecryptAsync`, settings and known issues.
+- **`references/concepts/file-fields.md`**: `x-storage` placement, the write shape and handle, `functions/file`, `GetFileAsync` (no authorization check), FileStorage settings, the Helm `global.blobStorageComponents` binding, the local binding, error codes 100047–100050, and the reserved `file` function key.
+- **`scripts/vnext-meta-live.sh`** prints one `vnext-meta` file live from vnext master. It caches for one hour and falls back to the offline snapshot.
+- Lint checks for every stale fact removed in this release. The domain-check sources must not reference runtime source paths, and every Python script must compile.
+
+### Changed
+
+- **Authorization and human tasks** (0.0.99–0.0.100):
+  - A credential-header model: `sub`, `act_sub`, `role`, `position` and `client_id`, which map to `CreatedBy`/`CreatedByBehalfOf` and are forwarded outbound when the mapping leaves them empty. All are self-asserted; the gateway is the trust boundary.
+  - The full catalog of reserved `$` roles.
+  - `allOf`/`anyOf` grant combinators with three-valued evaluation.
+  - **Leaf-only `authorize?queryRoles=true`**, which loosens access where only the root declared it.
+  - The morph-idm provider's configuration and flow, plus a recipe for running it locally.
+  - An identity-aware human-task list and the "role AND acting for the starter" approval pattern.
+  - The `terminate: false` interaction block is restored (0.0.98).
+  - State function response shape v14: labels, the `target` object, and `timeout.target` as an object.
+  - Security review gains checks for field protection, files, combinators and SubFlow leaves.
+- **Workflows, tasks and functions**:
+  - Optional Initial state with an implicit `$start`.
+  - `executionType` S/A.
+  - `variableKey`.
+  - `attributes.history: "none"` for one-shot flows.
+  - The CacheAside rewrite: the source runs as a task, and `key` is a string or a script.
+  - `instance-correlation` replaces `hierarchy`.
+  - Metrics endpoints and `executionLog`.
+  - Scheduled start.
+  - SubFlow transition proxy, so leaf errors now come back synchronously.
+  - Topic names `vnext.{domain}.{env}.*`, which Kafka needs.
+  - `X-Request-Id` and `context.Incident` fixes.
+  - The scaffold and architect questions and the `.http` template are updated to match.
+- **Schemas** (0.0.56):
+  - `attributes.type` is now a **role**: master, transition, function or component. Legacy values fail the package validation. Multi-role schemas are split.
+  - A role × keyword matrix.
+  - Corrected `x-enum`, `x-lov`, `x-validation`, `x-conditional` and `x-errorMessages` shapes.
+  - `x-filterOperators` takes the 14 declaration names only.
+  - **`x-indexed` on every filtered or sorted field** (toolkit rule).
+  - `x-context-source`/`x-context-target`, which are applied by the client only.
+  - `schema-design` asks for a protection decision on every sensitive field.
+  - The reviewer gains blockers for the new publish rejections.
+- **Scripting**: `Instance.DecryptAsync`, `ScriptBase.GetFileAsync`, `ScriptContext.CancellationToken`, `ICacheKeyMapping`, audit-only `InputHandler`, the `allowedAssemblies` publish check, the `System.ObjectModel` baseline, and script plugins loaded once per process.
+- **Workspace templates**:
+  - `CLAUDE.md.tmpl` is updated for all of the above, including credential headers, the "runtime defect → report-issue" rule, and `npm test` vs the e2e suite.
+  - The compose images are pinned and the network is `vnext-development` (vnext-runtime's network).
+- `scripts/sync-vnext-meta.sh` defaults to `burgan-tech/vnext@master`. `--from` and `--npm` still work.
+
+## [0.0.7] — 2026-09-29
+
+**Runtime coverage: vNext runtime 0.0.97 / schema 0.0.54 / `@burgan-tech/vnext-meta` 0.0.53** (previously 0.0.79). Released from `release-v0.0` (the heading previously read "Unreleased — 0.2.0"). Closed milestones v0.0.80 … v0.0.97 folded in.
 
 ### Added
 

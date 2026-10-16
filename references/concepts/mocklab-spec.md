@@ -1,6 +1,8 @@
 # MockLab — Seed Format & Behavior
 
-MockLab is vNext's canonical mock API (Mockoon has been removed). HTTP tasks during development point at MockLab at `http://localhost:3001`; in workflows that use Dapr service invocation, a `mocklab-dapr` sidecar is colocated (Dapr app-id `mocklab`, HTTP port `3500`).
+MockLab is vNext's canonical mock API (Mockoon has been removed). Image `ghcr.io/burgan-tech/mocklab`, pinned to **0.0.10** in the toolkit's `docker-compose.yml` and test environment. It answers on `http://localhost:3001` **from the host** (browser, curl, `.http` files) and on `http://mocklab:5000` **from runtime containers** on the `vnext-development` network; in Testcontainers runs the SDK starts its own MockLab at `http://test-mocklab:5000`. A `mocklab-dapr` sidecar is colocated for Dapr service invocation (app-id `mocklab`).
+
+> **HTTP task URLs never hard-code a host.** They carry the `API_BASEURL` placeholder, resolved by the task's input mapping from configuration (below). `http://localhost:3001` inside a task works only for a runtime run as a host process — never for Testcontainers or vnext-runtime, where `localhost` is the runtime container itself.
 
 ## Authoritative source
 
@@ -117,25 +119,40 @@ The mock cycles through items per request; useful for testing workflow retry pol
 
 ## URL conventions in HTTP tasks
 
-When workflows call mocked endpoints, point HTTP task config at MockLab:
+Task JSON ships the placeholder; the input mapping swaps in the configured base URL:
 
 ```jsonc
 {
   "type": "6",
   "config": {
-    "url": "http://localhost:3001/api/{domain}/{resource}/{action}",
-    "method": "POST",
-    "...": "..."
+    "url": "API_BASEURL/api/{domain}/{resource}/{action}",
+    "method": "POST"
   }
 }
 ```
 
-Alternative (Dapr service invocation):
-```
-http://localhost:3500/v1.0/invoke/mocklab/method/api/{domain}/{resource}/{action}
+```csharp
+public Task<ScriptResponse> InputHandler(WorkflowTask task, ScriptContext context)
+{
+    if (task is HttpTask http)
+        http.SetUrl(http.Url.Replace("API_BASEURL",
+            GetConfigValue("<Domain>:ApiBaseUrl", "http://mocklab:5000")));   // ':'-nested key
+    return Task.FromResult(new ScriptResponse());
+}
 ```
 
-Or use a `DaprService` task with app-id `mocklab`.
+`<Domain>` = PascalCase of the domain. The value is configuration, set per environment as the env var
+`<Domain>__ApiBaseUrl` on **both** orchestration and execution:
+
+| Where the runtime runs | `<Domain>__ApiBaseUrl` |
+|---|---|
+| Testcontainers (`dotnet test`, CI) | `http://<MocklabHost>:5000` — set by the toolkit `VNextTestEnvironment` (`MocklabHost` = `test-mocklab`) |
+| vnext-runtime released images | default `http://mocklab:5000` (MockLab compose alias); override in `domains/<d>/.env.orchestration` and `.env.execution` |
+| Shared / production environments | the real upstream base URL (Helm `appEnvConfig`) |
+
+**Dapr service invocation** of MockLab: use a `DaprService` task with `appId: "mocklab"` — the call goes
+through the runtime's own sidecar. `http://localhost:3500/v1.0/invoke/mocklab/method/…` reaches MockLab's
+sidecar from the host only (manual probing).
 
 ## Re-import gotcha (CRITICAL)
 

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  GIT-IGNORED. Written by /vnext-ai-toolkit:e2e (local mode) only after you approved it.
+  Points the tests at a runtime already running on this machine — vnext-runtime released images
+  (make up-vnext DOMAIN={{domain}}) or vNext Forge — instead of Testcontainers.
+  Delete this file to go back to Testcontainers.
+-->
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <VNEXT_BASE_URL>http://localhost:{{runtimePort}}</VNEXT_BASE_URL>
+      <MOCKLAB_BASE_URL>http://localhost:3001</MOCKLAB_BASE_URL>
+      <!-- <VNEXT_CALLER_ROLE_PROVIDER>morph-idm</VNEXT_CALLER_ROLE_PROVIDER> -->
+    </EnvironmentVariables>
+  </RunConfiguration>
+</RunSettings>

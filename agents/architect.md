@@ -57,10 +57,17 @@ before writing the output. Pull the option sets from the schema, not from memory
    state) or an independent child process (`P`, started **only** via a `SubProcessTask`
    type 14 — a state-level `subFlow.type: "P"` is rejected at publish since 0.0.95). Note
    any child workflow keys. Check the workspace `runtimeVersion` against
-   `references/runtime-feature-matrix.md` before relying on anything newer.
+   `references/runtime-feature-matrix.md` before relying on anything newer. Decide two
+   flow-level attributes with the user: **`history`** — `"none"` (0.0.100) for a one-shot,
+   fully automatic, high-volume flow nobody inspects afterwards (no human/Wizard state, no
+   manual/timer/event transition, no timeout/cancel/exit/updateData/shared transition, no
+   retry; SubFlow children `none` too — `references/concepts/workflow-types.md` §8), else omit;
+   and **`executionType`** — omit to let the caller's `?sync` decide, or pin `"S"`/`"A"` at
+   flow or transition level (0.0.99; transition → flow → `?sync`).
 2. **States.** Lay out the state list. For each state: its key (kebab-case), its state
-   kind (from the schema's `stateType` enum — exactly one initial state, the rest
-   intermediate/final/wizard as appropriate), and whether it shows the user a view
+   kind (from the schema's `stateType` enum — at most one Initial state, optional since
+   0.0.99 (none → the instance starts in the implicit `$start`); `$start` is a reserved key;
+   the rest intermediate/final/wizard as appropriate), and whether it shows the user a view
    (input form vs. read-only summary). Mark **human steps** (approval, review) as
    `subType: 6` states with `queryRoles` and a `humanTask: {title, description}` write on
    entry (`references/concepts/human-task.md`); mark states where the engine must wait for
@@ -81,10 +88,16 @@ before writing the output. Pull the option sets from the schema, not from memory
    (order 80) run before timers are armed (order 90). Add `annotations` where the UI needs
    hints (`ui/priority`, `ui/intent`, …). "Do X for every item of a list" is a **FanOut
    task** (type 21) on the transition, not an auto loop (`references/concepts/fan-out.md`).
+   The same task twice at one `order` needs a `variableKey` on one binding (0.0.99). On a
+   parent with an active SubFlow, transitions are proxied to the leaf (0.0.100) — leaf
+   400/403/409 are synchronous.
    Details: `references/concepts/transition-pipeline.md`.
-4. **Start transition.** The initial state's `startTransition`; confirm its `schema`
+4. **Start transition.** `startTransition.target` must name a declared state — the Initial
+   state if there is one, else the state entered from the implicit `$start` (never `$self`,
+   `$start` or empty — publish rejects them since 0.0.99); confirm its `schema`
    normally points at the master payload schema. It carries **no `view`** (`view: null`) — data is
-   validated via `schema` only; client-facing input belongs on the initial-state `view`.
+   validated via `schema` only; client-facing input belongs on the first state's `view`. Note a
+   scheduled start (`POST …/instances/schedule`, 0.0.100) if the flow is time-triggered.
 5. **Multi-actor access.** **Always ask the user whether the flow should configure roles at
    all before designing any** — roles add real complexity, especially for vNext newcomers, so
    proceed with role configuration only on explicit user confirmation; default to no roles when
@@ -95,7 +108,8 @@ before writing the output. Pull the option sets from the schema, not from memory
    the human-task list (`references/concepts/roles-and-authorization.md`).
 6. **Supporting components.** For each transition's `onExecutionTasks[]`, choose the task
    `type` + `config` from `references/concepts/task-types.md` (which types run in-process on
-   Orchestration, which are deprecated/experimental, schema ceiling 1–21); extract reusable logic
+   Orchestration, which are deprecated/experimental, schema ceiling `"1"`–`"22"` since
+   0.0.55, CacheAside's 0.0.99 contract); extract reusable logic
    into a Function. Decide which states/
    transitions need Views, which Schemas are needed (master + per-transition payloads),
    and whether instance-read enrichment needs an Extension. Use

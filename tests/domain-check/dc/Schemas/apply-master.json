@@ -1,0 +1,7 @@
+{ "key": "apply-master", "version": "1.0.0", "domain": "dc", "flow": "sys-schemas", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": "master", "schema": {
+  "$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",
+  "properties": {
+    "nationalId": { "type": "string", "x-filterOperators": ["eq"] },
+    "status": { "type": "string", "x-sortable": true, "x-filterOperators": ["eq"], "x-indexed": true },
+    "displayName": { "type": "string", "x-computed": { "evaluatedBy": "runtime", "fallback": "" } }
+  } } } }

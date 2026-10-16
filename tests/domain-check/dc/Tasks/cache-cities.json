@@ -1,0 +1,1 @@
+{ "key": "cache-cities", "version": "1.0.0", "domain": "dc", "flow": "sys-tasks", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": "18", "config": { "keyExpression": { "location": "dynamicExpresso", "code": "\"cities\"" }, "ttlInSeconds": 3600, "sourceTask": { "key": "http-get-cities", "domain": "dc", "version": "1.0.0" } } } }

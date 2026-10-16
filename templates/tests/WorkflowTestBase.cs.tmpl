@@ -1,0 +1,257 @@
+using System.Diagnostics;
+using System.Net;
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+
+namespace {{Domain}}.IntegrationTests.Infrastructure;
+
+/// <summary>
+/// A caller as the runtime sees it. The runtime validates no token: identity and roles are the
+/// self-asserted credential headers <c>sub</c> (subject — acted for), <c>act_sub</c> (actor — who acts),
+/// <c>role</c>, <c>position</c>, <c>client_id</c>. <c>x-roles</c> / <c>user_reference</c> are NOT read by
+/// authorization. Reference: .claude/references/roles-and-authorization.md (§ Authorization integration tests).
+/// </summary>
+public sealed record Caller(string Sub, string ActSub, string? Role = null, string? Position = null, string? ClientId = null)
+{
+    /// <summary>Scenario 1 — role-header caller (default provider): <c>role</c> + same <c>sub</c>/<c>act_sub</c>.</summary>
+    public static Caller WithRole(string role, string user = "u-test") => new(user, user, role);
+
+    /// <summary>Scenario 2 — morph-idm caller: NO role header (a role header bypasses the provider); roles
+    /// come from MockLab <c>get-roles</c> keyed on <c>sub</c>. Needs VNEXT_CALLER_ROLE_PROVIDER=morph-idm.</summary>
+    public static Caller MorphIdm(string user) => new(user, user);
+
+    /// <summary>Scenario 3 — behalf-of: <c>act_sub</c> = operator, <c>sub</c> = customer
+    /// (start → CreatedBy = actor, CreatedByBehalfOf = subject; <c>$InstanceBehalfOfStarter</c> matches <c>sub</c>).</summary>
+    public static Caller BehalfOf(string actor, string subject, string? role = null) => new(subject, actor, role);
+
+    /// <summary>Scenario 4 — role-less caller: allow-lists refuse, identity grants still match.</summary>
+    public static Caller RoleLess(string user = "u-anon") => new(user, user);
+
+    // Scenario 5 — four-eyes: two callers with the SAME role and different act_sub,
+    // e.g. WithRole("maker", "u-ayse") submits, WithRole("maker", "u-bob") approves.
+}
+
+/// <summary>
+/// Shared plumbing for workflow integration tests: async transitions (the SDK client hard-codes
+/// <c>?sync=true</c>), wait-for-state with fail-fast on Faulted, a retry for the one 409 a client is
+/// expected to retry (<c>Failed to acquire lock</c>), credential headers, and <c>authorize</c> verdicts.
+/// </summary>
+public abstract class WorkflowTestBase : IntegrationTestBase
+{
+    protected const string AppDomain = "{{domain}}";
+
+    // One HttpClient per orchestrator url for the whole run (test classes are short-lived).
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, HttpClient> Clients = new();
+    private readonly HttpClient _raw;
+
+    protected WorkflowTestBase(VNextTestEnvironment environment) : base(environment)
+    {
+        _raw = Clients.GetOrAdd(environment.OrchestratorBaseUrl.TrimEnd('/') + "/", url => new HttpClient { BaseAddress = new Uri(url) });
+    }
+
+    /// <summary>The caller used when a helper gets none. Override per test class (e.g. the role the flow needs).</summary>
+    protected virtual Caller DefaultCaller => Caller.RoleLess("u-test");
+
+    /// <summary>Credential headers for <paramref name="caller"/> — always <c>sub</c> AND <c>act_sub</c>.</summary>
+    protected static Dictionary<string, string> Headers(Caller caller)
+    {
+        var headers = new Dictionary<string, string>
+        {
+            ["sub"] = caller.Sub,
+            ["act_sub"] = caller.ActSub,
+            ["x-request-id"] = Guid.NewGuid().ToString(),
+        };
+        if (!string.IsNullOrEmpty(caller.Role)) headers["role"] = caller.Role;
+        if (!string.IsNullOrEmpty(caller.Position)) headers["position"] = caller.Position;
+        if (!string.IsNullOrEmpty(caller.ClientId)) headers["client_id"] = caller.ClientId;
+        return headers;
+    }
+
+    /// <summary>Shorthand for scenario 1.</summary>
+    protected static Dictionary<string, string> Headers(string role, string user = "u-test") => Headers(Caller.WithRole(role, user));
+
+    private Dictionary<string, string> HeadersFor(Caller? caller) => Headers(caller ?? DefaultCaller);
+
+    protected static string InstancePath(string workflow, string instanceId) =>
+        $"api/v1/{AppDomain}/workflows/{workflow}/instances/{instanceId}";
+
+    // ── requests ─────────────────────────────────────────────────────────────
+
+    /// <summary>Starts an instance (sync) and returns its id; fails with the runtime's body on refusal.</summary>
+    protected async Task<string> StartAsync(string workflow, object body, Caller? caller = null)
+    {
+        var response = await Api.StartInstanceAsync(workflow, body, HeadersFor(caller));
+        Assert.True(response.IsSuccessStatusCode, $"start {workflow} refused with {(int)response.StatusCode}: {response.RawBody}");
+        return response.Body.GetProperty("id").GetString()
+               ?? throw new InvalidOperationException("start response carried no instance id");
+    }
+
+    /// <summary>
+    /// Runs a transition asynchronously (<c>?sync=false</c> → 202, executed in the background) and
+    /// returns the status — never discard it. A 409 whose body says <c>Failed to acquire lock</c> is
+    /// retried (5 × 200 ms): the status lock is single-attempt by design and a test that fires the
+    /// moment it observes a state can land while the runtime finishes that hop. Every other refusal,
+    /// including 409 <c>Instance:100031</c> (Busy), is returned on the first attempt.
+    /// </summary>
+    protected async Task<HttpStatusCode> RunAsync(
+        string workflow, string instanceId, string transitionKey, object? body = null, Caller? caller = null)
+    {
+        var url = $"{InstancePath(workflow, instanceId)}/transitions/{transitionKey}?sync=false";
+        for (var attempt = 1; ; attempt++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Patch, url) { Content = JsonContent.Create(body ?? new { }) };
+            foreach (var (key, value) in HeadersFor(caller)) request.Headers.TryAddWithoutValidation(key, value);
+            using var response = await _raw.SendAsync(request);
+            if (attempt >= LockContentionAttempts || !await IsLockContentionAsync(response)) return response.StatusCode;
+            await Task.Delay(LockContentionDelay);
+        }
+    }
+
+    protected const int LockContentionAttempts = 5;
+    protected static readonly TimeSpan LockContentionDelay = TimeSpan.FromMilliseconds(200);
+
+    protected static async Task<bool> IsLockContentionAsync(HttpResponseMessage response) =>
+        response.StatusCode == HttpStatusCode.Conflict
+        && (await response.Content.ReadAsStringAsync()).Contains("Failed to acquire lock", StringComparison.Ordinal);
+
+    /// <summary>A transition that must be accepted: fails immediately with the runtime's body, then waits until not Busy.</summary>
+    protected async Task RunAcceptedAsync(
+        string workflow, string instanceId, string transitionKey, object? body = null, Caller? caller = null, TimeSpan? settleTimeout = null)
+    {
+        var status = await RunAsync(workflow, instanceId, transitionKey, body, caller);
+        Assert.True((int)status < 400, $"'{transitionKey}' on {workflow}/{instanceId} was refused with {(int)status}");
+        await WaitUntilSettledAsync(workflow, instanceId, caller, settleTimeout);
+    }
+
+    /// <summary>Like <see cref="RunAcceptedAsync"/> without waiting — for a parent that stays Busy while its SubFlow runs.</summary>
+    protected async Task SubmitAsync(string workflow, string instanceId, string transitionKey, object? body = null, Caller? caller = null)
+    {
+        var status = await RunAsync(workflow, instanceId, transitionKey, body, caller);
+        Assert.True((int)status < 400, $"'{transitionKey}' on {workflow}/{instanceId} was refused with {(int)status}");
+    }
+
+    /// <summary>A request with exactly the headers given (none = a caller with no credentials at all).</summary>
+    protected async Task<(HttpStatusCode Status, string Body)> SendRawAsync(
+        HttpMethod method, string url, object? body = null, IDictionary<string, string>? headers = null)
+    {
+        using var request = new HttpRequestMessage(method, url.TrimStart('/'));
+        // A string body is sent verbatim (pin the exact JSON); anything else is serialized.
+        if (body is string json) request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        else if (body is not null) request.Content = JsonContent.Create(body);
+        if (headers is not null) foreach (var (key, value) in headers) request.Headers.TryAddWithoutValidation(key, value);
+        using var response = await _raw.SendAsync(request);
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    // ── authorization: assert verdicts, not read 200s ─────────────────────────
+
+    /// <summary>
+    /// <c>GET …/functions/authorize?{query}</c> for <paramref name="caller"/>: 200 → true, 403 → false,
+    /// anything else fails. Queries: <c>transitionKey=approve</c>, <c>queryRoles=true</c>,
+    /// <c>functionKey=…</c>, <c>ack=true</c>. Read functions (state, data, view, …) never enforce
+    /// <c>queryRoles</c> in-process, and transitions are not role-gated at execution locally (no gateway).
+    /// </summary>
+    protected async Task<bool> AuthorizeAsync(string workflow, string instanceId, string query, Caller caller)
+    {
+        var (status, body) = await SendRawAsync(HttpMethod.Get, $"{InstancePath(workflow, instanceId)}/functions/authorize?{query}", headers: Headers(caller));
+        return status switch
+        {
+            HttpStatusCode.OK => true,
+            HttpStatusCode.Forbidden => false,
+            _ => throw new Xunit.Sdk.XunitException($"authorize?{query} answered {(int)status}: {body}")
+        };
+    }
+
+    /// <summary>Transition names the state function offers to <paramref name="caller"/> (<c>transitions[].name</c>).</summary>
+    protected async Task<IReadOnlyList<string>> GetOfferedTransitionsAsync(string workflow, string instanceId, Caller? caller = null)
+    {
+        var response = await Api.CallInstanceFunctionAsync(workflow, instanceId, "state", headers: HeadersFor(caller));
+        if (!response.Body.TryGetProperty("transitions", out var transitions)) return Array.Empty<string>();
+        return transitions.EnumerateArray()
+            .Select(t => t.TryGetProperty("name", out var n) ? n.GetString() : null)
+            .OfType<string>().ToList();
+    }
+
+    // ── reads ────────────────────────────────────────────────────────────────
+
+    /// <summary>The addressed instance's own state and status (A active, B busy, C completed, F faulted, …).</summary>
+    protected async Task<(string State, string Status)> GetInstanceStateAsync(string workflow, string instanceId, Caller? caller = null)
+    {
+        var response = await Api.GetInstanceAsync(workflow, instanceId, HeadersFor(caller));
+        var metadata = response.Body.GetProperty("metadata");
+        return (metadata.GetProperty("currentState").GetString() ?? "", metadata.GetProperty("status").GetString() ?? "");
+    }
+
+    /// <summary>What a polling client sees: for a SubFlow chain the DEEPEST active instance's state.</summary>
+    protected async Task<(string State, string Status)> GetObservedStateAsync(string workflow, string instanceId, Caller? caller = null)
+    {
+        var response = await Api.CallInstanceFunctionAsync(workflow, instanceId, "state", headers: HeadersFor(caller));
+        return (response.Body.GetProperty("state").GetString() ?? "", response.Body.GetProperty("status").GetString() ?? "");
+    }
+
+    protected async Task<JsonElement> GetAttributesAsync(string workflow, string instanceId, Caller? caller = null)
+    {
+        var response = await Api.GetInstanceAsync(workflow, instanceId, HeadersFor(caller));
+        return response.Body.GetProperty("attributes");
+    }
+
+    /// <summary>One line describing where an instance got to — used in failure messages.</summary>
+    protected async Task<string> DescribeAsync(string workflow, string instanceId, Caller? caller = null)
+    {
+        try
+        {
+            var (state, status) = await GetInstanceStateAsync(workflow, instanceId, caller);
+            var (incidentStatus, incident) = await SendRawAsync(HttpMethod.Get, $"{InstancePath(workflow, instanceId)}/incidents/active", headers: HeadersFor(caller));
+            var tail = incidentStatus == HttpStatusCode.OK ? $" incident={(incident.Length > 300 ? incident[..300] + "…" : incident)}" : "";
+            return $"{workflow}/{instanceId} {state}/{status}{tail}";
+        }
+        catch (Exception exception)
+        {
+            return $"{workflow}/{instanceId} — could not be read: {exception.Message}";
+        }
+    }
+
+    // ── waiting ──────────────────────────────────────────────────────────────
+
+    protected static async Task WaitUntilAsync(Func<Task<bool>> condition, string because, TimeSpan? timeout = null)
+    {
+        var budget = timeout ?? TimeSpan.FromSeconds(45);
+        var clock = Stopwatch.StartNew();
+        while (clock.Elapsed < budget)
+        {
+            if (await condition()) return;
+            await Task.Delay(250);
+        }
+
+        Assert.Fail($"Timed out after {budget.TotalSeconds:0}s: {because}");
+    }
+
+    protected Task WaitUntilSettledAsync(string workflow, string instanceId, Caller? caller = null, TimeSpan? timeout = null) =>
+        WaitUntilAsync(async () => (await GetInstanceStateAsync(workflow, instanceId, caller)).Status != "B",
+            $"{workflow}/{instanceId} stayed Busy", timeout);
+
+    /// <summary>
+    /// Waits for a STATE (not a status — a parked auto-chain rests in Busy by design) and fails as soon
+    /// as the instance faults, naming the active incident instead of timing out.
+    /// </summary>
+    protected Task WaitForInstanceStateAsync(string workflow, string instanceId, string state, Caller? caller = null, TimeSpan? timeout = null) =>
+        WaitUntilAsync(async () =>
+        {
+            var (current, status) = await GetInstanceStateAsync(workflow, instanceId, caller);
+            if (current == state) return true;
+            if (status == "F") Assert.Fail($"FAULTED while waiting for '{state}' — {await DescribeAsync(workflow, instanceId, caller)}");
+            return false;
+        }, $"{workflow}/{instanceId} never reached state '{state}'", timeout);
+
+    protected Task WaitForObservedStateAsync(string workflow, string instanceId, string state, Caller? caller = null, TimeSpan? timeout = null) =>
+        WaitUntilAsync(async () => (await GetObservedStateAsync(workflow, instanceId, caller)).State == state,
+            $"{workflow}/{instanceId} never reached observed state '{state}'", timeout);
+
+    /// <summary>Call right after a start whose first state runs entry tasks: reaching the state proves nothing if it faulted.</summary>
+    protected async Task AssertNotFaultedAsync(string workflow, string instanceId, Caller? caller = null)
+    {
+        var (_, status) = await GetInstanceStateAsync(workflow, instanceId, caller);
+        Assert.True(status != "F", $"instance faulted — {await DescribeAsync(workflow, instanceId, caller)}");
+    }
+}

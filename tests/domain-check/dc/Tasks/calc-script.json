@@ -1,0 +1,1 @@
+{ "key": "calc-script", "version": "1.0.0", "domain": "dc", "flow": "sys-tasks", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": "7", "config": {} } }

@@ -23,6 +23,19 @@ The two files are **designed independently**: the backend/analyst writes the sch
 
 ## 2. Schema authoring — what goes where?
 
+### 2.0 Pick the schema by role first (schema package 0.0.56+)
+
+A schema component declares its **role** in `attributes.type`, and the role limits which `x-*` keywords it
+may carry (full matrix: `schema-vocabularies.md`). The view's `dataSchema` follows the view's job:
+
+| View | `dataSchema` role | Typical keywords |
+|---|---|---|
+| State view (shows where the instance is, read-only `$instance`) | `master` | labels, `x-lov`/`x-lookup` to resolve stored keys; exposure via `x-roles`/`x-masking` |
+| Transition view, or any view that submits its own move (incl. an initial-state form) | `transition` (`function` for a function form) | `required`, `x-lov`, `x-conditional`, `x-validation`, `x-context-source`, client `x-encryption` |
+| Embedded component (`Component` node, sends nothing itself) | `component` | base keywords + `x-binding` |
+
+Base keywords and view hints (sections below) are valid in every role.
+
 ### 2.1 Field type + label
 
 ```json
@@ -41,7 +54,9 @@ The two files are **designed independently**: the backend/analyst writes the sch
 
 - `type` + standard JSON Schema keywords (minLength/pattern/min/max/format)
 - `x-labels` — multi-lang field label (auto-rendered on inputs)
-- `x-errorMessages` — per-rule custom error message (`required`, `minLength`, `pattern`, `min`, `max`, `format`)
+- `x-errorMessages` — per-keyword custom error message; keys only from `required`, `minLength`, `maxLength`, `minItems`, `maxItems`, `uniqueItems`, `minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `pattern`, `format`, `enum`, `const`
+- `x-order` — number; field order in a generated form (lower first) — a stored schema does not keep property order
+- View hints (client only): `x-helpText`, `x-placeholder` (localized), `x-uiHint` (e.g. `hidden`, `readonly`), `x-uiNote` (maintainer note, never shown), `x-group` (form section)
 
 ### 2.2 Enum dropdown
 
@@ -79,10 +94,19 @@ The SDK auto-binds when rendering a Dropdown. In the view just write: `{ "type":
 }
 ```
 
-- `source`: URN/URL (host resolver will resolve it)
-- `valueField`, `displayField`: JsonPath (array path + item key)
-- `filter[].value`: `$form.x`, `$instance.x`, `$param.x`, or a constant
+- Exactly **one** of `source` or `items` (schema 0.0.56):
+  - `source`: function URN (host resolver resolves it). May interpolate `{{$form.x}}` / `{{$instance.x}}` / `{{$param.x}}` to pick **which** source; an unresolved placeholder skips the load.
+  - `items`: an expression (`$instance.<path>` / `$form.<path>`) naming an array already in scope — no request; `valueField`/`displayField` are then plain property names in one element (empty = the element itself).
+- `valueField`, `displayField` (required): JsonPath (array path + item key) with `source`
+- `imageField` (optional): image per option, same path shape
+- `filter[].param`: request parameter; may carry the list-query operator after a colon (`"status:in"`)
+- `filter[].value`: `$form.x`, `$instance.x`, `$param.x`, or a literal — a literal may be an **array** (the only way to reach `in`/`nin`)
 - `required: true` → if the param can't be resolved, the LOV doesn't load (cascade is cleared)
+
+```json
+{ "selectedAccount": { "type": "string",
+    "x-lov": { "items": "$instance.accounts", "valueField": "iban", "displayField": "name", "imageField": "bankLogo" } } }
+```
 
 Cascade: when `country` changes, the `city` LOV is auto-refreshed and the previous selection is reset.
 
@@ -157,8 +181,8 @@ In the view, read with `$lookup.branchDetail.address`, `$lookup.branchDetail.pho
 }
 ```
 
-Operators: `equals`, `notEquals`, `in`, `notIn`, `greaterThan`, `lessThan`, `greaterOrEqual`, `lessOrEqual`, `contains`, `notContains`, `isEmpty`, `isNotEmpty`, `matches` (regex).
-Compound: `allOf`, `anyOf`, `not`.
+Operators (closed list, schema 0.0.56): `equals`, `notEquals`, `in`, `notIn`, `isEmpty`, `isNotEmpty`, `contains`, `greaterThan`, `lessThan`, `greaterThanOrEquals`, `lessThanOrEquals`, `startsWith`, `endsWith`. There is no `greaterOrEqual`, `lessOrEqual`, `notContains` or `matches` (regex) — use `not` + `contains`, or a schema `pattern`. <!-- lint:allow -->
+Compound: `allOf`, `anyOf`, `not`. `x-conditional` takes at least one of `showIf`/`hideIf`/`enableIf`/`disableIf`; "required when …" is JSON Schema `allOf` + `if`/`then`, not `x-conditional`.
 
 `showIf`/`hideIf` → visibility; `enableIf`/`disableIf` → input enabled/disabled.
 
@@ -171,13 +195,14 @@ Compound: `allOf`, `anyOf`, `not`.
     "pattern": "^[0-9]{11}$",
     "x-validation": {
       "rule": "tckn-checksum",
+      "parameters": { "allowForeign": false },
       "errorMessages": { "tr": "Geçersiz TC", "en": "Invalid TC" }
     }
   }
 }
 ```
 
-`delegate.onValidationRequest(field, value, formData)` is called asynchronously; the host returns an error string or `null`. It runs after schema-level pattern + length checks.
+`x-validation` is an object `{ rule, parameters?, errorMessages? }`. `delegate.onValidationRequest(field, value, formData)` is called asynchronously; the host returns an error string or `null`. It runs after schema-level pattern + length checks. The runtime never executes `rule` — enforce server-side rules in the transition's own validation.
 
 ---
 
@@ -525,9 +550,9 @@ For AI-generated views, check:
 ## 10. Quick reference — minimal form
 
 ```jsonc
-// schema.json
+// schema.json — attributes.schema of a schema component with attributes.type "transition"
 {
-  "$id": "demo:contact",
+  "$id": "urn:vnext:res:schema:demo:contact",
   "type": "object",
   "required": ["name", "email"],
   "properties": {
@@ -549,7 +574,7 @@ For AI-generated views, check:
 // view.json
 {
   "$schema": "https://amorphie.io/meta/view-vocabulary/1.0",
-  "dataSchema": "demo:contact",
+  "dataSchema": "urn:vnext:res:schema:demo:contact",
   "view": {
     "type": "Column",
     "gap": "md",

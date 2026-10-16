@@ -21,7 +21,7 @@ Each state in `attributes.states[]` carries a `stateType`. Conceptual mapping:
 
 | Value | Name | Role | Constraints |
 |-------|------|------|-------------|
-| `1` | Initial | Starting point | Exactly **one** per workflow. `startTransition.target` points to it. |
+| `1` | Initial | Starting point | **Optional — at most one** (0.0.99, #1068). With none declared the instance is born in the implicit **`$start`** state and `startTransition.target` decides where it enters (§6). Two Initial states are rejected at publish. |
 | `2` | Intermediate | Awaits user action or system work | Can have a view (user-facing) or be purely passive (auto-only transitions) |
 | `3` | Final | Workflow ends here | Instance status becomes Completed; `subType` 1 Success / 2 Error / 3 Terminated / 7 Cancelled / 8 Timeout |
 | `4` | SubFlow | Invokes a SubFlow child | Carries `subFlow` reference with `type: "S"` only (`"P"` rejected at publish since 0.0.95 — §5) |
@@ -33,7 +33,7 @@ Each state in `attributes.states[]` carries a `stateType`. Conceptual mapping:
 
 **Pattern: passive intermediate.** When an Intermediate state's only outgoing transitions are auto (1) or timer (2), set `state.view = null` — the state is not user-facing.
 
-**Pattern: Initial state input.** When the Initial state (`stateType: 1`) gathers input from the user before anything happens, the **default placement is `state.view`** (on the state itself), not on the outgoing transition. Reason: the runtime serves the state view immediately on instance start — the user sees the form right away and submits via a `view: null` transition. The reverse (form on the transition) requires the client to discover the transition and trigger it before any UI appears — an extra step with no UX benefit. The skill should propose this placement and confirm with the user (some flows want an intentional "intro → tap → form" two-step; `AskUserQuestion` with state-view marked Recommended). Wizard states (`stateType: 5`) are the exception — their form lives on the single outgoing transition by design.
+**Pattern: Initial state input.** When the first state (an Initial `stateType: 1`, or whatever `startTransition.target` names) gathers input from the user before anything happens, the **default placement is `state.view`** (on the state itself), not on the outgoing transition. Reason: the runtime serves the state view immediately on instance start — the user sees the form right away and submits via a `view: null` transition. The reverse (form on the transition) requires the client to discover the transition and trigger it before any UI appears — an extra step with no UX benefit. The skill should propose this placement and confirm with the user (some flows want an intentional "intro → tap → form" two-step; `AskUserQuestion` with state-view marked Recommended). Wizard states (`stateType: 5`) are the exception — their form lives on the single outgoing transition by design.
 
 ## 2.1 State alias (role-aware state labels)
 
@@ -81,9 +81,15 @@ The runtime exposes four **built-in functions** on every instance:
 | `schema` | the data schema for the current context (field visibility filtered by `x-roles`) |
 | `data` | the instance data (supports advanced filtering/sorting — see §7 Master schema) |
 
-Each call **authorizes against the current state's `queryRoles`**: if the caller's resolved roles
-(see `roles-and-authorization.md`) aren't `allow`-listed, the function returns **403**. So
-`queryRoles` on a state is what gates who can read that state, its view, its schema, and its data.
+Since 0.0.99 field protection — `x-roles` pruning, then `x-masking`, then `x-encryption` — applies on
+**every** instance read surface (instance GET and list, `data`, data history, sync start/transition
+responses, the Get* tasks), not only `schema` / `data`; see `references/concepts/field-protection.md`.
+
+Read access is gated by the current state's **`queryRoles`**: the gateway asks
+`authorize?queryRoles=true` before forwarding and returns **403** when the caller's resolved roles
+(see `roles-and-authorization.md`) aren't `allow`-listed — the runtime itself does not 403 these reads
+(since 0.0.95; inside a SubFlow the decision is taken at the leaf only since 0.0.99). So `queryRoles`
+on a state is what gates who can read that state, its view, its schema, and its data.
 
 **Precedence: state, then flow.** `queryRoles` can be defined at **two levels** — on the **flow**
 (`attributes.queryRoles`) and on a **state**. The **current state's `queryRoles` takes priority**; if
@@ -97,7 +103,8 @@ pipeline pauses after OnEntry (order 75), the instance stays Busy, and the state
 `interaction` block (`terminateLongPoll`, `fallbackTimeoutSeconds`, `ack.href`) to admitted callers —
 the client stops polling, renders, then `POST`s the ack (or the fallback timer resumes). Gate is
 exactly one of `roles` | `rule` (schema `oneOf`; write `"roles": []` for an open gate). `terminate: false`
-emits nothing. Full semantics, SubFlow bubbling, rule pitfalls and overrides: `long-poll-interaction.md`.
+(since 0.0.98, shape v13) serves the `interaction` block **without `ack`** whenever the caller passes the
+gate; nothing pauses, and `fallbackTimeoutSeconds` sets the client's poll window. Full semantics, SubFlow bubbling, rule pitfalls and overrides: `long-poll-interaction.md`.
 
 ## 3. Transition `triggerType`
 
@@ -128,8 +135,18 @@ compare-and-set under a short status lock, then the pipeline and its auto-chain 
 
 `updateData` (`target: "$self"`) is the only transition that skips OnExit/OnEntry/Schedule; against
 a parent with an open SubFlow it is data-only and never forwarded. Route parallel writes through it,
-return **delta-only** mappings, and give parallel branches distinct task definitions. Step order,
+return **delta-only** mappings, and give the same task listed twice at one `order` a distinct
+`variableKey` (0.0.99, #1072 — publish rejects a slot collision). Step order,
 `+Self` profile, discovery and annotations: `transition-pipeline.md`.
+
+## 3.2 `executionType` — sync/async pinned by the definition (0.0.99, #1037)
+
+`"executionType": "S"` (sync → `200` + full instance) or `"A"` (async → `202` + `{ id, status }`) on the
+flow (`attributes.executionType`) or on a state transition, shared transition or `startTransition`
+(not on `cancel` / `exit` / `updateData`). **Precedence: transition → flow → the caller's `?sync`**; when
+a definition sets it, `?sync` is ignored. Not applied to auto transitions, scheduled/timeout/retry
+paths, SubFlow resume/start/forward or the long-poll ack. Clients must branch on the **status code**,
+not on the `sync` they sent. Details: `transition-pipeline.md` §1.
 
 ## 4. State lifecycle hooks
 
@@ -158,7 +175,7 @@ State type check:
 |-----------|---------------|------------------|
 | Started by | state `stateType: 4` + `subFlow.type: "S"` (pipeline step 70) | **SubProcess task (type 14)** in `onExecutionTasks`/`onEntries`; state-level `"P"` is rejected at publish since 0.0.95 (#1026) |
 | Start / forward | **synchronous** in the parent's pipeline (#968, 0.0.91); a failed start **faults the parent** with an incident, retry repeats the start (#1026) | task executor starts the child and creates the correlation; parent continues |
-| Parent status | parent shows the child's status as `status` / `effectiveStatus` (#983); parent transitions are forwarded to the child (step 10) | independent; not projected upward |
+| Parent status | parent shows the child's status as `status` / `effectiveStatus` (#983); since 0.0.100 a forwardable parent transition is **proxied** to the leaf, which validates and answers synchronously (`runtime-operations.md` §1) | independent; not projected upward |
 | Data | child input from `ISubFlowMapping.InputHandler`; output merged by `OutputHandler` | own data; results come back only via explicit tasks/events |
 | Discovery | `correlations[]` in the state body lists active + completed children with `terminalOutcome` (#856) | listed in `correlations[]` with `subFlowType: "P"`; not followed by state/long-poll/human-task descent |
 | Cancellation | parent cancel → child cancel (bypassed if the child has no `cancel`) | independent; explicit cancel |
@@ -175,23 +192,43 @@ to expose.
 
 ## 6. Start transition
 
-Every workflow has exactly one `attributes.startTransition`. Its `target` must be the Initial (`stateType: 1`) state. The runtime fires this transition automatically when the instance is created.
+Every workflow has exactly one `attributes.startTransition`. The runtime fires it automatically when
+the instance is created. Rules since 0.0.99 (#1068), checked at publish:
+
+- `target` is **required** and must name a **declared state** — any state, not necessarily an Initial
+  one. An empty target, `$self` and `$start` are rejected.
+- **`$start` is a reserved state key** — never declare a state with it.
+- With **no Initial state**, the instance is born in the implicit `$start` (no tasks, view or
+  transitions; never listed in `states`) and enters `target` through the start transition. With one
+  Initial state, behaviour is unchanged (point `target` at it).
+- During an async start or a SubFlow child creation, `currentState` may briefly read `$start` —
+  clients that branch on `currentState` must tolerate it.
 
 **No view, but a schema.** The start transition **cannot carry a `view`** (`view` must be `null`) —
 it fires automatically on creation, so there's no UI surface for it. It **can carry a `schema`** to
-validate the **initial payload** sent to instance-start.
+validate the **initial payload** sent to instance-start. It may also carry `executionType` (§3.2).
 
 **Service-to-service vs client pattern.** In **service-to-service** flows it's natural to collect the
 initial data *at start* (the caller already has it) — set `startTransition.schema` to the payload it
 sends. In **client-facing** flows the instance usually starts with only base info, and the user
-provides input on the **initial-state view** (not at start). Design for this explicitly: put the
-input form on the Initial state's `view`, not on the start transition (which has none). See
+provides input on the **first state's view** (not at start). Design for this explicitly: put the
+input form on that state's `view`, not on the start transition (which has none). See
 `view-roles.md` § State view vs Transition view.
+
+### Ways to start an instance
+
+| Path | When |
+|------|------|
+| `POST …/instances/start` | Client or service call (body = initial payload) |
+| `POST …/instances/events?action=start` | A published message; needs the workflow's `event.mapping` to compute the key (`event-driven-workflows` docs) |
+| `POST …/instances/schedule?scheduleId=&version=&sync=` (**0.0.100**, #1076) | A Dapr `bindings.cron` component whose `route` points here — one component YAML per schedule, owned by the domain's deployment. No body: every non-reserved query parameter becomes a **string** attribute; key = `{scheduleId}-{yyyyMMddTHHmmssZ}`; `sync` defaults to `false`. Assumes one delivery per tick (no lock) — verify before scaling the orchestrator beyond one replica |
+| SubFlow state / SubProcess task (14) / StartTrigger task (11) | From another instance |
 
 ## 7. Master schema
 
 A flow defines a **master schema** (its `attributes.schema` / workflow-type schema). It derives the
-InstanceData template and powers vNext features — `x-lookup`, `x-encrypt`, and instance filtering.
+InstanceData template and powers vNext features — `x-lookup`, field protection (`x-roles`,
+`x-masking`, `x-encryption` — see `references/concepts/field-protection.md`), and instance filtering.
 
 **Merge validation.** On every instance-data merge, the runtime validates the merged data against
 the master schema and **rejects** the request if it doesn't fit. Because data **expands across
@@ -202,7 +239,8 @@ states** (each state merges more in), the master schema must be permissive:
 
 What still matters: `pattern`, the backbone object shape, vocabulary definitions (`x-*`), and the
 field types — these drive filtering and the `x-*` features. In particular, master-schema properties
-carry **`x-roles`** (field visibility in the `schema`/`data` functions) and
+carry **`x-roles`** (read-side field pruning on every instance read surface, not only the
+`schema`/`data` functions — `field-protection.md`) and
 **`x-filterOperators` / `x-sortable` / `x-displayFormat`** (which the `data` function uses for
 advanced filtering, sorting, and display). See `schema-vocabularies.md`.
 
@@ -214,7 +252,40 @@ filtering its flexibility.
 so `$instance.X` resolves everywhere). Input/transition views need a transition-specific schema
 that carries `required` / `enum` / `x-lov` / `x-validation` for the input set — see `view-roles.md`.
 
-## 8. Annotations
+## 8. History mode — `attributes.history: "none"` (0.0.100, #1082)
+
+`"history": "none"` (at the root of `attributes`, beside `type` / `executionType`; omitted or `"full"`
+= full history) marks a **one-shot** flow: no `InstanceTransitions` / `InstanceTasks` rows, and
+instance data is buffered and written **once** — at Finish, at a SubFlow handoff, or on a fault.
+
+**When to use it.** High-volume automatic flows nobody inspects afterwards — a quote, lookup,
+introspection or validation run end to end by the system. It cuts storage and write cost. Do **not**
+use it for anything a human waits on, anything you may need to `retry`, or flows whose history is
+an audit requirement.
+
+**Publish rejects a `none` flow that is not one-shot** (errors, flow-local; the schema enforces all
+but the last rule):
+
+- at least one Final state, and every state must reach one (no cycle, no `$self`-only loop, no dead end);
+- every state transition is **automatic** (`triggerType: 1`) — no manual, timer or event transitions; every non-Final state has at least one;
+- no `sharedTransitions`, `cancel`, `exit`, `updateData`, workflow `timeout`, `subFlow.overrides.timeout`;
+- no `interaction.longPoll`, no Wizard state, no **Suspended / Busy / Human** subtype — so **human states are forbidden**.
+
+`startTransition` stays, and SubFlow states, SubProcess tasks and a workflow `event` start are allowed.
+
+| Runtime code | When |
+|---|---|
+| `Instance:100044` (400) | A `none` parent's SubFlow (`S`) child is not `none` itself — the child refuses to start, the parent faults with an incident (SubProcess children exempt; a `none` child under a `full` parent is fine) |
+| `Instance:100045` (409) | `POST …/retry` on a `none` instance — retry is not available |
+| `Instance:100046` (incident) | A stage came to rest at a non-Final state (e.g. every auto rule false) — the instance is faulted |
+
+Also: transitions history, `functions/tasks`, `functions/actions` and the metrics endpoints return
+empty lists; while it runs the instance has no data row (GET returns null data, attribute filters miss
+it); `$PreviousUser` / `$PreviousBehalfOfUser` never resolve; a crash or post-commit fault loses the
+data since the last flush. Needs schema 0.0.56 and runtime 0.0.100 together — older ones silently
+ignore the field.
+
+## 9. Annotations
 
 `annotations` (string-valued, namespaced keys such as `ui/visibility-channel`, `ui/priority`,
 `ui/intent`) may be declared on state transitions, `sharedTransitions`, `cancel`, `exit`,
@@ -224,6 +295,7 @@ to `transitions[].annotations` and `timeout.annotations` in the state function. 
 
 ## Sources
 
+- Runtime 0.0.100: `docs/runtime/{history-mode,execution-type}.md`, `docs/domain/scheduled-workflow-start.md`; release notes v0.0.98–v0.0.100 (#1051, #1037, #1068, #1072, #1076, #1082, #1085)
 - Canonical schema: `workflow-definition.schema.json` — resolve the URL per `component-schemas.md` (do not hard-code a raw GitHub path)
 - Docs portal: `https://burgan-tech.github.io/vnext-docs/docs/components/workflow`
-- Working examples: `vnext-example/core/Workflows/account-opening/`, `payment-process/`
+- Working examples: `vnext-example/core/Workflows/account-opening/`, `payment-process/`; one-shot flows `history-none-lab/` (`hn-oneshot.json`, `hn-stuck.json`, `hn-fault.json`) and `history-none-subflow-lab/`

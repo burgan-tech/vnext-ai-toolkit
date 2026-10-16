@@ -1,7 +1,7 @@
 # Transition Pipeline — Order, Admission, `updateData`, Annotations
 
 > Author-facing view of what happens between `PATCH …/transitions/{key}` and the next state
-> function response. Runtime 0.0.97. For the state-function body itself see
+> function response. Runtime 0.0.100. For the state-function body itself see
 > `state-function-response.md`; for locking error codes see `runtime-operations.md`.
 
 ## 1. Lifecycle order (`LifecycleOrder.cs`)
@@ -9,7 +9,7 @@
 | Order | Step | What an author sees |
 |------:|------|---------------------|
 | 5 | Preflight | `cancel`/`exit` detection; already-terminal instance short-circuits |
-| 10 | ForwardToActiveSubflow | Parent transition is forwarded to the open SubFlow child. **Never** forwards `updateData` or a parent shared `$self` transition |
+| 10 | ForwardToActiveSubflow | Fallback only since 0.0.100: a forwardable parent transition is normally **proxied to the leaf before the pipeline starts** (no parent lock/Busy/job — `runtime-operations.md` §1). **Never** forwards `updateData`, `cancel`, `exit`, timeout or a parent shared transition available in the parent's state |
 | 19 | SetBusy | Instance → Busy for the rest of the chain (Normal kind only) |
 | 20 | CreateTransition | Transition record; duplicate-job guard |
 | 21 | UpdateDataDataOnly | `updateData` on a parent with an open SubFlow correlation: write data, jump to Finalize |
@@ -43,6 +43,29 @@
 Profiles remove irrelevant steps per trigger type (AutoChain drops 5/10/19/38, Scheduled/Event drop
 5/10, ErrorBoundary drops 5/10/25 and never pauses at 75). The profile is chosen from the
 **inbound** trigger type, not the transition definition.
+
+### Sync or async — `executionType` (0.0.99, #1037)
+
+Which mode a request runs in is decided **before** admission:
+
+```
+effective = transition.executionType ?? flow.executionType ?? caller ?sync (default false = async)
+```
+
+| Where | Field |
+|-------|-------|
+| flow | `attributes.executionType` |
+| state transition, `sharedTransitions[]`, `startTransition` | `executionType` |
+| `cancel`, `exit`, `updateData` | not available |
+
+`S` → `200` + full instance; `A` → `202` + `{ id, status }`. A definition value **overrides** `?sync`,
+so clients must branch on the HTTP status. Not applied to auto transitions (always inline in the
+chain), scheduled transitions, workflow timeouts, retry, SubFlow start/forward/resume/cancel/fault and
+the long-poll ack. A SubFlow proxy resolves the mode once at the parent and calls the leaf in it.
+Spans tag `vnext.execution.requested` / `vnext.execution.effective` and `vnext.execution.overridden=true`
+when the definition changed the caller's mode. Use it when a step must never depend on the caller
+(e.g. an always-sync validation, an always-async long call). Async bodies are capped at **10 MB**
+(Kestrel `MaxRequestBodySize`, `413`) since 0.0.99.
 
 ## 2. Admission kinds (`ITransitionAdmissionService.cs`)
 
@@ -119,15 +142,18 @@ either instance.
   so "accumulate, advance at threshold" works under a write storm.
 - **Mappings return delta only.** Each write persists immediately; echoing the full instance data
   overwrites fresher concurrent values with stale ones.
-- **Distinct task definitions per parallel branch at the same `order`.** The task journal key is
-  `transition+task+order`; two branches sharing a task at one order collide.
+- **Parallel branches at the same `order` need distinct response slots.** Same-order entries run in
+  parallel and merge by slot = `variableKey ?? camelCase(task.key)`. The same task twice at one order
+  (e.g. two SubProcess starts) needs a `variableKey` on at least one entry (0.0.99, #1072; pattern
+  `^[A-Za-z_][A-Za-z0-9_]*$`, ≤ 100 chars). Publish rejects a slot collision within one order; a later
+  order may reuse a slot and overwrites it.
 - `cancel`/`exit` always get through; do not build "abort" states on a normal transition.
 
 ## 4. Annotations
 
 `#/definitions/annotations`: string-valued object, namespaced keys, pure passthrough — the runtime
 never interprets values. Surfaces on `transitions[].annotations` and `timeout.annotations` in the
-state function (0.0.95, shape v12); `kind: "scheduled"` entries carry the arming transition's
+state function (since 0.0.95; current shape v14); `kind: "scheduled"` entries carry the arming transition's
 annotations.
 
 | Declared on | Allowed |
@@ -167,15 +193,18 @@ Meta: migration `sync-response-no-longer-carries-extensions`, deprecation
 - A `$self` shared transition re-arms timers and re-runs OnEntry; move idempotent-only logic to
   `onExecutionTasks`.
 - Reading `extensions` from a transition response is always `{}` since 0.0.93.
+- `?sync=true` does not guarantee a `200` when the transition or flow declares `executionType: "A"`
+  (and `?sync=false` may get a `200` under `"S"`).
+- `history: "none"` flows allow automatic transitions only — see `workflow-types.md` §8.
 
 ## Sources
 
-- Runtime `vnext` @ `eca5b466` (0.0.97): `src/BBT.Workflow.Execution/Pipeline/LifecycleOrder.cs`,
-  `src/BBT.Workflow.Execution/Pipeline/ITransitionAdmissionService.cs`,
-  `Pipeline/Steps/{HandleUpdateDataDataOnlyStep,ForwardToActiveSubflowStep}.cs`,
+- Runtime `vnext` @ `f06961ec` (0.0.100): `src/BBT.Workflow.Domain/Execution/Transitions/Pipeline/LifecycleOrder.cs`,
+  `ITransitionAdmissionService.cs`, `Pipeline/Steps/{HandleUpdateDataDataOnlyStep,ForwardToActiveSubflowStep}.cs`,
+  `docs/runtime/execution-type.md`, `docs/architecture/subflow-transition-proxy.md`,
   `docs/domain/well-known-transitions.md`, `docs/domain/extensions.md`
-- Schema `vnext-schema` @ `ac42026` (0.0.54): `#/definitions/{updateDataTransition,annotations,availableInEntry,workflowTimeout}`
-- vnext-docs @ `adf9bf4`: `concepts/transition-pipeline.md`, `components/workflow.md` §Annotations, §Transition Yürütme Modeli
-- Fixtures `vnext-example` @ `3b5ebab`: `core/Workflows/timeout-lab/timeout-lab-root.json`, `core/Workflows/schedule-after-auto/`
-- PRs: #877 (Busy-as-mutex), #884 (`+Self` only for updateData), #859 (well-known discovery), #917 (updateData no lock/guard), #943 (Auto 80 before Schedule 90), #984 (extensions read-only)
-- vnext-meta: `wellKnownTransitionDiscovery` 0.0.79, `selfTargetPipelineProfile` (stale order note), `stateAnnotations` 0.0.95
+- Schema `vnext-schema` 0.0.56: `#/definitions/{updateDataTransition,annotations,availableInEntry,workflowTimeout,executionType}`, task-entry `variableKey`
+- vnext-docs: `concepts/transition-pipeline.md`, `how-to/async-sync.md`, `components/workflow.md` §Annotations, §Transition Yürütme Modeli
+- Fixtures `vnext-example`: `core/Workflows/timeout-lab/timeout-lab-root.json`, `core/Workflows/schedule-after-auto/`, `core/Workflows/parallel-variable-key-lab/`
+- PRs: #877 (Busy-as-mutex), #884 (`+Self` only for updateData), #859 (well-known discovery), #917 (updateData no lock/guard), #943 (Auto 80 before Schedule 90), #984 (extensions read-only), #1037 (`executionType`), #1067 (10 MB async body), #1072 (`variableKey`), #1085 (SubFlow transition proxy)
+- vnext-meta: `wellKnownTransitionDiscovery` 0.0.79, `selfTargetPipelineProfile` (stale order note), `stateAnnotations` 0.0.95, `executionType` 0.0.99, `taskVariableKey` 0.0.99

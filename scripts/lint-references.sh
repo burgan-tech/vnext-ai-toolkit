@@ -23,7 +23,7 @@ ban() {
 }
 
 echo "== stale phrases"
-ban '"1"[–-]"1[56]"|\b1[–-]1[56] task types|enum `?"?1"?[–-]"?1[56]' 'task enum ceiling stated as 15/16 (runtime 1–23, schema validates 1–21)'
+ban '"1"[–-]"1[56]"|\b1[–-]1[56] task types|enum `?"?1"?[–-]"?1[56]' 'task enum ceiling stated as 15/16 (runtime 1–23, schema validates 1–22)'
 ban '\| *`?5`? *\| *HumanTask|HumanTask \(type 5\)|type 5 = ?HumanTask|"5" *= *HumanTask' 'HumanTask described as task type 5 (it is a human STATE subType 6 + human-task function)'
 ban 'schemas/\{componentType\}\.json|schemas/(workflow|task|view|schema|function|extension|mapping)\.json' 'wrong schema filename (real: {type}-definition.schema.json) — point to component-schemas.md'
 ban 'templates/(csx-contracts|function-mapping-pattern|mocklab-seed-format|view-author-guide)\.md|AGENTS\.md\.tmpl' 'reference to a deleted templates/ duplicate'
@@ -35,6 +35,26 @@ ban 'zipkin' 'zipkin tracing (runtime uses otel: key → otel-collector)'
 ban 'availableTransitions`? *(field|property|array)' 'state function wire field is `transitions`, not availableTransitions'
 ban 'POST [^ ]*/transitions/\{' 'transition endpoint is PATCH, not POST'
 ban 'filterOperators.*"(ge|le|ne|like|match)"|"enum": *\[[^]]*"(ge|le)"' 'x-filterOperators declared with WIRE operator names — schema-side names are gte/lte/neq/contains/startsWith/endsWith/isNull'
+# runtime 0.0.98–0.0.100 / schema 0.0.55–0.0.56
+ban 'functions/hierarchy' 'hierarchy function was removed in 0.0.99 — use functions/instance-correlation'
+ban '"cacheaside" *:|keyExpression`? \(Dynamic Expresso\) or|re-enters the router' 'CacheAside keyExpression / Modes:cacheaside were removed in 0.0.99 (source runs as a task; `key` is a string or script)'
+ban '[Ee]xactly (\*\*)?one(\*\*)? (initial|Initial)' 'Initial state is optional since 0.0.99 (at most one; implicit $start)'
+ban 'distinct task definitions|remotely invokable type' 'same task twice at one order uses variableKey (0.0.99); CacheAside source may be any task type'
+ban 'validates `"1"`[–-]`"21"` only|schema ceiling 1.21' 'schema 0.0.55+ validates task types "1"–"22"'
+ban 'x-encrypt\b|x-persistance' 'x-encrypt never shipped — use x-encryption (source runtime|client)'
+ban '"type": *"(workflow|task-input|task-output|view-data|SchemaDefinition)"' 'schema attributes.type is a role since schema 0.0.56: master | transition | function | component'
+ban 'greaterOrEqual|lessOrEqual|notContains' 'condition operators are greaterThanOrEquals / lessThanOrEquals (schema 0.0.56 vocabulary)'
+ban 'evaluatedBy"?: *"server"' 'x-computed evaluatedBy "server" was renamed to "runtime"'
+ban '"responsePath"' 'x-lookup uses resultField (no responsePath)'
+ban 'vocab[a-z]* (still )?lists? (the )?wire' 'the 0.0.56 vocabulary lists declaration names; publish rejects wire tokens'
+ban 'queryRoles[^|]*conjunction|chain conjunction|authorizeChainConjunction' 'authorize?queryRoles=true is leaf-only since 0.0.99 (no chain conjunction)'
+ban '(x-roles|user_reference)[^|]*role header' 'the runtime reads only role/sub/act_sub/position/client_id; x-roles and user_reference are not role headers'
+ban 'VNEXT_BASE_URL=http://localhost:5000|localhost:5000/api' 'the local runtime answers on :4201 (MockLab is :3001 from the host, mocklab:5000 in-network)'
+ban 'read/write (pruning|visibility)' 'x-roles prunes reads only'
+ban 'produces \*\*no\*\* .interaction' 'terminate:false serves the interaction block (without ack) since 0.0.98'
+# domain-check must not depend on a runtime checkout (issue #27)
+hits=$(grep -rnE 'src/BBT\.|\.cs\b|RUNTIME_ROOT|common\.props|TaskScope\.cs|DataFunctionCache|vnext-onboarding|ekyc' skills/domain-check commands/domain-check.md 2>/dev/null | grep -v 'lint:allow')
+[ -z "$hits" ] || { red 'domain-check references runtime source paths or private domains (cite public docs / schema instead)'; printf '%s\n' "$hits" | sed 's/^/     /'; }
 
 echo "== structural"
 manifest=.claude-plugin/plugin.json
@@ -79,6 +99,12 @@ if [ -f templates/CLAUDE.md.tmpl ]; then
   [ -z "$left" ] || red "CLAUDE.md.tmpl has non-allowlisted placeholders outside code fences: $(printf '%s ' $left)"
   n=$(wc -l < templates/CLAUDE.md.tmpl); [ "$n" -le 260 ] || yel "CLAUDE.md.tmpl is $n lines (target ≤ 260)"
 fi
+
+echo "== python"
+for py in $(find skills scripts -name '*.py' 2>/dev/null); do
+  python3 -m py_compile "$py" 2>/dev/null || red "python syntax error in $py"
+done
+find skills scripts -name '__pycache__' -type d -prune -exec rm -rf {} + 2>/dev/null
 
 echo "== shell syntax"
 # Check each script with the interpreter its shebang names (bash scripts use arrays that POSIX sh/dash rejects).

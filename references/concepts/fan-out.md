@@ -6,7 +6,7 @@ FanOut resolves a collection from instance data **at runtime**, runs a reference
 
 | Use FanOut when | Do NOT use FanOut when |
 |-----------------|------------------------|
-| The item count comes from **data** (documents to sign, recipients, accounts to reconcile) | The count is **fixed at design time** — tasks sharing the same `order` already run in parallel; give each branch its own task definition |
+| The item count comes from **data** (documents to sign, recipients, accounts to reconcile) | The count is **fixed at design time** — tasks sharing the same `order` already run in parallel; the same task listed twice needs a distinct `variableKey` (0.0.99) |
 | Each item is an independent call to a target with **no batch endpoint** | The downstream accepts a batch — one call beats N journal rows, N DI scopes, N invocations |
 | Partial failure is acceptable as **data** the flow branches on | Item 2 depends on item 1's output (items run concurrently, unordered) |
 | One write per batch is enough | You need per-item progress visible **before** the batch finishes (single-writer by design) |
@@ -96,7 +96,7 @@ public class FanOutDocumentsMapping : ScriptBase, IFanOutMapping
     {
         if (task is HttpTask httpTask)
         {
-            var baseUrl = GetConfigValue("Example:ApiBaseUrl", "http://localhost:3001");
+            var baseUrl = GetConfigValue("Example:ApiBaseUrl", "http://mocklab:5000");
             var documentId = item.ItemKey;                                    // = item.Value.id when present
             var mime = HasProperty(item.Value, "mimeType")
                 ? GetPropertyValue<string>(item.Value, "mimeType", "application/pdf")
@@ -184,7 +184,8 @@ Both rules must also treat "summary absent" as false so neither fires before the
 - **A per-item `ignore` boundary action does not change the verdict** — the item still counts as failed for the join; it only stops the boundary from escalating.
 - **`ItemKey` derivation**: `id` string → `key` string → index. Give items an `id` if you want stable correlation in logs and results.
 - **The mapping compiles against `WorkflowTask`** — check `task is HttpTask` (or the concrete type) before mutating; a type mismatch silently leaves the clone unbound.
-- **One inner task definition per batch** is correct here (unlike same-`order` fan-in, which needs distinct definitions) — the journal key includes `#{index}`.
+- **One inner task definition per batch** is correct here (unlike same-`order` parallel entries, which need distinct response slots — `variableKey` since 0.0.99) — the journal key includes `#{index}`.
+- In a `history: "none"` flow no `InstanceTasks` rows are written at all, so there are no per-item journal rows to inspect (`workflow-types.md` §8).
 - Schema support for `"21"` starts at vnext-schema **0.0.53**; older packages fail `npm run validate` while the runtime publishes fine.
 
 ## Sources

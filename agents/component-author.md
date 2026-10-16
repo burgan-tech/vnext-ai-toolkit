@@ -39,7 +39,24 @@ Rules:
   helpers (`HasProperty`, `GetPropertyValue<T>(obj, name, default)`, `GetList`, …).
   If the same mapping structure repeats across components, extract it into a
   `sys-mappings` helper as the primary approach. Full contract + helper reference:
-  `references/concepts/csx-contracts.md`.
+  `references/concepts/csx-contracts.md`. An `InputHandler`'s return value never
+  stops a task — validate before it or `throw`. `encrypt` fields reach scripts as
+  tokens (`context.Instance.DecryptAsync`); `GetFileAsync` has no authorization check.
+
+Awareness (runtime 0.0.100 / schema 0.0.56) — follow the reference, don't restate it:
+- **Schema roles:** a schema's `attributes.type` is its role (`master` / `transition` /
+  `function` / `component`, or absent); legacy values fail validation. One schema per
+  role. → `references/concepts/schema-vocabularies.md`
+- **`x-indexed`:** in the master schema, mark every field that instance queries filter
+  or sort on. → `references/concepts/schema-vocabularies.md`
+- **Sensitive fields:** for each PII/secret field, decide `x-roles` / `x-masking` /
+  `x-encryption` with the user; never leave it unprotected by default.
+  → `references/concepts/field-protection.md`; file fields → `references/concepts/file-fields.md`
+- **`history: "none"`**, **implicit `$start`** (Initial state optional, `$start`
+  reserved), and the **start transition target** → `references/concepts/workflow-types.md`
+- **`variableKey`:** the same task twice at one `order` needs a distinct `variableKey`;
+  slot collisions fail publish. → `references/concepts/task-types.md`
+- A runtime defect (not a component error) → draft it with `/vnext-ai-toolkit:report-issue`.
 
 When done, run `npm run validate` and fix reported errors until it passes. Writing
 the test/validation harness is not your job, but produce components that validate

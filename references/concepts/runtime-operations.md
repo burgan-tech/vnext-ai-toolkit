@@ -1,7 +1,7 @@
 # Runtime Operations — Locks, Caches, Discovery, URL Templates
 
 > Audience: domain authors running or debugging a domain against a local or shared runtime
-> (v0.0.97). This is the "why did the runtime answer 409 / 304 / stale?" reference. Helm and
+> (v0.0.100). This is the "why did the runtime answer 409 / 304 / stale?" reference. Helm and
 > operator detail is kept to what an author needs to *recognise*, not to operate. For tracing and
 > log lookup see `observability.md`; for incident/retry see `incidents-and-retry.md`.
 
@@ -21,6 +21,7 @@ outcome as `vnext.settle.cas = flipped | lost | skipped`).
 | `cancel` / `exit` / timeout (workflow-level `attributes.cancel` / `attributes.exit`) | Accepted — takes over the Busy flag under the lock | Same |
 | `updateData` | Accepted unconditionally — no Busy check, no flip; writes serialise on the `FOR UPDATE` funnel | Same |
 | Owner re-entry (subflow resume, long-poll `ack`, pre-reserved job) | No check, no reserve | — |
+| Forwardable transition on a parent with an active SubFlow (0.0.100) | **Proxied to the leaf** — the parent takes no lock, Busy or job; the leaf runs its own admission | Same |
 
 ### What the client sees
 
@@ -34,14 +35,29 @@ outcome as `vnext.settle.cas = flipped | lost | skipped`).
 | `Instance:100032` | 503 | Subflow terminal-outcome lock not acquired — transient, inbox relay redelivers |
 | `Instance:100027` | 400 | `retry` on an instance that is not Faulted |
 | `Instance:100037` | 404 | `incidents/active` when no incident is open — normal; re-read state |
+| `Instance:100031` on a SubFlow parent | 409 | (0.0.100 proxy) the child just completed or does not exist yet behind an open correlation — retry |
+| `Instance:100045` | 409 | `retry` on a `history: "none"` instance — not supported (`workflow-types.md` §8) |
+| — | 413 | Async transition body over **10 MB** (Kestrel `MaxRequestBodySize`, 0.0.99 #1067; before that > ~2 MiB could strand the instance Busy) |
 
-### Subflow chain reservation
+### SubFlow transition proxy (0.0.100, #1085)
 
-- An **async** transition on a parent with an active SubFlow marks the whole chain **Busy down to
-  the leaf** before answering 202, so a poller sees the leaf as Busy (#884). The forwarded
-  child call claims that reservation via the internal request body — never a public header.
-- A failed post-commit forward **releases** the chain reserve (#993). A failed subflow
-  *start* **faults the parent** with an incident; `retry` repeats the start (#1026, 0.0.95).
+The accept-time "chain reservation" is gone on the sending side. A transition sent to a **parent with
+an active SubFlow** is forwarded **unchanged** down the active-correlation chain to the deepest leaf:
+
+- The **parent writes nothing** — no status lock, no Busy flip, no job. The **leaf** validates the
+  request, swaps `x-storage` file content, flips its own Busy and schedules its own job.
+- **Leaf rejections reach the client synchronously**: 400 / 403 / 409 come back on the call (before
+  0.0.100 the parent answered 202 and the failure surfaced later). Update tests that expected a 202.
+- The mode is resolved once at the parent (`executionType` → `?sync`) and the leaf runs in it. The
+  response carries the **parent's** id and the **child's** status.
+- A child that has just completed, or does not exist yet behind an open correlation, answers
+  **409 `Instance:100031` on the parent** — retry after re-reading state.
+- **Not proxied** (still run on the parent): `updateData`, `cancel`, `exit`, timeouts, and a parent
+  shared transition that is available in the parent's current state.
+- Mixed-version domains need no action (deprecation `subflow-chain-reserve-claim`; an older parent's
+  reserve is still accepted by a 0.0.100 leaf).
+- A failed subflow *start* still **faults the parent** with an incident; `retry` repeats the start
+  (#1026, 0.0.95).
 - `metadata.status` on a parent is Busy for the child's whole lifetime *by design*; branch on
   `metadata.effectiveStatus` (deepest active SubFlow's status) instead.
 
@@ -214,8 +230,33 @@ Tests must not hard-code `/api/v1` when parsing hrefs; read them from the state 
 | instance dashboards / counts | `GET …/instances?filter=…&sort=…` with `groupBy` / `aggregations` (in the filter envelope or as query params) |
 | error inspection | `GET …/instances/{id}/incidents`, `…/incidents/active` |
 | step detail | `GET …/instances/{id}/functions/tasks`, `…/functions/actions?taskId=` |
-| tree view | `GET …/instances/{id}/functions/hierarchy` |
+| tree view | `GET …/instances/{id}/functions/instance-correlation` (0.0.99; the old `hierarchy` path is **404**, no alias) |
 | ad-hoc ops | MCP server `vnext/tools/BBT.Workflow.Mcp.Server`; logs + APM (see `observability.md`) |
+
+## 5.1 Read endpoints added in 0.0.99 / 0.0.100
+
+| Call | Since | Notes |
+|---|---|---|
+| `GET …/instances/{id}/functions/instance-correlation` | 0.0.99 (#1067, breaking) | `{ "root": node }`; node: `currentState` (deepest active descendant), `ownState`, `subFlowType` `S`/`P`, `terminalOutcome`, links, `children[]`. Batched, parallel, cross-domain; an incomplete subtree has `resolved: false` + `unresolvedReason` `depth-exceeded` \| `hop-failed` \| `instance-missing` \| `hop-unsupported` (partner on an older runtime). Bounds `Workflow:InstanceCorrelation` (`MaxDescentDepth` 20, `FanoutParallelism` 8, `MaxConcurrentHops` 32). Replaces `hierarchy`; MCP tool `get_instance_correlation`; span `Instance.Read/instanceCorrelation`. Add the path to gateway allow-lists |
+| `GET …/instances/{id}/transitions/{key}/metrics`, `…/states/{key}/metrics` | 0.0.99 (#1030) | Every attempt with its tasks (`hook`, `order`, status, duration, error) — `observability.md` §5.1 |
+| `GET /{domain}/functions/{f}/metrics`, `GET /{domain}/workflows/{wf}/functions/{f}/metrics` | 0.0.99 (#1030) | Only for functions with `attributes.executionLog: "E"` |
+| `GET …/instances/{id}/data/history`, `…/data/history/{rowId}` | 0.0.100 (#1079) | **Internal** (Forge Instance Monitor). Same exposure as the data function; hidden from Swagger but **not blocked** — keep it off the public gateway |
+| `POST …/instances/schedule?scheduleId=` | 0.0.100 (#1076) | Scheduler-driven start — `workflow-types.md` §6 |
+| `GET \| HEAD …/instances/{id}/functions/file?file=` | 0.0.100 (#1085) | `x-storage` file read. **`file` is a reserved system function name** — a domain function keyed `file` is shadowed |
+
+## 5.2 Platform notes with no author action
+
+- **gRPC transport removed** (0.0.100, #1083): Orchestration always calls Execution over Dapr HTTP.
+  `ExecutionApi:Transport` / `Kestrel:GrpcPort` are gone; nothing changes in a domain package.
+- **Co-hosting several domains** (`APP_DOMAINS`, 0.0.100, #1088/#1089, **experimental**, not in Helm):
+  one runtime set serves several domains on one database (co-hosted flow schemas are prefixed
+  `<domain>_`; optional `ConnectionStrings:Domains:<domain>`). `APP_DOMAIN` stays the primary. Calls
+  between co-hosted domains run in-process. Treat it as a platform decision, not something to
+  design a domain around.
+- **Runtime topics renamed** (0.0.100, #1095): `vnext.{domain}.{environment}.*`; operators must drain
+  the outbox before the upgrade. Domain-authored topics: `observability.md` §7.
+- **Sandbox baseline** gained `System.ObjectModel` (0.0.99): `foreach` over an `ExpandoObject` no
+  longer fails with CS0012 — no `allowedAssemblies` entry needed for it.
 
 ## 6. Local runtime checklist before testing a domain
 
@@ -231,29 +272,32 @@ Tests must not hard-code `/api/v1` when parsing hrefs; read them from the state 
 5. **No gateway locally ⇒ no 403 on reads:** role headers (`role`, `act_sub`, `sub`) are trusted as
    sent; a 403 you see locally is the runtime's `authorize` decision, not the gateway.
 6. **409 `Instance:100031` is not a bug:** poll `metadata.effectiveStatus`, then retry. If it never
-   leaves Busy and there is no `incident`, see the known issue in §1 → `cancel`/`exit`.
+   leaves Busy and there is no `incident`, see the known issue in §1 → `cancel`/`exit`. On a SubFlow
+   parent (0.0.100) leaf 400/403/409 come back synchronously — assert them on the call itself.
 7. **hrefs:** parse `BasePath`-relative links from responses instead of building paths by hand.
 
 ## Sources
 
-- Runtime `vnext` @ `eca5b466` (0.0.97):
+- Runtime `vnext` @ `f06961ec` (0.0.100):
   `src/BBT.Workflow.Domain/Execution/Transitions/Pipeline/ITransitionAdmissionService.cs`,
   `src/BBT.Workflow.Domain/WorkflowErrorCodes.cs`, `src/BBT.Workflow.Domain/Logging/WorkflowErrors.cs`,
+  `src/BBT.Workflow.Application/SubFlow/Services/SubflowProxyService.cs`,
   `src/BBT.Workflow.HttpApi.Shared/Microsoft/Extensions/DependencyInjection/WorkflowApiBaseServiceCollectionExtensions.cs` (error → HTTP status map),
   `src/BBT.Workflow.Execution.Abstractions/VNextAppIds.cs`,
   `src/BBT.Workflow.Application/Discovery/{ServiceDiscoveryOptions,DaprDiscoveryOptions,DiscoveryCacheOptions}.cs`,
   `src/BBT.Workflow.Infrastructure/Discovery/{DaprDomainDiscoveryProvider,DomainRegistrationService}.cs`,
   `src/BBT.Workflow.Application/Caching/ComponentCacheOptions.cs`,
   `orchestration/BBT.Workflow.Orchestration.HttpApi.Host/Controllers/{Utilities/UtilityController,Definitions/DefinitionController,Instances/InstanceController}.cs`,
-  `docs/runtime/{remote-app-service-architecture,dapr-invocation-transport,discovery-endpoint-cache,publish-completed-hook,component-cache-generation-memo,state-function-cache-and-etag,dapr-component-footprint}.md`,
-  `docs/architecture/subflow-execution.md`, `etc/{orchestration,execution}/dapr/config.yaml`.
-- PRs: #864 (ETag gap decision), #867/#898 (component cache), #871 (BasePath), #884, #964, #975,
-  #976, #982, #993, #997, #1022, #1026.
-- vnext-docs @ `adf9bf4`: `configuration/{service-discovery,caching,url-templates,telemetry}.md`,
-  `how-to/{resource-lock,async-sync}.md`, `concepts/transition-pipeline.md`.
-- vnext-meta 0.0.53: features `discoveryDomainListWarmup` (0.0.94), `discoveryEventDrivenInvalidation`,
-  `publishCompletedHook` (0.0.95), `instanceEffectiveStatus`; deprecations `monitor-api-host`,
-  `definitions-re-initialize-removed`; migration `cd-must-call-publish-completed`; known issue
+  `docs/runtime/{remote-app-service-architecture,dapr-invocation-transport,discovery-endpoint-cache,publish-completed-hook,component-cache-generation-memo,state-function-cache-and-etag,dapr-component-footprint,instance-correlation-tree,transition-and-state-metrics,function-execution-metrics}.md`,
+  `docs/architecture/{subflow-execution,subflow-transition-proxy}.md`, `docs/domain/scheduled-workflow-start.md`, `etc/{orchestration,execution}/dapr/config.yaml`.
+- PRs: #864 (ETag gap decision), #867/#898 (component cache), #871 (BasePath), #964, #975,
+  #976, #982, #997, #1022, #1026, #1030, #1067, #1076, #1079, #1083, #1085, #1088/#1089, #1095.
+- vnext-docs: `configuration/{service-discovery,caching,url-templates,telemetry}.md`,
+  `how-to/{resource-lock,async-sync}.md`, `concepts/transition-pipeline.md`, release notes v0.0.99 / v0.0.100.
+- vnext-meta (master): features `discoveryDomainListWarmup` (0.0.94), `discoveryEventDrivenInvalidation`,
+  `publishCompletedHook` (0.0.95), `instanceEffectiveStatus`, `instanceCorrelationTree` (0.0.99),
+  `instanceDataHistory`, `scheduledWorkflowStart`, `multiDomainHosting` (0.0.100); deprecations `monitor-api-host`,
+  `definitions-re-initialize-removed`, `subflow-chain-reserve-claim`; migration `cd-must-call-publish-completed`; known issue
   `pre-reserved-job-failure-can-strand-busy`.
 - Helm `vnext-helm-charts/charts/vnext/values.yaml` (`global.dapr.*`, `UrlTemplates__BasePath`).
-- Lab: `vnext-example/labs/cross-domain/{README.md,lab.sh,orchestration.overlay.env}` @ `3b5ebab`.
+- Lab: `vnext-example/labs/cross-domain/{README.md,lab.sh,orchestration.overlay.env}`.

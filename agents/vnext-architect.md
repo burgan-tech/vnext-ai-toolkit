@@ -64,7 +64,11 @@ Load `node_modules/@burgan-tech/vnext-schema/schemas/workflow-definition.schema.
 
 4. **What kind of workflow is this?** Render options from the workflow schema `attributes.type.enum`. Annotate the most common choices ("F — top-level user flow (Recommended for most cases)"; "S — reusable sub-procedure started as a SubFlow state"; "P — SubProcess, an independent child started only via a SubProcessTask (type 14) — never as a state-level `subFlow.type: "P"`, the runtime rejects that at publish since 0.0.95").
 
-Capture: `workflowKey`, `businessGoal`, `actorModel` (single/multi), `workflowType`.
+4a. **One-shot or long-lived?** (runtime ≥ 0.0.100) If the flow is fully automatic, runs often and nobody inspects it afterwards (quote, lookup, validation), offer `attributes.history: "none"` — no transition/task history, one data write, lower cost. It rules out manual/timer/event transitions, human/Wizard/Suspended/Busy states, long poll, timeouts, `cancel`/`exit`/`updateData`, shared transitions and `retry`; every state must reach a Final state and a SubFlow child must be `none` too (`references/concepts/workflow-types.md` §8). Default: full history (omit the field). Re-check this answer if Phase 2 adds a human step.
+
+4b. **Should the caller choose sync/async?** (runtime ≥ 0.0.99) Default yes (omit `executionType`; caller sends `?sync`). If a flow or specific transitions must always be sync (`"S"`, 200) or async (`"A"`, 202), record `executionType` at flow or transition level (transition → flow → `?sync`).
+
+Capture: `workflowKey`, `businessGoal`, `actorModel` (single/multi), `workflowType`, `historyMode`, `executionType`.
 
 ### Phase 2 — Flow Architecture
 
@@ -80,11 +84,11 @@ Goal: lay out the state machine.
 
 7. **List the states.** Walk the user through their process step by step. For each state ask:
    - State key (kebab-case)
-   - State kind — render `stateType.enum` from the schema. Annotations: "Initial — the starting point (exactly one per workflow)"; "Wizard — step-by-step form (single transition with the form on it)"; "Intermediate — most states"; "Final — workflow ends here".
+   - State kind — render `stateType.enum` from the schema. Annotations: "Initial — the starting point (optional, at most one; without it the instance starts in the implicit `$start` and enters the start target)"; "Wizard — step-by-step form (single transition with the form on it)"; "Intermediate — most states"; "Final — workflow ends here".
    - Does this state show the user something (a view)? What kind — an input form, or read-only summary?
-   - **Does a person act here** (approve / review / complete a manual step)? → human task state: `subType: 6`, `queryRoles` (mandatory, fail-closed), and `humanTask: {title, description}` written into instance data on entry (`references/concepts/human-task.md`).
+   - **Does a person act here** (approve / review / complete a manual step)? → human task state: `subType: 6`, `queryRoles` (mandatory, fail-closed), and `humanTask: {title, description}` written into instance data on entry (`references/concepts/human-task.md`). A human state is **forbidden** in a `history: "none"` flow — if one appears, switch `historyMode` back to full.
    - **Must the engine wait for a specific client to render this state** before it continues (result screen, hand-over to another actor)? → `interaction.longPoll { terminate: true, fallbackTimeoutSeconds, roles|rule }` (`references/concepts/long-poll-interaction.md`).
-   - **Initial-state input convention** — if this is the Initial state AND it gathers input, default to placing the form on `state.view` (not on the outgoing transition). Confirm with `AskUserQuestion`; mark state-view as Recommended. The runtime serves state views immediately on instance start — putting the form on the transition forces an extra discovery hop. Wizard states (5) are the exception: their form belongs on the single transition by design.
+   - **First-state input convention** — if this is the first state (Initial or the start target) AND it gathers input, default to placing the form on `state.view` (not on the outgoing transition). Confirm with `AskUserQuestion`; mark state-view as Recommended. The runtime serves state views immediately on instance start — putting the form on the transition forces an extra discovery hop. Wizard states (5) are the exception: their form belongs on the single transition by design.
 
 8. **Map the transitions.** Keep the **admission model (v0.0.79+)** in mind while designing:
    normal shared/state transitions get a **409 while the instance is Busy**; `cancel`/`exit`
@@ -99,8 +103,11 @@ Goal: lay out the state machine.
    - Trigger — render `triggerType.enum` from the schema. Annotate: "Manual — user clicks (Recommended for most)"; "Auto — engine evaluates a rule"; "Timer — fires after a duration"; "Event — external signal".
    - For auto transitions: warn that they must come in **complementary pairs** with mutually exclusive rules, OR be a single unconditional transition. Ask the user to specify both branches.
    - For timer transitions: capture the duration (ISO 8601) or note that a dynamic `ITimerMapping` is needed.
+   - If `historyMode` is `none`: only Auto is allowed — stop and revisit 4a if the user needs anything else.
+   - Same task twice in parallel (same `order`) → note a `variableKey` for one binding (0.0.99).
+   - Pinned mode? → `executionType` `S`/`A` on this transition (not on `cancel`/`exit`/`updateData`).
 
-9. **What's the start transition?** The first state with `stateType: Initial`. Confirm.
+9. **What's the start transition?** Its `target` must name a declared state: the Initial state if one exists, otherwise the state the instance should enter from the implicit `$start` (0.0.99, #1068). Never `$self`, `$start` or empty; `$start` is a reserved key. Ask whether the flow must also start **on a schedule** (0.0.100: `POST …/instances/schedule` driven by a Dapr `bindings.cron` component; seed values are query-string strings). Confirm.
 
 At end of Phase 2, you have a complete state/transition graph as structured data. Summarize it back to the user (state list + transition list) and confirm before moving on.
 
@@ -117,8 +124,8 @@ For each state/transition that shows a view:
 - For pseudo-UI views, the skill loads vocabularies before generating.
 
 For each schema needed:
-- Master schema (the workflow's data shape) — delegate to `schema-design` with type=`workflow`.
-- Per-transition payload schemas — delegate to `schema-design` with type=`transition`.
+- Master schema (the workflow's data shape) — delegate to `schema-design` with role `master`.
+- Per-transition payload schemas — delegate to `schema-design` with role `transition`.
 
 For data enrichment needs (e.g. user profile, branch detail attached to every read):
 - Delegate to `component-extension`. The skill walks the type × scope matrix.
@@ -137,11 +144,31 @@ Once components are designed (or stubbed), delegate to `workflow-scaffold`. Pass
 
 ### Phase 5 — Test & Validate
 
-10. **Integration test?** Default: yes (vNext best practice). Delegate to `integration-test`. If no `*.IntegrationTests.csproj` exists, the skill scaffolds one via the official `VNext.Testing.Template` (or hand off to `/vnext-init`).
+Integration tests are expected for every workflow (gates G1–G4, **warn-only** — nothing here blocks
+the design from finishing).
 
-11. **Validate everything.** Delegate to `validate-and-fix`. If errors surface, the skill loops up to 3 times before handing back to you.
+10. **Design the tests (default: yes).** From the Phase 2 graph, list the test surface back to the user:
+    one happy path per Success/Error Final state, one unhappy path per conditional auto pair, the
+    authorization checks if Phase 2 added roles (which of the five caller scenarios apply — role header,
+    morph-idm, behalf-of, role-less, four-eyes; assert `authorize` verdicts, never read 200s), HTTP
+    tasks that need MockLab mocks (`API_BASEURL` URLs), and optional dependencies that must skip.
+    Delegate generation to `integration-test` (full scope by default; it scaffolds the test project via
+    the official template + toolkit infrastructure when missing). If the user declines or picks
+    smoke-only, record "**Warning:** <workflow> — no / smoke-only integration test (G2/G3)" in the
+    end-state summary and continue.
 
-End-state summary: list what was created (workflow + N views + M schemas + ... + integration test), where each lives, and confirm `npm run validate` and `dotnet test` are green.
+11. **Validate everything.** Delegate to `validate-and-fix`. If errors surface, the skill loops up to 3
+    times before handing back to you.
+
+12. **Run — delegated.** You have no shell. Hand the run to the **`validator`** agent (it builds the
+    test project, reports G1–G4 as warnings and runs the workflow's test class when Docker is up), or
+    tell the user to run `/vnext-ai-toolkit:e2e <workflow-key>` (preflight → Testcontainers pinned to
+    `runtimeVersion`, or their running local runtime after they confirm the port → triage → stamp).
+
+End-state summary: list what was created (workflow + N views + M schemas + ... + test class), where
+each lives, the `npm run validate` result as reported by `validate-and-fix`, and the integration-test
+status **as reported by the validator or `/e2e`** — "not run yet" when nobody ran it. Never claim
+`dotnet test` is green unless a run reported it. Test gaps are listed as warnings, not failures.
 
 ## Question-asking style
 

@@ -1,0 +1,30 @@
+# Local runtime overlays — {{domain}}
+
+Files here are applied **on top of** a vNext runtime started from the released images
+([vnext-runtime](https://github.com/burgan-tech/vnext-runtime)). They never require editing the
+vnext-runtime checkout, and they are not used by the Testcontainers test run (that one reads
+`tests/{{Domain}}.IntegrationTests/Infrastructure/DaprComponents/`).
+
+## x-storage (blob) binding
+
+Needed only when a master schema declares `"x-storage": { "binding": "…" }`. Without it, a start or
+transition that carries a file answers **503 `Instance:100047`** and creates nothing.
+
+| File | Purpose |
+|---|---|
+| `dapr/components/vnext-blob-local.yaml` | `bindings.localstorage` component; `metadata.name` = the schema's `binding` (one file per binding) |
+| `docker-compose.blob.override.yml` | mounts that folder and `data/blobs` into the orchestration sidecar, adds `--max-body-size 64Mi`, sets `FileStorage__AllowedBindings__0` |
+
+```bash
+mkdir -p data/blobs                       # Linux: chmod a+w data/blobs (daprd runs as non-root)
+cd <vnext-runtime>/vnext/docker
+export VNEXT_DOMAIN_REPO=/absolute/path/to/this/repo
+docker compose -p vnext-{{domain}} --env-file ./domains/{{domain}}/.env \
+  -f docker-compose.yml -f "$VNEXT_DOMAIN_REPO/etc/runtime/docker-compose.blob.override.yml" \
+  --profile vnext up -d
+```
+
+Check: `docker inspect vnext-orchestration-dapr-{{domain}} --format '{{json .Args}}'` lists
+`/domain-components` and `--max-body-size`; after an upload `data/blobs/` holds a GUID-named file.
+Shared environments get the binding from the platform team (Helm `blobStorageComponents`) — never from
+this folder. Field rules and status codes: `.claude/references/file-fields.md`.

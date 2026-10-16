@@ -1,0 +1,18 @@
+# Testcontainers mode: x-storage binding for the SDK's orchestration sidecar.
+# Copy to tests/{{Domain}}.IntegrationTests/Infrastructure/DaprComponents/orchestration/<name>.yaml —
+# one file per binding your master schemas declare; metadata.name MUST equal "x-storage".binding.
+# Missing binding → start/transition answer 503 Instance:100047 and no instance is created.
+#
+# - rootPath is inside the daprd container (distroless, non-root): /tmp is writable, / is not.
+# - SDK 0.0.6 starts daprd without --max-body-size (default 4Mi): keep test uploads small (≤ ~3 MiB
+#   of base64). Large-file scenarios belong to local mode with the etc/runtime overlay (64Mi).
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: vnext-blob-local
+spec:
+  type: bindings.localstorage
+  version: v1
+  metadata:
+    - name: rootPath
+      value: /tmp/blobs

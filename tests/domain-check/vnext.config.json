@@ -1,0 +1,17 @@
+{
+  "version": "1.0.0",
+  "description": "domain-check smoke-test fixture (scripts/test-domain-check.sh). Not publishable: each component triggers one scanner measurement.",
+  "domain": "dc",
+  "runtimeVersion": "0.0.100",
+  "schemaVersion": "0.0.56",
+  "paths": {
+    "componentsRoot": "dc",
+    "tasks": "Tasks",
+    "views": "Views",
+    "functions": "Functions",
+    "extensions": "Extensions",
+    "workflows": "Workflows",
+    "schemas": "Schemas",
+    "mappings": "Mappings"
+  }
+}

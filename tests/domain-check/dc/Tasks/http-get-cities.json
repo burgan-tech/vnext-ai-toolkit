@@ -1,0 +1,1 @@
+{ "key": "http-get-cities", "version": "1.0.0", "domain": "dc", "flow": "sys-tasks", "flowVersion": "1.0.0", "tags": ["fixture"], "attributes": { "type": "6", "config": { "url": "https://ref-api.example/cities", "method": "GET" } } }
