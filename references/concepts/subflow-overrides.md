@@ -2,7 +2,7 @@
 
 > A parent that consumes a workflow as a SubFlow (`stateType: 4`, `subFlow.type: "S"`) tunes the
 > child for its own context **without editing the child**: roles, query roles, long-poll window,
-> view swaps, timeout. Runtime 0.0.97, schema 0.0.54 (`#/definitions/subFlowOverrides`, schema PR #139).
+> view swaps, timeout. Runtime 0.0.100, schema 0.0.56 (`#/definitions/subFlowOverrides`, schema PR #139).
 
 ## 1. When to use
 
@@ -37,7 +37,11 @@ All objects are `additionalProperties: false`. Keys match `^[a-z0-9-]+$`.
 **add** a long poll to a state that declares none (log 20305).
 
 Grants use lowercase `"grant": "allow"` / `"deny"` (schema enum). vnext-docs
-`how-to/subflow-overrides.md` shows `"ALLOW"` — that fails schema validation.
+`how-to/subflow-overrides.md` shows `"ALLOW"` — that fails schema validation. Override grant lists
+accept `allOf` / `anyOf` combinators (0.0.99) — but a child domain on a runtime older than 0.0.99
+treats a combinator stamp as malformed and falls back to its own grants (log 20307; known issue
+`role-grant-combinators-rollback-floor`). Predefined roles in an override (`$InstanceStarter`,
+`$PreviousUser`, behalf-of twins) resolve against the **child** instance's starter and history.
 
 ## 3. Example (fixture `subflow-override-lab-parent.json`)
 
@@ -99,13 +103,19 @@ first (`human-task.md`).
 
 - **Timeout replace is total.** Overriding `timeout` drops the child's `mapping` and `annotations`
   unless you repeat them.
-- **Long-poll roles on a runtime-started child only matter if the parent mapping forwards role
-  headers** (`long-poll-interaction.md` §6). The fixture mapping forwards `x-roles`, `role`,
-  `user_reference`, `x-device-id`, `x-token-id`.
+- **Long-poll roles on a runtime-started child only matter if the parent mapping forwards the
+  caller's credential** (`long-poll-interaction.md` §6): `role`, `sub`, `act_sub`, `position`,
+  `client_id`. Those are the only headers the runtime's authorization reads — `x-roles`,
+  `user_reference`, `x-device-id`, `x-token-id` (which the fixture mapping also forwards) are plain
+  headers for scripts and `$.context.Headers.*` grants, not role sources.
 - Child with `rule` arm: only `fallbackTimeoutSeconds` is effective; `roles` override is logged and
   dropped.
-- `queryRoles` override participates in the `authorize?queryRoles=true` chain conjunction (each
-  level: stamped override → state → root).
+- **`queryRoles` is decided at the leaf only (0.0.99, PR #1071).** `authorize?queryRoles=true` and
+  the human-task list evaluate the deepest active leaf (stamped override → leaf state → leaf root);
+  the parent's own `queryRoles` no longer restrict while the child runs. This **loosened** access:
+  a parent that relied on its root/state `queryRoles` must now stamp
+  `overrides.states.<childState>.queryRoles` (or the child must declare its own). Migration
+  `query-roles-decided-at-subflow-leaf`.
 
 ## Pitfalls
 
@@ -115,14 +125,17 @@ first (`human-task.md`).
 - Overriding a grandchild from the top parent → no effect (one hop).
 - Changing overrides and re-testing on an **existing** child instance → old stamp still applies;
   start a new instance.
+- Relying on the parent's `queryRoles` to hide a running child → since 0.0.99 it does not; stamp the
+  override on the child state.
 
 ## Sources
 
-- Runtime `vnext` @ `eca5b466` (0.0.97): `src/BBT.Workflow.Domain/Definitions/{SubFlowOverrides,SubFlowStateOverride,SubFlowTransitionOverride,SubFlowLongPollOverride,SubFlowStateInteractionOverride}.cs`,
+- Runtime `vnext` @ `f06961ec` (0.0.100): `src/BBT.Workflow.Domain/Definitions/{SubFlowOverrides,SubFlowStateOverride,SubFlowTransitionOverride,SubFlowLongPollOverride,SubFlowStateInteractionOverride}.cs`,
   `src/BBT.Workflow.Domain/Instances/SubFlowOverrideStamp.cs`, `Instance.ResolveEffectiveLongPoll`,
   `InstanceSubFlowOverrideExtensions.ResolveViewOverride`, `WorkflowValidator.ValidateSubFlowOverrides`,
-  `docs/domain/subflow-overrides.md`, `docs/domain/long-poll-termination.md` §Parent override
-- Schema `vnext-schema` @ `ac42026` (0.0.54): `#/definitions/{subFlowOverrides,subFlowStateOverride,subFlowTransitionOverride,subFlowLongPollOverride,subFlow}`
+  `docs/domain/subflow-overrides.md`, `docs/domain/long-poll-termination.md` §Parent override,
+  `docs/domain/authorize-function.md` (`?queryRoles=true` decided at the leaf), `docs/domain/role-grant-authorization.md` (combinators)
+- Schema `vnext-schema` 0.0.56: `#/definitions/{roleGrant,subFlowOverrides,subFlowStateOverride,subFlowTransitionOverride,subFlowLongPollOverride,subFlow}`
 - vnext-docs @ `adf9bf4`: `how-to/subflow-overrides.md` (grant casing wrong), `components/workflow.md`
 - Fixtures `vnext-example` @ `3b5ebab`: `core/Workflows/subflow-override-lab/{subflow-override-lab-parent,…-parent-roles,…-parent-short,…-child}.json`, `core/Workflows/timeout-lab/timeout-lab-parent.json`
-- PR #1028 (0.0.95), schema PR #139; vnext-meta `subFlowOverrides` 0.0.95, deprecations `subflow-overrides-views-by-view-key`, `subflow-view-overrides-legacy`
+- PRs #1028 (0.0.95), #1071 (0.0.99), schema PR #139; vnext-meta `subFlowOverrides` 0.0.95, deprecations `subflow-overrides-views-by-view-key`, `subflow-view-overrides-legacy`

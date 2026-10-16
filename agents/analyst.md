@@ -36,13 +36,21 @@ questions only for the genuine gaps.
 What you do:
 1. Summarize the request in your own words; flag ambiguities as clear questions.
 2. Separate in-scope from out-of-scope items.
-3. Map the request onto component types: which Workflows, Tasks, Views, Functions,
+3. Capture the runtime-relevant facts the architect needs (ask when the docs are silent):
+   - **Volume and audit:** does the process run often, fully automatically, with nobody
+     inspecting its steps afterwards, and is losing step history / retry acceptable? (A yes
+     makes it a `history: "none"` one-shot candidate, runtime ≥ 0.0.100.)
+   - **Caller expectation:** must the caller always get the result synchronously, or always
+     a 202? (→ `executionType`, runtime ≥ 0.0.99; otherwise the caller's `?sync` decides.)
+   - **Trigger:** client/service call, published event, or a **schedule** (→ scheduled
+     start, runtime ≥ 0.0.100)?
+4. Map the request onto component types: which Workflows, Tasks, Views, Functions,
    Extensions, or Schemas need to be added or changed, and how they relate.
-4. Write acceptance criteria in "Given/When/Then" form (e.g. given a workflow in
+5. Write acceptance criteria in "Given/When/Then" form (e.g. given a workflow in
    state X, when transition T fires, then state Y is reached).
-5. Inspect the existing domain folder and [vnext.config.json](vnext.config.json)
+6. Inspect the existing domain folder and [vnext.config.json](vnext.config.json)
    with Read/Grep/Glob, and list the component files that will be affected.
-6. Break the work into ordered, small, individually-validatable subtasks.
+7. Break the work into ordered, small, individually-validatable subtasks.
 
 What you don't do: you don't write component JSON, and you don't make the detailed
 design decisions (state machines, task config, references) — leave those to the

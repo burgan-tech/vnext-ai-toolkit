@@ -11,10 +11,13 @@ graph TD
   B -->|Reusable sub-procedure| C3[Workflow type S — SubFlow]
   B -->|Parallel background work| C4[Child workflow type P — started only by SubProcessTask 14,<br/>never a state-level subFlow type P]
   B -->|Stateless single page or pure API — no states, nothing persisted| C5[NOT a workflow — propose a Function<br/>page → BFF View, no view → BFF API<br/>confirm with user, then component-function]
-  C1 --> D[Actor model]
-  C2 --> D
-  C3 --> D
-  C4 --> D
+  C1 --> HM{One-shot, fully automatic,<br/>high volume, no audit/retry need?}
+  C2 --> HM
+  C3 --> HM
+  C4 --> HM
+  HM -->|Yes| HM1[attributes.history: none — 0.0.100<br/>auto transitions only, no human state,<br/>no timeout/cancel/exit/updateData/retry —<br/>workflow-types.md §8]
+  HM -->|No — default| D[Actor model]
+  HM1 --> E
   D --> D1{Single actor or multi-actor?}
   D1 -->|Single| E
   D1 -->|Multi| D2[queryRoles + authorize function — gateway decides<br/>$InstanceStarter / $PreviousUser — roles-and-authorization.md]
@@ -48,15 +51,17 @@ graph TD
   H1 -->|Conditional auto| I1[triggerType 1 +<br/>IConditionMapping pair]
   H1 -->|Time-based| I2[triggerType 2 +<br/>ITimerMapping or static duration]
   H1 -->|Event-driven| I3[triggerType 3 — verify schema]
+  H1 -->|Must the caller not pick sync/async?| I4[executionType S / A on flow or transition — 0.0.99<br/>transition → flow → ?sync]
   H1 -->|None| J
   I1 --> J[External integrations]
   I2 --> J
   I3 --> J
+  I4 --> J
   J --> J1{Calls outside the workflow?}
   J1 -->|REST| K1[HttpTask + IMapping]
   J1 -->|SOAP| K2[SoapTask + IMapping]
   J1 -->|Dapr service| K3[DaprService task]
-  J1 -->|Message queue| K4[DaprPubSub task]
+  J1 -->|Message queue| K4[DaprPubSub task —<br/>Kafka: topic vnext.domain.env.event]
   J1 -->|Notification| K5[NotificationTask + INotificationMapping]
   J1 -->|Internal script| K6[ScriptTask + IMapping]
   J1 -->|None| L
@@ -97,6 +102,8 @@ graph TD
 
 Ask: process name, business goal, who initiates, who consumes. Output:
 - Workflow `type` (F/S/P/C) — **read enum from `workflow.json` schema**
+- **History mode** — `history: "none"` only for one-shot, fully automatic, high-volume flows with no human step, no retry need and no audit requirement on the steps (runtime ≥ 0.0.100; publish rejects anything else — `workflow-types.md` §8). Default: omit (full).
+- **Trigger** — client/service start, event (`instances/events?action=start`) or schedule (`instances/schedule`, 0.0.100)
 - Domain (from `vnext.config.json`)
 - Working title for the workflow key
 
@@ -107,7 +114,9 @@ Determine:
 - Human approval → a state with `subType: 6`, `queryRoles`, a `humanTask` data block and (optionally) `interaction.longPoll` (`human-task.md`)
 - Complexity → SubFlow spin-off (state-level `subFlow.type: "S"`) or SubProcessTask (14) on a transition — never state-level `"P"` (`workflow-types.md` §5, `schema-runtime-gaps.md` D5)
 - Child customisation → `subFlow.overrides` (`subflow-overrides.md`); collections → FanOutTask 21 (`fan-out.md`); concurrent writers → `updateData` (`transition-pipeline.md`); actor hand-over → `interaction.longPoll` (`long-poll-interaction.md`)
-- State list (kind + view need) — `stateType` enum from schema
+- State list (kind + view need) — `stateType` enum from schema; Initial optional (≤ 1, 0.0.99) — `startTransition.target` must be a declared state; `$start` reserved
+- Sync/async policy → `executionType` `S`/`A` on flow or transition, else the caller's `?sync` (0.0.99)
+- If `history: "none"`: re-check — any manual/timer/event transition or human state voids it
 - Transition map — `triggerType` enum from schema
 - Auto-pair correctness check
 

@@ -84,7 +84,9 @@
     "references/concepts/incidents-and-retry.md",
     "references/concepts/runtime-operations.md",
     "references/concepts/observability.md",
-    "references/concepts/schema-runtime-gaps.md"
+    "references/concepts/schema-runtime-gaps.md",
+    "references/concepts/field-protection.md",
+    "references/concepts/file-fields.md"
   ],
   "vnext": {
     "knownRuntimeVersion": "0.0.100",
@@ -128,6 +130,8 @@
       "references/concepts/observability.md",
       "references/concepts/runtime-operations.md",
       "references/concepts/schema-runtime-gaps.md",
+      "references/concepts/field-protection.md",
+      "references/concepts/file-fields.md",
       "references/runtime-feature-matrix.md"
     ]
   }

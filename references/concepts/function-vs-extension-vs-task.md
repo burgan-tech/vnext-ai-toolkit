@@ -33,9 +33,11 @@ Three vNext components all run code, but their roles are distinct. Picking the w
 - `verbs` — accepted HTTP verbs (absent = all; mismatch → 405 + `Allow`)
 - `inputSchema` — request body validated before tasks run (failure → 400); `outputSchema` — declarative only
 - `inputView` / `outputView` — the views a client renders to collect input / present output; all four slots accept a single reference or rule-based entries (first match wins, rule-less tail = fallback)
-- `rawResponse`, `cache`, `roles` (DENY overrides ALLOW)
+- `rawResponse`, `cache` (its own `keyExpression` / `key` — unrelated to the CacheAside task), `roles` (DENY overrides ALLOW; `allOf`/`anyOf` since 0.0.99)
+- `executionLog: "E"` (0.0.99) — opt-in journal behind `GET /{domain}/functions/{f}/metrics` (count, p50/p95, failure rate); absent/`"D"` records nothing
+- Key `file` is a **reserved system function name** since 0.0.100 (like `state`, `data`, `tasks`, …) — a domain function with that key is shadowed
 - Discovery: `GET .../functions/{fn}/info` (+ `view`/`schema?target=input|output`) answers "may I run this, with which verb, which view/schema applies" — 403 for unauthorized callers; `GET …/instances/{id}/functions/catalog` lists the role-filtered functions of an instance's workflow (`{name, version, scope, href}`); no ETag on any of them.
-- Multi-task: results land in `TaskResponse[ToVariableName(key)]` (isolated copies since 0.0.95); keys that normalise to the same variable (`user-info` / `user_info`) are **rejected at publish** — § 9.
+- Multi-task: results land in `TaskResponse[variableKey ?? ToVariableName(key)]` (isolated copies since 0.0.95; `variableKey` since 0.0.99); effective slots must be **unique across all `onExecutionTasks`** — collisions (`user-info` / `user_info`, or the same task twice without a `variableKey`) are **rejected at publish** — § 9.
 
 **Use cases.**
 - LOV/lookup endpoints called by views (`x-lov`, `x-lookup`)
@@ -82,7 +84,7 @@ enrichment of the whole instance.
 
 **Role.** A discrete action invoked inside a workflow — typically inside a transition's `onExecutionTasks[]`, a state's `onEntries[]` / `onExits[]`, or a function's task list.
 
-**Most-used types** (`attributes.type` is a numeric **string**; the schema enum is `"1"`–`"21"`, the runtime knows 1–23 — see `schema-runtime-gaps.md` D1):
+**Most-used types** (`attributes.type` is a numeric **string**; the schema enum is `"1"`–`"22"` since 0.0.55, the runtime knows 1–23 — see `schema-runtime-gaps.md` D1):
 
 | Value | Type | Purpose |
 |-------|------|---------|
@@ -92,7 +94,7 @@ enrichment of the whole instance.
 | `12` | DirectTrigger | Fire a transition on another instance (cross-instance / cross-domain) |
 | `14` | SubProcessTask | Start a fire-and-forget child (`P`) and create the correlation — the **only** way to start a SubProcess (state-level `subFlow.type: "P"` is rejected at publish since 0.0.95) |
 | `15` | GetInstancesTask | List/query instances (filters, paging) |
-| `18` | CacheAsideTask | Read-through cache around an inner task |
+| `18` | CacheAsideTask | Read-through cache; the source runs as a real task and `sourceMapping` shapes what is cached (0.0.99 — no `keyExpression`; `key` is a string or script) |
 | `21` | FanOutTask | Run one inner task once per item of a data-driven collection, in parallel, with a join policy (`all` / `allSettled` / `quorum` / `firstSuccess`) — `IFanOutMapping` |
 
 Full catalog including Dapr types (1–4), Condition/Timer (8/9), StartTrigger (11), GetInstanceData (13), Soap (16), StateStore (17), GetInstance (19), DaprConversation (20), ExternalHttp (22, deprecated) and Python (23), plus which types run Local vs Remote: **`task-types.md`**. A **human approval step is not a task** — it is a state with `subType: 6` + `queryRoles` served by the built-in `human-task` function: **`human-task.md`**.
@@ -115,12 +117,12 @@ Full catalog including Dapr types (1–4), Condition/Timer (8/9), StartTrigger (
 - **Functions can be composed of Tasks.** A multi-task Function pipelines several Tasks and aggregates via `IOutputHandler`. This is how complex aggregations are built without bloating a workflow's transition logic.
 - **"One call per item of a list?"** That is a **FanOutTask (21)** wrapping the per-item task — not a loop of transitions, not N tasks in `onExecutionTasks`. The join policy decides success; branch on the `{resultKey}Summary` counters with auto transitions. Nested fan-out is rejected at runtime.
 - **"Start a child that the parent does not wait for?"** A **SubProcessTask (14)** on a transition. A state-level `subFlow` is always `type: "S"` (blocking SubFlow); `"P"` there is a publish-time error since 0.0.95.
-- **Function catalog and key collisions.** Clients find a workflow's functions through `…/functions/catalog` (role-filtered); a multi-task function's task keys must stay distinct after `ToVariableName` normalisation or publish fails — `function-mapping-pattern.md` § 9.
+- **Function catalog and key collisions.** Clients find a workflow's functions through `…/functions/catalog` (role-filtered); a multi-task function's effective slots (`variableKey`, else `ToVariableName(task.key)`) must be unique across all `onExecutionTasks` or publish fails — `function-mapping-pattern.md` § 9.
 
 ## Sources
 
 - Canonical schemas: `function-definition.schema.json`, `extension-definition.schema.json`, `task-definition.schema.json` — resolve as described in `component-schemas.md`
-- Runtime: `src/BBT.Workflow.Domain/Definitions/Tasks/TaskEnums.cs` (v0.0.97), `WorkflowValidator.ValidateStateSubFlowType`, `FunctionComponentValidator.ValidateTaskKeysDistinct`
+- Runtime: `src/BBT.Workflow.Domain/Definitions/Tasks/TaskEnums.cs` (v0.0.100), `WorkflowValidator.ValidateStateSubFlowType`, `FunctionComponentValidator.ValidateTaskKeysDistinct`
 - Related references: `task-types.md`, `fan-out.md`, `human-task.md`, `schema-runtime-gaps.md`
 - Docs: `https://burgan-tech.github.io/vnext-docs/docs/components/{functions/index|extension|tasks/index}`
 - Examples: `vnext-example/core/Functions/`, `core/Extensions/`, `core/Tasks/`

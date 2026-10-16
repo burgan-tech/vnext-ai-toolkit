@@ -20,9 +20,15 @@ Real file names (one per component type — note the `-definition.schema.json` s
 | `sys-extensions` | `schemas/extension-definition.schema.json` |
 | `sys-mappings` | `schemas/mapping-definition.schema.json` |
 | shared header / root | `schemas/core-header.schema.json`, `schemas/core-schema.schema.json` |
-| `x-*` vocabularies | `vocabularies/view-vocab.json`, `data-vocab.json`, `roles-vocab.json` |
+| `x-*` vocabularies (0.0.56) | `vocabularies/view-vocab.json` (keyword definitions), `data-base-vocab.json` (base keywords, every role), `view-hints-vocab.json` (view hints mixin), `record-vocab.json` (`master` role), `input-vocab.json` (`transition` / `function` roles), `component-vocab.json` (`component` role), `data-vocab.json` (`x-context-source` / `x-context-target`), `roles-vocab.json` (role grants) |
 
 The reusable pieces of the workflow and function schemas sit under **`definitions`** (draft-07 style `#/definitions/...`), not `$defs`.
+
+### Schema components have a role (0.0.56)
+
+A schema component's `attributes.type` is a **role** — `master`, `transition`, `function`, `component`, or absent/`""` — and selects the role vocabulary `attributes.schema` is validated against (`master` → `record-vocab.json`, `transition`/`function` → `input-vocab.json`, `component` → `component-vocab.json`). The legacy free-text values are refused by the 0.0.56 package (the runtime still publishes them with a warning). Each role vocabulary exposes `#/definitions/allowedKeywords` — the list of `x-*` keywords that role accepts, as data; skills read it instead of hardcoding a list. Role × keyword matrix, legacy mapping and the split-per-role rule: `schema-vocabularies.md`.
+
+`schema-definition.schema.json` `$ref`s the vocabularies by `$id`, so a validator must call the package's `addVocabularies(ajv)` before compiling it. A workspace `validate.js` that does not prints `Could not compile validator for schema` and silently skips every `sys-schemas` component — see `schema-vocabularies.md` §2.
 
 ## Resolution order
 
@@ -42,7 +48,7 @@ https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/sche
 https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/vocabularies/{file}.json
 ```
 
-where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.54` for runtime 0.0.97) and `{type}` is one of `workflow`, `task`, `view`, `schema`, `function`, `extension`, `mapping`.
+where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.56` for runtime 0.0.100) and `{type}` is one of `workflow`, `task`, `view`, `schema`, `function`, `extension`, `mapping`.
 
 **3. If the tag 404s** → retry against `master` and warn "schemaVersion tag missing, using master; output may not match the validator".
 
@@ -52,7 +58,7 @@ where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.54` for r
 
 ```
 1. Read repo-root vnext.config.json:
-   - Capture schemaVersion (e.g. "0.0.54"), domain, paths.*
+   - Capture schemaVersion (e.g. "0.0.56"), domain, paths.*
 
 2. Load the schema by the resolution order above (node_modules first).
 
@@ -73,9 +79,9 @@ where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.54` for r
 
 The schema is the **authoring** contract; the runtime is the **execution** contract, released separately. Known differences are catalogued in **`schema-runtime-gaps.md`** — read it whenever validate and the runtime disagree. Headline items:
 
-- Schema **0.0.54 validates task types `"1"`–`"21"` only**; the runtime (v0.0.97) also knows `22` (ExternalHttp, deprecated — use `6`) and `23` (Python). A definition using them fails `npm run validate` but publishes fine.
-- Some shapes the schema accepts are rejected at `publish` (state-level `subFlow.type: "P"`, colliding multi-task keys), and some schema-required fields are ignored at runtime (`timeout.timer.reset`).
-- `x-filterOperators` must be authored with the runtime's schema-side spellings (`gte`, `lte`, `neq`, `contains`…), not the wire names the vocabulary enum lists.
+- Schema **0.0.56 validates task types `"1"`–`"22"`**; the runtime (v0.0.100) also knows `23` (Python, experimental), which fails `npm run validate` but publishes. `22` (ExternalHttp) validates but is deprecated — use `6`.
+- Some shapes the schema accepts are rejected at `publish` (state-level `subFlow.type: "P"`, a multi-task slot collision without `variableKey`, `history: "none"` flows that cannot reach a Finish state), and some schema-required fields are ignored at runtime (`timeout.timer.reset`).
+- The runtime publishes a legacy schema `attributes.type` with a warning while the 0.0.56 package refuses it, and the runtime does not enforce the role vocabularies (apart from `x-indexed` and runtime `x-computed`, a keyword outside its role is simply not applied) — `npm run validate` is the only gate for roles.
 
 ## Why this matters
 
@@ -122,6 +128,6 @@ The interesting part is `properties.attributes` — that's where the type-specif
 
 ## Sources
 
-- Package: `@burgan-tech/vnext-schema` (npm); repo `https://github.com/burgan-tech/vnext-schema` @ `ac42026` (v0.0.54) — `schemas/*.json`, `vocabularies/*.json`
+- Package: `@burgan-tech/vnext-schema` (npm); repo `https://github.com/burgan-tech/vnext-schema` @ tag `v0.0.56` — `schemas/*.json`, `vocabularies/*.json`, `index.js` (`addVocabularies`), `README.md` (Role Vocabularies)
 - Workspace pin: `package.json` → `@burgan-tech/vnext-schema`, `vnext.config.json` → `schemaVersion` (e.g. `vnext-example` @ `3b5ebab`)
 - Gaps: `references/concepts/schema-runtime-gaps.md`; version matrix: `references/runtime-feature-matrix.md`

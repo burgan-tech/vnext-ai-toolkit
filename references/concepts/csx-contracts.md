@@ -9,6 +9,8 @@
 3. **Repeated logic goes to `sys-mappings` first.** If the same `.csx` structure appears in more than one place, extracting a `sys-mappings` helper is the *primary* approach, not an afterthought. See `mappings-and-scripts.md`.
 4. **`context.Related` is for correlation data only** (parent / subflow / subprocess of *this* instance, v0.0.79+). Any other cross-instance data must be fetched with a Task.
 5. **Return delta-only output from mappings** (v0.0.79+ immediate-persistence write model): `ScriptResponse.Data` should contain **only the fields you changed**, never a full echo of the instance data — a full echo overwrites concurrent writers' fresher values with stale ones (this bites hardest under parallel branches and `updateData` storms).
+6. **`InputHandler` is not a gate** (#1087). Its return value is audit-only; the task runs whatever it returns. Validate *before* the task, or `throw`. See `IMapping` below.
+7. **Encrypted fields arrive as tokens** (0.0.99+). Open them with `await context.Instance.DecryptAsync(path, context.CancellationToken)`, never by copying the token. See § Encrypted fields.
 
 ## NuGet packages
 
@@ -78,8 +80,8 @@ The real, complete surface (from `BBT.Workflow.Domain/Scripting/Models.cs`). The
 | `QueryParameters` | `dynamic?` | URL query string parameters (GET-mode function calls arrive here). |
 | `EventPayload` | `dynamic?` | Raw inbound pub/sub / binding payload. Non-null only inside `IEventMapping`. |
 | `RawBody` | `string?` | The original request body as a literal string (not camelCased, not re-serialized). For JWS/mTLS signature verification. |
-| `Instance` | `Instance?` | The workflow instance snapshot: `Instance.Data` (dynamic), `Instance.Key`, current state, etc. |
-| `Incident` | `ScriptIncidentInfo?` | Error-boundary awareness: `HasActiveIncident`, `ActiveIncident`, `TotalIncidentCount`. |
+| `Instance` | `Instance?` | The workflow instance snapshot: `Instance.Data` (dynamic, **as stored** — `x-encryption` `encrypt` fields hold their token since 0.0.99), `Instance.Key`, current state, `DecryptAsync(path, ct)` (see § Encrypted fields). |
+| `Incident` | `ScriptIncidentInfo?` | Error-boundary awareness: `HasActiveIncident`, `ActiveIncident`, `TotalIncidentCount`, `IncidentsLoaded`. On **0.0.93–0.0.98** `ActiveIncident` was `null` and `TotalIncidentCount` `0` even with an active incident (known issue `script-context-incident-not-loaded`); populated since **0.0.99** — don't branch on `ActiveIncident` in error-boundary mappings on older runtimes. |
 | `Related` | `IRelatedInstanceAccessor` | Correlated-instance reads (v0.0.79+, see below). Never null. |
 | `Workflow` | `Definitions.Workflow?` | The workflow definition (states, transitions, tasks). |
 | `Runtime` | `IRuntimeInfoProvider` | Environment/runtime info. |
@@ -90,6 +92,7 @@ The real, complete surface (from `BBT.Workflow.Domain/Scripting/Models.cs`). The
 | `OutputResponse` | `Dictionary<string, dynamic?>` | Per-task **OutputHandler results** (what each task's `IMapping.OutputHandler` returned), keyed by task key. Not merged into `Body`. |
 | `MetaData` | `Dictionary<string, dynamic>` | Execution metadata. |
 | `Mutations` | `InstanceMutations` | Controlled instance mutations (e.g. `Stage`), applied atomically after the script. |
+| `CancellationToken` | `CancellationToken` | **0.0.100+** (#1090). The request / transition-job / event-delivery token. Pass it to your own I/O (a plugin DB driver, `DecryptAsync`) so an abandoned operation stops the call. `CancellationToken.None` when the context was built without one. A property, not a handler parameter — interface signatures are unchanged. |
 
 ### `TaskResponse` vs `OutputResponse` vs `Body` — the exact semantics
 
@@ -232,6 +235,37 @@ Task<Dictionary<string,string>> GetSecretsAsync(string storeName, string secretS
 // sync wrappers: GetSecret / GetSecrets
 ```
 
+### File fields — `GetFileAsync` (0.0.100+)
+
+Reads the bytes behind an `x-storage` file handle (the master schema's file field; schema side in `file-fields.md`). The handle in instance data carries `owner.domain`, `owner.flow`, `owner.instance` and `file` — pass those, not the instance you happen to be in:
+
+```csharp
+protected Task<ScriptFile> GetFileAsync(string domain, string flow, string instance, string file)   // no CancellationToken parameter
+
+public sealed record ScriptFile(byte[] Content, string? Name, string? MimeType, long Size, string ETag);  // ETag = SHA-256 hex
+```
+
+- **No authorization check.** Neither `queryRoles` nor `x-roles` is evaluated — it is a service-to-service read. **Your mapping must enforce who may get the bytes** before returning or forwarding them.
+- **Cross-domain.** Works for a handle owned by another domain (internal route, network isolation only). The handle must be in that instance's **latest** data.
+- Throws `InvalidOperationException` when no file reader is available or the read fails; blank arguments throw `ArgumentException`.
+- **Bytes stay in memory and land wherever you put them.** Copying `Content` into a task request stores it in that task record (known issue `file-in-task-record`). Pass the handle through mappings; fetch bytes only in the mapping of the task that needs them, and don't echo them into responses.
+
+## Encrypted fields — `context.Instance.DecryptAsync` (0.0.99+)
+
+A field marked `x-encryption: { "type": "encrypt" }` is stored as a token (`ENCRYPTED:AES256:…`). Scripts see the **token**, not the plaintext: in `context.Instance.Data`, `LatestData.Data` / `FindData(version).Data`, and in a `context.Body` the runtime fills with instance data (extensions, view rules, output and timeout mappings). Schema side and roles: `field-protection.md`.
+
+```csharp
+// Instance.DecryptAsync(string path, CancellationToken cancellationToken = default) → Task<string?>
+var iban = await context.Instance.DecryptAsync("customer.iban", context.CancellationToken);   // dot path
+if (iban is null) { /* not an encrypt token at that path, unknown path, or unopenable */ }
+```
+
+- **Own instance only.** It opens a token at `path` in **this** instance's latest data. A token that reached the script any other way (request body, task response, another instance, `context.Related`) returns `null`. Passing a token instead of a path returns `null`.
+- **Never copy a token into another field** — the write is refused (`EncryptedValueReservedException`).
+- **The plaintext is yours to protect.** Writing it into a non-encrypted field, a task request, a log line or a response stores or exposes it in clear. Transition bodies, task records and some caches already hold plaintext copies (known issue `field-encryption-plaintext-copies`) — don't add more.
+- **DynamicExpresso rules, dynamic role grants and human-task text see the token.** Move a condition on an encrypt field to a C# `IConditionMapping` that calls `DecryptAsync`.
+- Unchanged: a SubFlow `OutputHandler`'s `Body` (child data, opened by the child) and a transition task's own request `Body` are plaintext.
+
 ## `context.Related` — correlated instance access (v0.0.79+)
 
 Mapping scripts can read a **related** instance's data directly: one hop up (the parent that started this instance as a SubFlow/SubProcess) or one hop down (this instance's own correlations). Lazy + memoized per context; nothing is pre-fetched.
@@ -285,6 +319,7 @@ public class MyTaskMapping : ScriptBase, IMapping
     {
         // Cast `task` to the concrete type (HttpTask, NotificationTask, …) and mutate its config.
         // Read data via GetPropertyValue(context.Instance.Data, ...), context.Headers, context.QueryParameters.
+        // The return value is AUDIT-ONLY — it never stops the task. To prevent the call: throw.
         return Task.FromResult(new ScriptResponse { /* audit data */ });
     }
 
@@ -296,6 +331,11 @@ public class MyTaskMapping : ScriptBase, IMapping
     }
 }
 ```
+
+**`InputHandler` cannot reject the task** (#1087, documented behaviour on every version). Whatever it returns — `Data["error"]`, a `StatusCode`, an empty response — goes only into the task's audit record, and the task is then invoked as configured. For a write task (StartTrigger, DirectTrigger, SubProcess, HTTP POST, publish) the write happens even when the handler found the input invalid. Instead:
+
+- **Validate before the task** — a transition `rule`, an auto transition to an error state, or a preceding validation step decides whether the task runs at all (preferred).
+- **Or `throw`** from `InputHandler` as a last resort: the task fails as a task execution error, `OutputHandler` does not run, and `AcceptedStatusCodes` do not apply (it is not a business response) — the error boundary handles it.
 
 ### `IOutputHandler` — multi-task Function aggregation
 
@@ -413,6 +453,27 @@ Semantics you must not get wrong:
 - **Per item = pure.** It runs N times concurrently on discarded branch contexts. No instance-data writes, no shared mutable state across items.
 - **`OutputHandler` is the single write point** of the whole batch — its `Data` is merged once. `result.Items` is a typed list (plain LINQ), not a dynamic — the `List*` helpers are for `item.Value` / `Data`, not for `Items`.
 
+### `ICacheKeyMapping` — CacheAside key script (0.0.99+)
+
+A CacheAside task's (type 18) `config.key` is `string | ScriptCode`. A string is used verbatim. A `ScriptCode` with `location: "dynamicExpresso"` is a Dynamic Expresso expression; any other `location` compiles a Roslyn class implementing:
+
+```csharp
+public interface ICacheKeyMapping            // namespace BBT.Workflow.Scripting
+{
+    Task<string?> Handler(ScriptContext context);   // null / whitespace → keep the key resolved earlier
+}
+
+public class CustomerProfileKey : ScriptBase, ICacheKeyMapping
+{
+    public Task<string?> Handler(ScriptContext context) =>
+        Task.FromResult<string?>($"customer:{GetPropertyValue<string>(context.Instance.Data, "customerId", "")}:profile");
+}
+```
+
+- `encoding` accepts `NAT`, `B64` and `REF`; **the default is `B64`**, so a hand-written plain-text expression needs `"encoding": "NAT"` or the task fails decoding it.
+- A non-blank result **overrides** a key set earlier with `SetCacheKey` in the task mapping's `InputHandler`.
+- `keyExpression` was removed in 0.0.99 — move it to `key: { "location": "dynamicExpresso", "encoding": "NAT", "code": "…" }`. (Function-level `cache.keyExpression` is a different feature and unchanged.) Task config: `task-types.md`.
+
 ### `INotificationMapping` — per-channel notification payload
 
 > The method is named **`ChannelHandler`**, not `Handler`. The `state` channel never reaches this interface — the platform handles it; implement `IStateNotificationMapping` (in the same file) to enrich it.
@@ -500,7 +561,20 @@ if (task is HttpTask httpTask)
 }
 ```
 
-Common concrete types: `HttpTask`, `ScriptTask`, `NotificationTask`, `SoapTask`, `DaprServiceTask`, `DaprPubSubTask`, `GetInstancesTask`, `GetInstanceTask`, `StateStoreTask`, `CacheAsideTask` (`SetCacheKey`), `DaprConversationTask`, `FanOutTask` (its per-item binding is `IFanOutMapping`, not `IMapping`). Catalog: `task-types.md`.
+Common concrete types: `HttpTask`, `ScriptTask`, `NotificationTask`, `SoapTask`, `DaprServiceTask`, `DaprPubSubTask`, `GetInstancesTask`, `GetInstanceTask`, `StateStoreTask`, `CacheAsideTask` (`SetCacheKey`; a `key` script overrides it — see `ICacheKeyMapping`), `DaprConversationTask`, `FanOutTask` (its per-item binding is `IFanOutMapping`, not `IMapping`). Catalog: `task-types.md`.
+
+### Outbound headers the runtime fills for you (0.0.99+)
+
+When an `InputHandler` sets headers (`SetHeaders`) on an outbound task, know which ones the runtime fills **only if your mapping leaves them absent or empty** — a non-empty mapping value always wins:
+
+| Header | Filled with | Applies to |
+|--------|-------------|------------|
+| `sub`, `act_sub`, `position`, `client_id`, `role` | The calling request's own credential headers (`sub`/`act_sub` fall back to trace baggage). `role` only as the caller **sent** it — a role resolved by morph-idm is never forwarded. | HTTP, SOAP, DaprService, DaprHttpEndpoint, GetInstance/GetInstances/GetInstanceData, StartTrigger, SubProcess, DirectTrigger — same-domain and cross-domain |
+| `X-Request-Id` | vNext's own request id (the originating request's `X-Request-Id`). | Every HTTP-shaped task type, StartTrigger and SubProcess |
+
+- **The task runs as its caller by default.** To call as a service identity (e.g. a role on an `x-roles` / `x-encryption` allow list), set that header to a non-empty value in the mapping. An **empty** value no longer suppresses the header — it is filled from the request.
+- **Need a fresh UUID per call** (e.g. OHVPS/BKM APIs)? Set it yourself: `["X-Request-Id"] = Guid.NewGuid().ToString()`. On **0.0.80–0.0.98** a mapping-set `X-Request-Id` was silently dropped (known issue `task-binding-x-request-id-dropped`).
+- `X-Workflow-Instance-Id` and `X-Correlation-Id` are always set by the runtime; a mapping value is overwritten.
 
 ## Function envelope: `rawResponse`
 
@@ -560,6 +634,28 @@ Default **`false`** — flipping it changes affected instances' content hash onc
 
 Before **v0.0.87** the compiler replaced the script's using list with the platform list, so an author's `using System.Text;` was silently discarded and `StringBuilder` failed at **runtime** with `CS0246` — despite the import being right there. Since 0.0.87 author usings are **merged** (aliases and `using static` included). Two rules still hold on every version: the default usings are `System`, `System.Collections.Generic`, `System.Linq`, `System.Threading.Tasks`, `System.Text.Json`; anything from an assembly outside the default reference set needs `scripts.allowedAssemblies` regardless of the `using`. A `CS0246` for a namespace you clearly imported on a workspace pinned below 0.0.87 is this bug, not your code.
 
+## Runtime notes that bite scripts (v0.0.98 – v0.0.100)
+
+### `allowedAssemblies` must resolve at publish (0.0.99, #1069)
+
+Every simple name under `scripts.allowedAssemblies` (flow level or any script slot of a workflow, task, function or extension) must resolve in the publishing runtime — a framework assembly or a DLL in the environment's plugin directory. Otherwise **publish returns 400 naming the field**, e.g. `sys-flows.states[0].onEntries[1].mapping.scripts.allowedAssemblies[0]`. This holds even where the sandbox is disabled (where the grant used to be harmless). Fix: drop the unused/misspelled name, use the simple name without `.dll`, or ask the platform team / environment owner to mount the assembly, then publish again. The check does not compile: an assembly the script needs but never declares still fails only at run time.
+
+### `foreach` over an `ExpandoObject` under the sandbox (fixed 0.0.99)
+
+`System.ObjectModel` is in the sandbox baseline since 0.0.99. On **0.0.26–0.0.98**, where the environment enables the sandbox, a mapping that `foreach`-es over an `ExpandoObject` failed to compile with `CS0012` (known issue `sandbox-baseline-missing-system-objectmodel`). Workaround on older runtimes: grant `"System.ObjectModel"` in `scripts.allowedAssemblies`, or read the expando through `as IDictionary<string, object>` instead of enumerating the expando itself.
+
+### Script plugins (0.0.100, #1090)
+
+A plugin is a DLL (e.g. a database driver) the **platform team** mounts in the environment's plugin directory (`Scripting:Sandbox:PluginDirectory`); a mapping uses it by listing its name in `scripts.allowedAssemblies`. Product teams do not control this directory or runtime config — ask the platform team / environment owner.
+
+- **Loaded once per process**, shared by every script and helper set: one copy, one static state, one connection pool.
+- **Usable from a helper-less mapping.** Before 0.0.100 only `sys-mappings` helper sets loaded plugins; a mapping that used a plugin type directly compiled, then failed at run time with `FileNotFoundException`. On older runtimes, wrap plugin calls in a `sys-mappings` helper.
+- **Added DLL:** picked up without a restart (re-read on a miss, at most every `PluginRescanIntervalSeconds`, default 30). A component rejected at publish before the DLL arrived must be published again. **Replacing or removing** a loaded DLL needs a runtime restart.
+- **Pass `context.CancellationToken`** to driver calls so a cancelled request/job stops the query.
+- The banned-namespace analyzer checks your script, not the plugin: a mounted DB driver gives network access to every mapping that lists it. Working example: vnext-example `core/Functions/script-plugin-lab/` + `plugins/ScriptPluginLab.Sql`.
+
+If a script fails in a way these notes don't explain and the runtime is at fault, draft an issue with `/vnext-ai-toolkit:report-issue`.
+
 ## Class naming
 
 - File name: `kebab-case.csx`
@@ -569,8 +665,8 @@ Before **v0.0.87** the compiler replaced the script's using list with the platfo
 
 ## Sources
 
-- Runtime source of truth: `BBT.Workflow.Domain/Scripting/Models.cs` (ScriptContext), `Scripting/Contracts/*.cs` (interfaces, incl. `IFanOutMapping.cs`), `BBT.Workflow.Modules.Scripting/.../ScriptBase.cs` (helpers), `Scripting/Related/*.cs` (Related API), `Modules.Scripting/.../Evaluators/CSharpEvaluator.cs` (using-merge), `Modules.Scripting/.../Functions/SecretCacheOptions.cs`, `Application/BackgroundJobs/Options/WorkflowExecutionOptions.cs` (`PreserveNumericPrecision`)
-- Release notes: vnext-docs `blog/2026-08-20-v0-0-81-84.md` (#888), `blog/2026-08-24-v0-0-85.md` (#899, #905, #907), `blog/2026-08-31-v0-0-87.md` (#920); vnext-meta known issue `instance-data-numeric-precision-loss`, feature `scriptSecretCache` (0.0.80)
+- Runtime source of truth: `BBT.Workflow.Domain/Scripting/Models.cs` (ScriptContext, `CancellationToken`), `Scripting/Contracts/*.cs` (interfaces, incl. `IFanOutMapping.cs`, `ICacheKeyMapping.cs`, `IMapping.cs`), `Domain/Instances/Instance.cs` (`DecryptAsync`), `BBT.Workflow.Modules.Scripting/.../ScriptBase.cs` + `ScriptFile.cs` (helpers, `GetFileAsync`), `Scripting/Related/*.cs` (Related API), `Modules.Scripting/.../Evaluators/CSharpEvaluator.cs` (using-merge), `Modules.Scripting/.../Functions/SecretCacheOptions.cs`, `Application/BackgroundJobs/Options/WorkflowExecutionOptions.cs` (`PreserveNumericPrecision`), `Execution.Abstractions/HttpTaskInvocation.cs` (outbound header fill), vnext `docs/custom-script-helpers.md` §3–§4 (sandbox, plugins)
+- Release notes: vnext-docs `blog/2026-08-20-v0-0-81-84.md` (#888), `blog/2026-08-24-v0-0-85.md` (#899, #905, #907), `blog/2026-08-31-v0-0-87.md` (#920), `blog/2026-10-05-v0-0-99.md` (#1053, #1054, #1059, #1060, #1069), `blog/2026-10-15-v0-0-100.md` (#1087, #1090, file fields); vnext-docs `docs/configuration/scripting.md`, `docs/components/tasks/cache-aside.md`; vnext-meta known issues `instance-data-numeric-precision-loss`, `script-context-incident-not-loaded`, `sandbox-baseline-missing-system-objectmodel`, `task-binding-x-request-id-dropped`, `field-encryption-plaintext-copies`, `file-in-task-record`; migrations `script-sees-encrypt-tokens`, `task-caller-credential-forwarded`, `publish-rejects-unavailable-allowed-assemblies`, `cacheaside-source-as-task-and-script-key`; feature `scriptSecretCache` (0.0.80)
 - Working examples:
   - `vnext-example/core/Workflows/payments/src/SendPaymentNotificationSmsMapping.csx` — IMapping
   - `vnext-example/core/Workflows/payments/src/PaymentSuccessRule.csx` — IConditionMapping
@@ -578,3 +674,4 @@ Before **v0.0.87** the compiler replaced the script's using list with the platfo
   - `vnext-example/core/Workflows/payments/src/PaymentProcessMapping.csx` — ISubFlowMapping
   - `vnext-example/core/Functions/account-opening/src/GetBranchDetailLookupMapping.csx` — IMapping + ScriptBase
   - `vnext-example/core/Workflows/fan-out-documents/src/FanOutDocumentsMapping.csx` — IFanOutMapping (item binding only, default output)
+  - `vnext-example/core/Functions/script-plugin-lab/src/SplDirectQueryMapping.csx` — helper-less plugin call with `context.CancellationToken`

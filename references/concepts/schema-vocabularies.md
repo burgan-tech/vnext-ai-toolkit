@@ -1,257 +1,325 @@
-# Schema Vocabularies — `x-*` Extensions
+# Schema Vocabularies — Roles and `x-*` Keywords
 
-vNext extends JSON Schema with custom `x-*` keywords that drive the view layer (form generation, validation, lookups, localization, access control). The canonical source for these vocabulary definitions is:
+> Schema package **0.0.56** / runtime **0.0.100**. vNext extends JSON Schema with `x-*` keywords that
+> drive forms, record exposure, queries, files and client context. Since 0.0.56 **a schema plays one
+> role** (`attributes.type`), and the role decides which `x-*` keywords it may carry.
+>
+> Where the vocabulary files live and how to load them for the workspace's `schemaVersion`:
+> `component-schemas.md`. Field protection (`x-roles`, `x-masking`, `x-encryption`, `x-computed`) in
+> depth: `field-protection.md`. File fields (`x-storage`): `file-fields.md`. Query contract:
+> `instance-query.md`.
 
+## 1. Role × keyword matrix (read this first)
+
+✅ accepted · ❌ refused by the package validator (`npm run validate`, CLI, Forge) · ⚠️ accepted, see note
+
+| Keyword | Group | `master` | `transition` | `function` | `component` | no type / `""` |
+|---|---|:-:|:-:|:-:|:-:|:-:|
+| `x-labels`, `x-enum`, `x-order`, `x-displayFormat`, `x-lov`, `x-lookup`, `x-errorMessages`, `x-validation`, `x-conditional` | base | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `x-helpText`, `x-placeholder`, `x-uiHint`, `x-uiNote`, `x-group` | view hints | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `x-roles` | record | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `x-masking` | record | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `x-encryption` `source: runtime` (default) | record | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `x-encryption` `source: client` | record + input | ⚠️ accepted, runtime ignores it | ✅ | ✅ | ❌ | ✅ |
+| `x-storage` | record | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `x-indexed` | record | ✅ | ❌ | ❌ | ❌ | ❌ |
+| `x-filterOperators`, `x-sortable` | record | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `x-computed` (`runtime` or `client`) | record | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `x-context-target` | record | ✅ | ❌ | ❌ | ❌ | ✅ |
+| `x-context-source` | input | ❌ | ✅ | ✅ | ❌ | ✅ |
+| `x-binding` | component | ❌ | ❌ | ❌ | ✅ | ✅ |
+| any other `x-*` (incl. `x-encrypt`, `x-persistance`) | — | ❌ | ❌ | ❌ | ❌ | no gate | <!-- lint:allow -->
+
+- The check is **recursive** (`properties`, `items`, combinators, `$defs`/`definitions`): a keyword outside
+  the role is refused wherever it sits.
+- The "no type" column is the package view only. The **runtime** applies its own publish rules whatever
+  the type, and it enforces the record keywords only on the schema a workflow references as its
+  `attributes.schema` (the master). Writing `x-roles` on a transition schema protects nothing.
+- Exception enforced by the runtime too: `x-computed` with `evaluatedBy: "runtime"` is refused on a
+  `transition` / `function` / `component` schema.
+
+## 2. Schema roles — `attributes.type`
+
+| `attributes.type` | Role vocabulary | Use it for |
+|---|---|---|
+| `master` | `record-vocab.json` | a flow's master (data) schema — the one `workflow.attributes.schema` points to |
+| `transition` | `input-vocab.json` | a transition's request body schema |
+| `function` | `input-vocab.json` | a function's `inputSchema` |
+| `component` | `component-vocab.json` | the `dataSchema` of an embedded view (`Component` node) that sends nothing itself |
+| absent / `""` | none (no role gate) | last resort for a schema that serves several roles; `x-indexed` is not allowed |
+
+This enum is **only** for schema components (`flow: sys-schemas`). Workflow, task, view and extension
+`attributes.type` keep their own enums.
+
+### Legacy values → role
+
+| Where the schema is actually used | Typical legacy value | New `attributes.type` |
+|---|---|---|
+| A workflow's `attributes.schema` (flow data) | `workflow`, `schema`, `SchemaDefinition` | `master` | <!-- lint:allow -->
+| A transition body | `workflow`, `schema`, `transition` | `transition` | <!-- lint:allow -->
+| A function `inputSchema` | `function`, `schema` | `function` | <!-- lint:allow -->
+| An embedded (component) view's `dataSchema` | `view` | `component` | <!-- lint:allow -->
+| Task I/O, headers, anything else, or several roles at once | `task-input`, `task-output`, `view-data`, `headers`, `task`, `extension` | **split** the schema per role; omit the field only as a last resort | <!-- lint:allow -->
+
+| Layer | Legacy value | Missing / `""` | Keyword outside its role |
+|---|---|---|---|
+| Package 0.0.56 (`npm run validate`, CLI, Forge) | **refused** | accepted (no gate) | **refused** |
+| Runtime 0.0.100 (`publish`) | accepted **with a warning**; will be refused later (`schema-attributes-type-legacy-values`) | accepted (before 0.0.100: `Schema type is required.`) | not applied; only the keywords it enforces are validated |
+
+Runtime warning text: *"attributes.type 'workflow' is not a schema role (master, transition, component,
+function) and will be refused in a future release …"* <!-- lint:allow -->
+
+### One schema, several roles → split it (toolkit rule)
+
+If the same schema is both a transition body and a read-only view's `dataSchema`, or both the master and
+a transition body, **split it**: one schema per role, shared fields copied into each, each with its own
+`attributes.type`. The package then catches out-of-role keywords. Leaving `attributes.type` empty is the
+last resort (no gate; and a master without `type: "master"` cannot use `x-indexed`). Splitting is
+mandatory in practice for file fields: the master's `x-storage` node describes the persisted handle and
+cannot declare `content`, the transition schema must (`file-fields.md`).
+
+### Validator caveat — `addVocabularies`
+
+`schema-definition.schema.json` `$ref`s the role vocabularies by `$id`; a validator must register them
+before compiling:
+
+```js
+const Ajv = require('ajv');
+const { addVocabularies, schemaDefinition } = require('@burgan-tech/vnext-schema');
+const validate = addVocabularies(new Ajv({ strict: false })).compile(schemaDefinition);
 ```
-https://github.com/burgan-tech/vnext-schema/tree/master/vocabularies
-```
 
-Like `schemas/`, this folder is **tagged per `schemaVersion`**. Skills fetch the vocabulary for the workspace's exact version:
+A workspace `validate.js` (from an older `@burgan-tech/vnext-template`) that does not call
+`addVocabularies` cannot compile the schema validator against 0.0.56: it prints
+`⚠ Warning: Could not compile validator for schema …` and **skips every `sys-schemas` component** while
+still exiting green. Read the validate output for that line; if present, schema components were not
+validated (role, keywords, shapes). Updating the template is the fix; do not "fix" it by pinning the
+package back.
 
-```
-GET https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/vocabularies/{vocab-file}.json
-```
+## 3. Base keywords (every role)
 
-## Vocabularies (conceptual list — verify against the repo for the current set)
+### `x-labels` — localized label
 
-### `x-labels` — bilingual labels
-
-Per-property labels:
+`{ "<lang>": "<text>" }`, keys `^[a-z]{2}(-[A-Z]{2})?$`, at least one entry. Views read
+`$schema.<field>.label`; the runtime also uses it to localize schema-validation errors.
 
 ```jsonc
-"properties": {
-  "currency": {
-    "type": "string",
-    "x-labels": { "tr": "Para Birimi", "en": "Currency" }
-  }
-}
+"currency": { "type": "string", "x-labels": { "tr": "Para Birimi", "en": "Currency" } }
 ```
 
-Consumed by views: `$schema.currency.label` → renders the current-locale label.
+### `x-enum` — labels per enum value (an **object**, not an array)
 
-### `x-enum` — enum values with display metadata
-
-Extends the standard `enum` with display info:
+Keys are the `enum` values; each value is a localized text map.
 
 ```jsonc
 "accountType": {
   "type": "string",
-  "x-enum": [
-    { "value": "savings", "x-labels": { "tr": "Vadesiz", "en": "Savings" } },
-    { "value": "checking", "x-labels": { "tr": "Vadeli", "en": "Checking" } }
-  ]
+  "enum": ["savings", "checking"],
+  "x-enum": {
+    "savings":  { "tr": "Vadesiz", "en": "Savings" },
+    "checking": { "tr": "Vadeli",  "en": "Checking" }
+  }
 }
 ```
 
-Renders to a `Dropdown` with both the underlying value and the displayed label.
+### `x-order` — field order in a generated form
 
-### `x-lov` — list-of-values dropdown source
+A number; lower first, unordered fields after every ordered one. Needed because a stored schema does not
+keep property order (PostgreSQL `jsonb`).
 
-Either static or function-backed:
+### `x-displayFormat` — display hint
 
-**Static list:**
+Non-empty string, UI only (e.g. `"yyyy-MM-dd'T'HH:mm:ssXXX"`).
+
+### `x-lov` — options for a selectable input
+
+`valueField` and `displayField` are required, plus **exactly one** of `source` or `items`:
+
+| Member | Meaning |
+|---|---|
+| `source` | URN of the data-source function, fetched. May interpolate `{{$form.x}}` / `{{$instance.x}}` / `{{$param.x}}` to choose **which** source; an unresolved placeholder skips the load. `valueField`/`displayField` are JSONPaths into the response. |
+| `items` | Expression (`$instance.<path>` / `$form.<path>`) naming an array already in scope; **no request**. `valueField`/`displayField` are plain property names in one element, or `""` for the element itself (array of strings). |
+| `imageField` | Optional image path per option (same shape as `valueField`). |
+| `filter[]` | `{ param, value, required? }`. `param` may carry the list-query operator after a colon (`"status:in"`; default equality). `value` is a reference string (`$form.x`, `$instance.x`, `$param.x`) **or a literal**; a literal may be an **array** — the only way to reach `in` / `nin`. `required: true` skips the load while the value is unresolved (cascade cleared). |
+
 ```jsonc
-"currency": {
+"district": {
   "type": "string",
   "x-lov": {
-    "items": [
-      { "value": "TRY", "x-labels": { "tr": "TL", "en": "Turkish Lira" } },
-      { "value": "USD", "x-labels": { "tr": "Dolar", "en": "US Dollar" } }
+    "source": "urn:vnext:fn:get:shared:get-districts",
+    "valueField": "$.response.data[*].code",
+    "displayField": "$.response.data[*].name",
+    "filter": [
+      { "param": "cityCode", "value": "$form.city", "required": true },
+      { "param": "status:in", "value": ["active", "pending"] }
     ]
   }
-}
-```
-
-**Function-backed (the usual case):**
-```jsonc
-"branchCode": {
+},
+"selectedAccount": {
   "type": "string",
-  "x-lov": {
-    "source": {
-      "function": { "domain": "core", "key": "get-branches-lov", "version": "1.0.0" },
-      "method": "GET",
-      "params": [
-        { "name": "currency", "value": "$form.currency" }
-      ],
-      "responsePath": "$.data[*]",
-      "valueField": "code",
-      "labelField": "name"
-    }
-  }
+  "x-lov": { "items": "$instance.accounts", "valueField": "iban", "displayField": "name", "imageField": "bankLogo" }
 }
 ```
 
-The function returns an enveloped array; the view applies `responsePath` (JsonPath) to extract items, then `valueField`/`labelField` populate the dropdown.
-
-**Cascade**: when `params` reference `$form.X`, changing X re-invokes the function with the new value.
+Cascade: a `filter` value referencing `$form.X` re-loads the list when X changes. Meaning by role: on an
+input schema it offers choices; on a master it resolves the stored key to its label. Every function behind
+a `source` needs `attributes.rawResponse: true` (`function-mapping-pattern.md` §5).
 
 ### `x-lookup` — read-time enrichment (object **or** array)
 
-Where `x-lov` feeds a *selectable dropdown* bound to an input, `x-lookup` fetches data at read time
-to **render** it — and it can resolve to either a **single object** or an **array**. `resultField`
-(JsonPath into the function response) decides what `$lookup.{propertyName}` holds.
-
-**Single object** — read fields with `$lookup.{propertyName}.{field}`:
+`{ source (URN, required), resultField (JSONPath, required), filter[]? }` — `filter` has the same shape as
+in `x-lov`. Where `x-lov` feeds a dropdown, `x-lookup` loads data to **render**; `resultField` decides what
+`$lookup.{propertyName}` holds.
 
 ```jsonc
 "branchDetail": {
   "type": "object",
   "readOnly": true,
   "x-lookup": {
-    "source": "core/functions/get-branch-detail",
-    "resultField": "$.response.data",                 // points at an object
+    "source": "urn:vnext:fn:get:core:get-branch-detail",
+    "resultField": "$.response.data",
     "filter": [ { "param": "code", "value": "$form.branchCode" } ]
   }
-}
-```
-→ `$lookup.branchDetail.address`, `$lookup.branchDetail.phone`.
-
-**Binding-driven reload (cascade).** When a `filter` value references a binding (e.g. `$form.branchCode`),
-the lookup **tracks that binding and re-loads itself** whenever the value changes — so the rendered
-data stays in sync as the user picks a different code. (Same reactivity as `x-lov` cascade.) With no
-binding-referencing filter, it loads once on render.
-
-**Array** — point `resultField` at an array and iterate it with `ForEach`. `$lookup.{propertyName}`
-is the **array container**; read each element with `$item.*` (NOT `$lookup.*`):
-
-```jsonc
+},
 "branchList": {
-  "x-lookup": { "source": "core/functions/list-branches", "resultField": "$.response.data.branches" }
-}
-```
-```jsonc
-{ "type": "ForEach", "source": "$lookup.branchList",
-  "template": { "type": "Card", "children": [
-    { "type": "Text", "content": "$item.name" },
-    { "type": "Text", "content": "$item.address" }
-  ] } }
-```
-
-**Property name = access key.** The lookup must sit on a property literally named what the view
-references, and that name must appear in the view's root `lookups` array. Multiple lookups are
-disambiguated **by property name**:
-
-```jsonc
-// schema — each property owns its x-lookup
-"branchDetail":   { "x-lookup": { "source": "...", "resultField": "$.response.data" } },
-"customerDetail": { "x-lookup": { "source": "...", "resultField": "$.response.data" } }
-```
-```jsonc
-// view root
-{ "dataSchema": "...", "lookups": ["branchDetail", "customerDetail"], "view": { /* ... */ } }
-```
-
-Then read with `$lookup.branchDetail.name`, `$lookup.customerDetail.fullName`. (`$lookup` with no
-path returns the whole map, but in practice always use `$lookup.{name}`.)
-
-### `x-validation` — runtime validation rules
-
-Beyond standard JSON Schema (type/format/pattern/min/max), `x-validation` carries cross-field or business rules:
-
-```jsonc
-"amount": {
-  "type": "number",
-  "x-validation": [
-    { "rule": "amount > 0", "message": { "tr": "Tutar pozitif olmalı", "en": "Amount must be positive" } },
-    { "rule": "amount <= $instance.dailyLimit", "message": { "tr": "Günlük limiti aşıyor", "en": "Exceeds daily limit" } }
-  ]
+  "x-lookup": { "source": "urn:vnext:fn:get:core:list-branches", "resultField": "$.response.data.branches" }
 }
 ```
 
-The rule expression uses the data binding namespaces (`$instance`, `$form`, `$lookup`).
+- Object → `$lookup.branchDetail.address`. Array → `ForEach` with `source: "$lookup.branchList"`, each
+  element via `$item.*` (not `$lookup.*`).
+- **Property name = access key**: the `x-lookup` sits on a property literally named what the view reads,
+  and that name is listed in the view root's `lookups` array (`"lookups": ["branchDetail", "branchList"]`).
+- A `filter` value referencing a binding re-loads the lookup when that value changes; otherwise it loads
+  once.
 
-### `x-conditional` — conditional visibility / requirement
+### `x-errorMessages` — localized message per validation keyword
+
+Keys (closed list): `required`, `minLength`, `maxLength`, `minItems`, `maxItems`, `uniqueItems`,
+`minimum`, `maximum`, `exclusiveMinimum`, `exclusiveMaximum`, `multipleOf`, `pattern`, `format`, `enum`,
+`const`. Values are localized text maps. The runtime uses them in schema-validation error messages.
+
+### `x-validation` — custom rule metadata (an **object**)
+
+`{ rule (required), parameters?, errorMessages? }`. A named rule the client delegate runs
+(`onValidationRequest`); the runtime strips it before JSON-Schema validation and never executes `rule`.
+Server-side business rules belong in the transition's validation script / tasks, not here.
 
 ```jsonc
-"taxId": {
+"email": {
   "type": "string",
-  "x-conditional": {
-    "show": "$form.accountType == 'business'",
-    "required": "$form.accountType == 'business'"
+  "x-validation": {
+    "rule": "validateEmailDomain",
+    "parameters": { "blockedDomains": ["tempmail.com"] },
+    "errorMessages": { "tr": "Geçici e-postalar kabul edilmez", "en": "Temporary e-mails are not accepted" }
   }
 }
 ```
 
-Shows or requires the field based on another form value.
+### `x-conditional` — visibility / enablement
 
-### `x-filterOperators` — allowed filter operators
+`{ showIf?, hideIf?, enableIf?, disableIf? }` (at least one), each a **condition**:
+`{ field, operator, value? }` or `{ allOf: [...] }` / `{ anyOf: [...] }` / `{ not: {...} }`.
 
-Declares which filter operators a field accepts in instance queries. **Empty or absent ⇒ the field
-is not filterable.** Most relevant on the **master schema**, where the built-in `data` function reads
-it to build the query.
-
-> **Schema-side names ≠ wire names.** The runtime (`SchemaFilterContext.cs`) translates the wire
-> operator before checking the schema: `ne→neq`, `ge→gte`, `le→lte`, `like|match→contains`,
-> `startswith→startsWith`, `endswith→endsWith`, `isnull→isNull` (case-insensitive; `eq gt lt between
-> in nin includes` unchanged). **Declare the schema-side names.** A schema listing `ge`/`le`/`ne`/`like`
-> validates fine but makes those operators fail at runtime with `Validation:900010`. Full mapping
-> table, wire operators, limits and error codes: `instance-query.md`.
+Operators (closed list): `equals`, `notEquals`, `in`, `notIn`, `isEmpty`, `isNotEmpty`, `contains`,
+`greaterThan`, `lessThan`, `greaterThanOrEquals`, `lessThanOrEquals`, `startsWith`, `endsWith`.
 
 ```jsonc
-"startDateTime": {
+"spouseName": {
   "type": "string",
-  "format": "date-time",
-  "x-filterOperators": ["eq", "gt", "gte", "lt", "lte", "between"],
-  "x-sortable": true,
-  "x-displayFormat": "yyyy-MM-dd'T'HH:mm:ssXXX"
+  "x-conditional": {
+    "showIf":   { "field": "maritalStatus", "operator": "equals", "value": "married" },
+    "enableIf": { "allOf": [
+      { "field": "age", "operator": "greaterThanOrEquals", "value": 18 },
+      { "field": "consent", "operator": "equals", "value": true }
+    ] }
+  }
 }
 ```
 
-Operator semantics depend on the field's JSON `type` (schema-side spellings below):
+`x-conditional` only shows/enables. For "required when …" use JSON Schema `allOf` + `if`/`then` (the
+runtime validates it).
 
-| Schema `type` | Typical `x-filterOperators` | SQL behavior |
+## 4. View hints (every role; the runtime reads none)
+
+| Keyword | Shape | Meaning |
 |---|---|---|
-| `number` / `integer` | `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `between`, `in`, `nin`, `isNull` | `accessor::numeric {op} @param` |
-| `string` + `format: date-time` with `gt`/`gte`/`lt`/`lte`/`between` | date comparison | `accessor::timestamptz {op} @param` |
-| `string` + `eq`/`contains`/`startsWith`/`endsWith`/`in`/`nin` | text comparison | `accessor ILIKE @param` / equality |
-| `boolean` | `eq`, `neq`, `isNull` | equality |
-| `array` (JSON array in instance data) | `includes` (+ `in`) | `Data @> @param` (leaf path: single-element array + partial-object pattern) |
+| `x-helpText` | localized text | help under/beside the field |
+| `x-placeholder` | localized text | placeholder in an empty input |
+| `x-uiHint` | non-empty string | rendering hint (`hidden`, `readonly`, …); unknown hints are ignored |
+| `x-uiNote` | non-empty string | note for maintainers, never displayed |
+| `x-group` | non-empty string | section a generated form puts the field in |
 
-Schema-side full set: `eq, neq, gt, gte, lt, lte, between, contains, startsWith, endsWith, in, nin,
-isNull, includes`.
+## 5. Record keywords (`master` only)
 
-Vocabulary file caveat: `vnext-schema/vocabularies/view-vocab.json` (`x-filterOperators.items.enum`)
-still lists the **wire** names (`ne, ge, le, like, match, startswith, endswith`) and omits `isNull`
-/ `includes`. The runtime (`SchemaFilterContext`) is authoritative; `npm run validate` will not
-catch the wrong spelling. When the fetched vocab and this file disagree, use the schema-side names.
+### `x-roles`, `x-masking`, `x-encryption`, `x-computed`
 
-### `x-sortable` — sortable field
-
-`true` ⇒ the field can be sorted on in instance queries; absent ⇒ not sortable.
+Field exposure on the read surfaces, in the fixed order `x-roles` → `x-masking` → `x-encryption` →
+`x-computed`. Shapes, combination rules, where they apply and where they do not, and examples:
+**`field-protection.md`**. Quick shapes:
 
 ```jsonc
-"x-sortable": {
-  "type": "boolean",
-  "description": "When true, the field is sortable. Absent means not sortable."
-}
+"x-roles":      [ { "role": "morph-idm.auditor", "grant": "allow" } ]          // read-only pruning
+"x-masking":    { "operator": "mask", "params": { "keepFirst": 2, "keepLast": 4 } }
+"x-encryption": { "type": "encrypt", "roles": [ { "role": "morph-idm.auditor", "grant": "allow" } ] }
+"x-computed":   { "evaluatedBy": "runtime", "fallback": { "join": { "fields": ["firstName", "lastName"] } } }
 ```
 
-### `x-displayFormat` — UI display format hint
+### `x-storage` — file field
 
-A format hint for rendering the field (e.g. a date pattern). UI-facing only; it doesn't affect
-validation or storage.
+`{ "binding": "<dapr binding name>" }` on a `type: object` property (or one array's `items`). Placement,
+write/read shapes and settings: **`file-fields.md`**.
 
-```jsonc
-"x-displayFormat": {
-  "type": "string",
-  "minLength": 1,
-  "description": "UI-facing format hint (e.g. yyyy-MM-dd'T'HH:mm:ssXXX)."
-}
-```
+### `x-filterOperators` — which operators a list query may use on the field
 
-### `x-indexed` — attribute index preparation (runtime 0.0.94+)
+An array of **declaration names** — exactly these 14, no duplicates:
 
-Boolean. **Master schema only** — the component's `attributes.type` must be exactly `"master"`;
-any `x-indexed` (even `false`) in another schema is rejected at publish. `true` marks a scalar
-(`string` / `number` / `integer` / `boolean`, date = `string` + `format: "date-time"`, nested under
-fixed `object.properties`) as a candidate for a stored generated column + PostgreSQL index. Arrays,
-objects, `$ref` and conditional nodes are rejected.
+`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `between`, `contains`, `startsWith`, `endsWith`, `in`, `nin`,
+`isNull`, `includes`.
 
-**Not a permission** — filterability stays with `x-filterOperators`, sortability with `x-sortable`.
-**No DDL from the runtime** — `wf indexes generate` produces SQL, the DBA runs it, and
-`AttributeIndexes:Enabled` routes queries to ready projections. Not present in
-`vnext-schema/vocabularies/*.json` (0.0.54); the runtime parses it directly. Full flow, limits and
-fallback behavior: `instance-query.md` §9.
+- **Publish rejects anything else (0.0.100, `publish-rejects-filter-operator-tokens`)**: a query token or
+  case variant (`ne`, `ge`, `le`, `like`, `match`, `startswith`, `endswith`, `isnull`, `EQ` …) fails with
+  *"x-filterOperators value 'ge' is not a declaration name; declare 'gte'"*; unknown values, duplicates and <!-- lint:allow -->
+  non-strings fail too. The package enum (0.0.56) is the same 14 names, so `npm run validate` catches it.
+- **The wire is unchanged**: clients still send query tokens (`ge`, `le`, `ne`, `like`…); the runtime maps
+  them to declaration names before checking. Full mapping and wire syntax: `instance-query.md` §2–3.
+- Empty or absent ⇒ the field is not filterable.
+- Not allowed together with `x-masking`, an active `x-encryption`, or `x-computed`. Do not declare it on a
+  field hidden by `x-roles` (list filters probe the raw value — `field-protection.md` §7).
+
+| JSON `type` | Sensible declaration set | SQL behavior |
+|---|---|---|
+| `number` / `integer` | `eq, neq, gt, gte, lt, lte, between, in, nin, isNull` | `accessor::numeric {op}` |
+| `string` + `format: date-time` | `eq, gt, gte, lt, lte, between, isNull` | `accessor::timestamptz {op}` |
+| `string` (text) | `eq, neq, contains, startsWith, endsWith, in, nin, isNull` | `ILIKE` / equality |
+| `boolean` | `eq, neq, isNull` | equality |
+| `array` | `includes` (+ `in` for scalar arrays) | `Data @> @param` |
+
+### `x-sortable`
+
+`true` ⇒ `sort` on `attributes.<field>` is allowed; absent ⇒ not sortable. Same exclusions as
+`x-filterOperators`.
+
+### `x-indexed` — attribute index candidate
+
+Boolean, in `record-vocab.json` since 0.0.56 (runtime support since 0.0.94).
+
+| Rule | Detail |
+|---|---|
+| Role | Component `attributes.type` exactly `"master"`; any `x-indexed` (even `false`) elsewhere is refused by the package and at publish |
+| Value | `true` / `false` only; omitting it requests nothing |
+| Shape (`true`) | explicit scalar `type`: `string`, `number`, `integer`, `boolean` (dates: `string` + `format: "date-time"`), under fixed `properties`; first path segment `[a-zA-Z][a-zA-Z0-9_]*`. Arrays, objects, `$ref`, combinators/conditionals (on the node or an ancestor), `$defs`, `patternProperties` are refused |
+| Exclusive with | `x-masking`, an active `x-encryption` (`hash`/`encrypt`), `x-computed` |
+| Not a permission | filterability stays `x-filterOperators`, sortability `x-sortable` |
+| No DDL from the runtime | `wf indexes generate` writes SQL, a **DBA** runs it, then `AttributeIndexes:Enabled=true` (default `false`) routes queries to ready projections (`instance-query.md` §9) |
+
+Without an index a filter/sort still works — the runtime evaluates a JSON expression per row — it is
+just slow on large tables. No error, no warning.
+
+**Toolkit rule (maintainer decision):** every field that is **filtered or sorted** — it declares
+`x-filterOperators` or `x-sortable`, or a `GetInstances` task / list query filters or sorts on it — carries
+`x-indexed: true`. `schema-design` proposes it by default; the reviewer reports a filtered/sorted field
+without it as a **warning**. The runtime does not enforce this.
 
 ```jsonc
 "amount": {
@@ -262,56 +330,92 @@ fallback behavior: `instance-query.md` §9.
 }
 ```
 
-### `x-roles` — field-level access
+### `x-context-target` — copy record values into the client context (client only)
 
-> The keyword is **`x-roles`** (the `x-` JSON-Schema vocabulary prefix). It matters **especially in
-> the master schema**, where it drives field visibility in the built-in `schema` / `data` functions.
-> (Don't confuse it with workflow-definition `roles` on a transition, or `queryRoles` on a state —
-> those are not `x-` prefixed.)
+A map on the master schema (normally at the root): instance-data path (dot notation) → context-store slot
+`{ "context": { "boundary": "device|user|subject", "key": "<template>", "storage"?: "memory|local|secure" } }`.
+`key` may interpolate `{instance}` and `{subject}`. The **client** applies it on every instance read (start
+result, after each transition) so values that appear later (tokens, device registrations, certificates)
+reach the context store for later flows' `x-context-source`. The runtime never reads it.
 
 ```jsonc
-"branchCode": {
-  "type": "string",
-  "x-roles": [
-    { "role": "$InstanceStarter", "grant": "allow" },
-    { "role": "$PreviousUser", "grant": "allow" }
-  ]
+"x-context-target": {
+  "deviceData.instanceId": { "context": { "boundary": "device", "key": "device.registration.{instance}" } },
+  "certificate":           { "context": { "boundary": "device", "key": "device.cert.{instance}", "storage": "secure" } }
 }
 ```
 
-`role` also accepts a JSONPath grant compared against the `ScriptContext` (incl. `Instance.Data`):
+Use `{instance}` for per-instance values; leave it out for a cross-flow singleton so the next flow's
+`x-context-source` finds it at a stable key. Targets are context slots only (`const` / `identity` are
+source-only).
+
+## 6. Input keywords (`transition`, `function`)
+
+### `x-context-source` — client-resolved input (client only)
+
+Marks a property the **client** fills; it renders no form field for it. Exactly one of:
+
+| Form | Meaning |
+|---|---|
+| `{ "const": <any JSON> }` | literal baked into the schema |
+| `{ "context": { "boundary": "device\|user\|subject", "key": "<template>", "storage"?: "memory\|local\|secure" } }` | context-store slot (`{instance}`, `{subject}` interpolate) |
+| `{ "identity": "subject" \| "user" }` | active subject (JWT `sub`) or active user |
 
 ```jsonc
-"x-roles": [
-  { "role": "morph-idm.initiator", "grant": "allow" },
-  { "role": "$userBehalfOf.$.context.Instance.Data.initial.customer.ownerUserId", "grant": "deny" }
-]
+"properties": {
+  "channel":  { "type": "string", "x-context-source": { "const": "web" } },
+  "deviceId": { "type": "string", "x-context-source": { "context": { "boundary": "device", "key": "device.id" } } },
+  "userId":   { "type": "string", "x-context-source": { "identity": "subject" } }
+}
 ```
 
-Built-in system role tokens:
-- `$InstanceStarter` — the actor who started the instance
-- `$PreviousUser` — the actor who triggered the previous transition
-- `$InstanceBehalfOfStarter` — the subject (on-behalf) the instance was started for
-- `$PreviousBehalfOfUser` — the subject of the previous transition
-- (Custom roles defined in the workflow; JSONPath grants like `$user.<path>` / `$role.<path>` / `$userBehalfOf.<path>`)
+The runtime does not resolve or check these values — they arrive as ordinary, **self-asserted** body
+fields. Never base an authorization decision on them; identity comes from the credential headers
+(`roles-and-authorization.md`).
 
-There is **no `$CurrentUser`**. The full model — token claims (`sub` / `act_sub`) and JSONPath
-grants — is documented in `roles-and-authorization.md`.
+### `x-encryption` with `source: "client"` — sealed in transit
 
-`grant: "allow"` / `"deny"` controls read/write visibility on this field for matched roles.
+The client seals the value to a recipient's public key before sending; only the service holding the private
+key opens it. Input schemas accept **only** this source. Shape and HPKE/RSA members:
+`field-protection.md` §4.
 
-## Skill behavior
+## 7. Component keyword (`component`)
 
-When `schema-design` runs, it:
+### `x-binding`
 
-1. Fetches `schema.json` for envelope shape (canonical schema-first rule).
-2. Fetches `vocabularies/*.json` for the current set of `x-*` keywords and their inner shapes.
-3. Asks the user about each field's needs (labels? LOV? validation? `x-roles` access? filterable/sortable/display-format?) and assembles `properties` accordingly.
-4. Never invents an `x-` keyword that isn't in the fetched vocabularies.
+`"required"` | `"optional"`: whether the embedding (host) view must bind this field into the component.
+A component does **not** inherit its host's role; send/record behaviour (`x-context-source`, client
+`x-encryption`, `x-roles`, `x-masking`, `x-context-target`) stays on the host's schema. A component that
+submits uses a command the host passes in (`$param.submitCommand`). A view that submits its own move is not
+a component — its `dataSchema` is in the `transition` role.
+
+## 8. Removed / never shipped
+
+| Form | Status | Use instead |
+|---|---|---|
+| `x-encrypt` | never shipped; refused by the package | `x-encryption` + `"source": "client"` | <!-- lint:allow -->
+| `x-persistance` | never shipped; refused | — | <!-- lint:allow -->
+| `x-encryption.type: "persisted"` / `"transport"` | removed 0.0.99; publish error | `"encrypt"` |
+| `x-computed.evaluatedBy: "server"` | renamed 0.0.100; publish error | `"runtime"` | <!-- lint:allow -->
+| `x-filterOperators` with query tokens (`ge`, `le`, `ne`, `like` …) | publish error since 0.0.100 | declaration names (`gte`, `lte`, `neq`, `contains` …) | <!-- lint:allow -->
+| legacy `attributes.type` values | package refuses; runtime warns | a role (§2) |
+
+## 9. Skill behavior
+
+`schema-design`:
+
+1. Loads `schema-definition.schema.json` and the role vocabularies from the pinned package
+   (`component-schemas.md`); the per-role `#/definitions/allowedKeywords` lists are the source of truth for
+   what a role accepts.
+2. Asks the **role first** and proposes splitting a multi-role schema.
+3. Offers only the keywords of that role; never invents an `x-` keyword.
+4. For every PII / sensitive field asks which of `x-roles` / `x-masking` / `x-encryption` applies.
+5. Proposes `x-indexed: true` on every filtered or sorted field.
 
 ## Sources
 
-- Vocabularies repo: `https://github.com/burgan-tech/vnext-schema/tree/master/vocabularies`
-- Canonical envelope: `vnext-schema/schemas/schema-definition.schema.json` at `v{schemaVersion}` (see `component-schemas.md`)
-- Working examples: `vnext-example/core/Schemas/account-opening/*.json` (look for `x-labels`, `x-lov`, `x-lookup`)
-- Filter/sort/index runtime truth: `vnext/src/BBT.Workflow.Domain/Definitions/Schemas/{SchemaFilterContext,SchemaFilterMetadataResolver,AttributeIndexDefinition}.cs`; vnext-docs `components/schema.md`, `how-to/attribute-indexes.md`; toolkit `instance-query.md`
+- `vnext-schema` v0.0.56: `vocabularies/{view-vocab,data-base-vocab,record-vocab,input-vocab,component-vocab,view-hints-vocab,data-vocab,roles-vocab}.json`, `schemas/schema-definition.schema.json` (`attributes.type`, `masterIndexSchema`), `README.md` (Role Vocabularies, Field Exposure), `index.js` (`addVocabularies`)
+- Runtime v0.0.100: `SchemaComponentValidator`, `SchemaRoleTypes`, `FilterOperatorDefinition`, `ComputedFieldDefinition`, `FieldMaskingDefinition`, `FileStorageSchemaParser`, `AttributeIndexDefinition`, `JsonSchemaVocabularySanitizer`; `docs/domain/field-masking.md`, `docs/runtime/file-storage.md`, `docs/runtime/manual-attribute-index-maintenance.md`
+- vnext-meta: deprecations `schema-attributes-type-legacy-values`, `x-encryption-type-persisted`, `x-encryption-type-transport`; migrations `publish-rejects-filter-operator-tokens`, `computed-evaluated-by-server-renamed`, `x-indexed-requires-master-schema`
+- vnext-docs: `concepts/schema-roles.md`, `components/schema.md` (legacy migration, data-context vocabulary), `how-to/view-consept/schema-definition.md`, `how-to/file-fields.md`, `how-to/instance-filtering.md`, `how-to/attribute-indexes.md`
+- Fixtures: `vnext-example` `core/Schemas/schema-roles-lab/`, `core/Schemas/forge-file-form-lab/` (`ffl-master` / `ffl-upload` split)

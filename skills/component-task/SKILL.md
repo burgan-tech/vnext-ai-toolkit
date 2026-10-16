@@ -55,22 +55,23 @@ location and pitfalls). Most common picks:
 | SMS / email / push | `10` Notification | needs `INotificationMapping` |
 | Start another workflow | `11` StartTrigger | same-domain → in-process; `sync` defaults to `false` |
 | Fire a transition on an existing instance | `12` DirectTrigger | `version` is deprecated |
-| Read another instance's data | `13` GetInstanceData / `19` GetInstance | system identity, unfiltered |
+| Read another instance's data | `13` GetInstanceData / `19` GetInstance | since 0.0.99 read with the **caller's** visibility (`x-roles` / `x-masking` / `x-encryption` applied; `SystemRead` removed) — `context.Related` still reads as system |
 | Independent child process | `14` SubProcess | the **only** way to start a SubProcess (never state-level `subFlow.type "P"`) |
 | Query instances | `15` GetInstances | invalid filter now **faults** the task — declare `x-filterOperators` correctly |
 | Legacy SOAP | `16` Soap | Local |
 | Dapr state store get/set/delete | `17` StateStore | Local; custom `storeName` needs an orchestrator-scoped Dapr component |
-| Cache an expensive task's result | `18` CacheAside | Local; wraps a `sourceTask`, `ttlInSeconds`, `bypassOnCacheError` |
+| Cache an expensive task's result | `18` CacheAside | source runs as a real task; `sourceMapping` shapes what is cached; `key` string or script (0.0.99 — §4 below) |
 | LLM conversation via Dapr | `20` DaprConversation | Remote |
 | **Same work over a data-driven collection** | `21` FanOut | see `references/concepts/fan-out.md`; ask this whenever the user says "for each …" |
 | Internal service via Dapr | `3` DaprService | Local; `httpVerb` must be set |
-| Async messaging | `4` DaprPubSub | Remote |
+| Async messaging | `4` DaprPubSub | Remote; `topic` used verbatim — under Kafka name it `vnext.{domain}.{environment}.{event}` (0.0.100) |
 
 Do **not** offer `5` Human (a stub — human approval is a *state* with `subType: 6`, see
 `references/concepts/human-task.md`), `8` Condition / `9` Timer (no executor), `22` ExternalHttp
 (deprecated 0.0.94 → use 6) or `23` Python unless the user asks (experimental; `Python:Enabled` is
-off by default). **Schema ceiling:** vnext-schema 0.0.54 validates `"1"`–`"21"` only — a `22`/`23`
-task fails `npm run validate` even though the runtime runs it (`references/concepts/schema-runtime-gaps.md`).
+off by default). **Schema ceiling:** vnext-schema ≥ 0.0.55 validates `"1"`–`"22"` (22 is still
+deprecated — write 6); `23` Python is **not** in the schema and fails `npm run validate` even though
+the runtime runs it (`references/concepts/schema-runtime-gaps.md`).
 
 Before continuing: if the workspace `runtimeVersion` is below a type's `since` in
 `references/runtime-feature-matrix.md`, say so and pick an older alternative.
@@ -82,6 +83,28 @@ Once the user picks a type, the schema tells you the per-type `config` shape. Fo
 For URLs that hit external systems during development, default to MockLab: `http://localhost:3001/api/{domain}/{resource}/{action}`. Production URLs are hardcoded only when explicitly requested.
 
 **Error boundary reminders.** `errorBoundary.onError[].action` must be an **integer** (0–5) to pass the schema even though the runtime also accepts strings; `errorBoundary.onTimeout` is accepted by the schema but never read; a task timeout surfaces as `…:TaskCanceledException` with **no status code**, so only an `errorTypes` rule can catch it; `errorTypes` rules now match on the in-process path too (they silently never did on the remote path before 0.0.94) — dormant rules may fire for the first time after an upgrade.
+
+**Outbound headers (0.0.99).** `X-Request-Id` is fill-if-absent: a non-empty value in `headers` or
+the input mapping is sent, otherwise vNext's own request id. If the target needs a UUID **per call**
+(OHVPS/BKM), set `Guid.NewGuid()` in the mapping. `sub` / `act_sub` / `position` / `client_id` /
+`role` are forwarded from the caller when the mapping leaves them empty. `traceparent`, `tracestate`,
+`baggage`, `X-Correlation-Id`, `X-Workflow-Instance-Id` stay reserved (skipped if set).
+
+**CacheAside (18) — 0.0.99 contract (#1053, breaking).** Ask: *what is the key* (static string, or
+computed → `key` as a ScriptCode: `{ "location": "dynamicExpresso", "encoding": "NAT", "code": "…" }`,
+or a C# `ICacheKeyMapping` class; **default encoding is `B64`, so plain text needs `NAT`**), *which
+task is the source* (`sourceTask`, any type but CacheAside — it runs through its own executor), *what
+shape should be cached* (`sourceMapping` = the source's full `IMapping`; its `OutputHandler` output is
+what is stored), `ttlInSeconds` (0/absent = never expires), `bypassOnCacheError` (default `true`).
+The task-level mapping's `OutputHandler` runs on hit **and** miss and sees `context.Body.metadata`
+(`CacheHit`, `Refreshed`, `Key`, `StoreName`, `ETag`). **Never write `keyExpression`** on a CacheAside
+task — it was removed (the function-level `attributes.cache.keyExpression` is a different, still valid
+field). Details: `references/concepts/task-types.md` §3.
+
+**Same task twice at one `order`.** In a workflow's `onEntries` / `onExits` / `onExecutionTasks` (and
+a function's `onExecutionTasks`), entries at the same `order` merge by slot `variableKey ??
+camelCase(task.key)`. When the user binds this task twice in parallel, add `"variableKey": "…"` to at
+least one binding (0.0.99; publish rejects a collision).
 
 **FanOut (21).** If chosen, walk `references/concepts/fan-out.md`: `itemsPath` XOR `ItemSelector`, inner `task` reference (distinct task definition), `execution.{maxDegreeOfParallelism,itemTimeoutSeconds ≤ batchTimeoutSeconds}`, `join.{policy,resultKey}` (default `allSettled`; branch on `{resultKey}Summary` with an order-80 auto transition), and scaffold an `IFanOutMapping` `.csx` with at least `ItemInputHandler`.
 

@@ -7,14 +7,21 @@
 @apiVersion = 1
 @domain = {{domain}}
 @workflowKey = {{workflowKey}}
-# Caller identity for a local runtime without a gateway (CallerRoleProvider default → `role` header)
+# Caller identity for a local runtime without a gateway (CallerRoleProvider default → `role` header).
+# Send act_sub (and sub) on start too — CreatedBy = act_sub; without it $InstanceStarter never matches.
 @role = tester
+@actSub = tester-user
+@sub = tester-user
 
 ### Start a new instance (sync → response carries metadata.effectiveStatus)
+# executionType (0.0.99) on the flow / startTransition overrides ?sync: "S" → 200 + instance, "A" → 202 { id, status }.
+# Branch on the status code. Async bodies are capped at 10 MB (413).
 # @name start
 POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/start?sync=true
 Content-Type: application/json
 role: {{role}}
+act_sub: {{actSub}}
+sub: {{sub}}
 
 {
   /* Initial payload — match the workflow's master schema required fields */
@@ -34,9 +41,13 @@ role: {{role}}
 If-None-Match: {{state.response.headers.ETag}}
 
 ### Execute a manual transition (PATCH; 409 Instance:100031 while the instance is Busy)
+# executionType on the transition/flow overrides ?sync. On a parent with an active SubFlow the call is
+# proxied to the leaf (0.0.100): leaf 400/403/409 come back synchronously; a just-completed child → 409, retry.
 PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{transition-key}?sync=true
 Content-Type: application/json
 role: {{role}}
+act_sub: {{actSub}}
+sub: {{sub}}
 
 {
   /* Transition payload — match the transition's input schema */
@@ -63,7 +74,7 @@ role: {{role}}
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/authorize?transitionKey={transition-key}
 role: {{role}}
 
-### Authorize — may this caller read the instance (queryRoles chain)?
+### Authorize — may this caller read the instance? (0.0.99+: decided at the deepest SubFlow leaf only)
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/authorize?queryRoles=true
 role: {{role}}
 
@@ -89,6 +100,18 @@ role: {{role}}
 
 {}
 
+### SubFlow / SubProcess tree (0.0.99; replaces the removed `hierarchy` function — that path is 404)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/instance-correlation
+role: {{role}}
+
+### Transition / state metrics — attempts with their tasks (0.0.99; empty for history:none flows)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{transition-key}/metrics
+###
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/states/{state-key}/metrics
+
+### Function metrics — only for functions with attributes.executionLog: "E" (0.0.99)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/functions/{function-key}/metrics?page=1&pageSize=20
+
 ### Task / action history (metadata only)
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/tasks
 ###
@@ -99,7 +122,7 @@ GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instanc
 ###
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/incidents?page=1&pageSize=20
 
-### Retry a Faulted instance (400 Instance:100027 otherwise)
+### Retry a Faulted instance (400 Instance:100027 otherwise; 409 Instance:100045 for history:none flows)
 POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/retry?sync=true
 
 ### Human-task inbox for this domain (leaf state subType 6, authorised by its queryRoles)
@@ -111,3 +134,7 @@ GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instanc
 
 ### List all instances
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances
+
+### Scheduled start (0.0.100) — what a Dapr bindings.cron `route` calls. No body: non-reserved query
+### params become STRING attributes; key = {scheduleId}-{yyyyMMddTHHmmssZ}; sync defaults to false.
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/schedule?scheduleId=manual-test

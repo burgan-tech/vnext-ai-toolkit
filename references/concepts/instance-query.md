@@ -1,6 +1,6 @@
 # Instance Query — list endpoint, filters, sort, `x-filterOperators`, `x-indexed`
 
-> Runtime 0.0.97. The list endpoint fails **closed** since 0.0.84: anything the runtime cannot
+> Runtime 0.0.100 / schema 0.0.56. The list endpoint fails **closed** since 0.0.84: anything the runtime cannot
 > execute exactly as written is a 400, never a silently widened result set. `GetInstancesTask`
 > (type `15`) validates the same way and returns `Result.Fail` — under an `Abort` boundary rule
 > the calling instance can end up **Faulted** (see Pitfalls).
@@ -54,12 +54,13 @@ Operator names on the wire (case-insensitive):
 **Instance columns** are bare names; **instance data** is `attributes.<path>` (dot-nested or
 `{"attributes":{"address":{"city":{"eq":"Ankara"}}}}`).
 
-## 3. Schema-side vs wire operator names — the mapping table
+## 3. Declaration names vs query tokens — the mapping table
 
-**This is the trap.** The master schema's `x-filterOperators` uses *different* spellings from the
-wire. `SchemaFilterContext.ToSchemaOperator` translates the wire op before checking the schema:
+The master schema's `x-filterOperators` **declares** operators with the 14 declaration names; clients
+**send** query tokens on the wire. `SchemaFilterContext.ToSchemaOperator` maps the token before checking
+the declaration:
 
-| Wire (client sends) | Schema-side (`x-filterOperators` must contain) |
+| Query token (client sends) | Declaration name (`x-filterOperators` must contain) |
 |---|---|
 | `eq` | `eq` |
 | `ne` | **`neq`** |
@@ -74,18 +75,21 @@ wire. `SchemaFilterContext.ToSchemaOperator` translates the wire op before check
 
 Comparison is case-insensitive on both sides. Rules:
 
-- **Declare schema-side names in `x-filterOperators`.** A schema listing `ge`/`le` lets **no**
-  client use `ge`/`le` — the check looks for `gte`/`lte` and answers `Validation:900010`.
-- The wire does **not** accept schema-side names: `{"amount":{"gte":5}}` is `900011
+- **Declare declaration names.** Since 0.0.100 a schema whose `x-filterOperators` holds a query token
+  or case variant is **rejected at publish** — *"x-filterOperators value 'ge' is not a declaration <!-- lint:allow -->
+  name; declare 'gte'"* — as are unknown values, duplicates and non-strings, at every placement
+  (`publish-rejects-filter-operator-tokens`). The 0.0.56 vocabulary enum is the same 14 names, so
+  `npm run validate` already fails on them.
+- The wire is **unchanged** and does **not** accept declaration names: `{"amount":{"gte":5}}` is `900011
   filter.unknownOperator` with hint `gte→ge`. `contains` is not a wire alias (ambiguous).
 - Empty or absent `x-filterOperators` ⇒ field not filterable at all (`900010`).
-- `vnext-docs how-to/instance-filtering.md` (its `eq/gt/ge/lt/le/between` example) and
-  `vnext-schema/vocabularies/view-vocab.json` still list wire names — **the runtime is
-  authoritative**; `npm run validate` passes the wrong names.
+- A filter, sort, groupBy or aggregation on an `x-encryption` `encrypt` path (or an ancestor) is `900010`
+  whatever the declaration says. Never declare `x-filterOperators`/`x-sortable` on an `x-roles` field:
+  list queries run on the raw value and can probe it (`field-protection.md` §7).
 
 ## 4. `x-filterOperators` per JSON type — correct examples
 
-| Schema `type` | Sensible schema-side set | SQL |
+| Schema `type` | Sensible declaration set | SQL |
 |---|---|---|
 | `number` / `integer` | `eq, neq, gt, gte, lt, lte, between, in, nin, isNull` | `accessor::numeric {op}` |
 | `string` + `format: date-time` | `eq, gt, gte, lt, lte, between, isNull` | `accessor::timestamptz {op}` |
@@ -95,17 +99,19 @@ Comparison is case-insensitive on both sides. Rules:
 
 ```jsonc
 "properties": {
-  "amount":        { "type": "number",  "x-filterOperators": ["eq","gt","gte","lt","lte","between"], "x-sortable": true },
-  "startDateTime": { "type": "string", "format": "date-time",
+  "amount":        { "type": "number",  "x-indexed": true,
+                     "x-filterOperators": ["eq","gt","gte","lt","lte","between"], "x-sortable": true },
+  "startDateTime": { "type": "string", "format": "date-time", "x-indexed": true,
                      "x-filterOperators": ["gte","lte","between"], "x-sortable": true,
                      "x-displayFormat": "yyyy-MM-dd'T'HH:mm:ssXXX" },
-  "customerName":  { "type": "string",  "x-filterOperators": ["eq","contains","startsWith"] },
-  "isVip":         { "type": "boolean", "x-filterOperators": ["eq"] },
-  "participants":  { "type": "array",   "x-filterOperators": ["includes"] }
+  "customerName":  { "type": "string",  "x-indexed": true, "x-filterOperators": ["eq","contains","startsWith"] },
+  "isVip":         { "type": "boolean", "x-indexed": true, "x-filterOperators": ["eq"] },
+  "participants":  { "type": "array",   "x-filterOperators": ["includes"] }   // arrays cannot be x-indexed; served by the Data GIN index
 }
 ```
 
-`x-sortable: true` is required for `sort` on `attributes.*`; `x-displayFormat` is UI-only.
+`x-sortable: true` is required for `sort` on `attributes.*`; `x-displayFormat` is UI-only. Toolkit
+rule: every filtered or sorted scalar field also carries `x-indexed: true` (§9).
 
 ## 5. Filterable instance columns
 
@@ -162,7 +168,7 @@ sort={"fields":[{"field":"status","direction":"asc"},{"field":"attributes.startD
 
 | Code | Constant | When |
 |---|---|---|
-| `Validation:900010` | `SchemaFilterValidation` | Master-schema **policy**: field has no/empty `x-filterOperators`, operator not declared (schema-side name!), or `attributes.*` sort without `x-sortable`. 400, not logged as drift. |
+| `Validation:900010` | `SchemaFilterValidation` | Master-schema **policy**: field has no/empty `x-filterOperators`, operator not declared (declaration name, after token mapping), or `attributes.*` sort without `x-sortable`. 400, not logged as drift. |
 | `Validation:900011` | `InstanceFilterInvalid` | Grammar/limits: `filter.unknownOperator` (with hint), `.unrecognizedFormat`, `.invalidJson`, `.unknownProperty`, `.noOperator`, `.emptyLogicalOperator`, `.legacyNotAggregatable`, `.valueTooLong`, `.tooLong`, `.ambiguousEnvelope` |
 | `Validation:900012` | `InstanceSortInvalid` | `sort.invalidJson`, `.invalidDirection`, `.unknownField`, `.unsafePath`, `.emptyField` |
 | `Validation:900013` | `InstanceGroupByInvalid` | `groupBy.invalidJson`, `.noFields`, `.invalidField` |
@@ -170,17 +176,25 @@ sort={"fields":[{"field":"status","direction":"asc"},{"field":"attributes.startD
 
 400 body: `{"error":{"code":"Validation:900011","message":"…","validationErrors":[{"members":["filter.attributes.reference.eq"],"message":"…"}]}}`.
 
-## 9. `x-indexed` — attribute indexes (0.0.94, `masterAttributeIndexes`)
+## 9. `x-indexed` — attribute indexes (0.0.94, `masterAttributeIndexes`; vocabulary since schema 0.0.56)
 
 `x-indexed: true` asks for a **physical projection** (stored generated column `q_<hash>` + index)
 so `attributes.*` filters/sorts stop extracting JSON per row. **Not a permission**: filterability
-is still `x-filterOperators`, sortability `x-sortable`.
+is still `x-filterOperators`, sortability `x-sortable`. It is in `record-vocab.json` since 0.0.56, so
+`npm run validate` checks role and shape too.
+
+**Toolkit rule (maintainer decision):** a field that is filtered or sorted — it declares
+`x-filterOperators` / `x-sortable`, or a `GetInstances` task or list query filters/sorts on it — carries
+`x-indexed: true`. Without it the query still works (JSON expression per row, no error) but degrades
+with volume. `schema-design` proposes it by default; the reviewer warns when it is missing. The runtime
+does not enforce it, and the index only exists after the DBA step below.
 
 | Rule | Detail |
 |---|---|
 | Master schema only | Component `attributes.type` must be exactly `"master"`. Any `x-indexed` (even `false`) elsewhere ⇒ publish error `x-indexed is only allowed when attributes.type is 'master'`. |
 | Scalar only | `string`, `number`, `integer`, `boolean`; date = `string` + `format: "date-time"`. Nested under fixed `object.properties` OK. Arrays, objects, `$ref`, `oneOf/anyOf/allOf/if`, `type` arrays ⇒ rejected. |
 | Boolean value | `true`/`false` only. |
+| Exclusive with | `x-masking`, an active `x-encryption` (`hash`/`encrypt`), `x-computed` — publish error. |
 | Runtime runs **no DDL** | Publishing, host start and reads never create indexes or schedule jobs. |
 
 ```
@@ -208,8 +222,9 @@ master schema (x-indexed) → wf indexes generate [--flow k] [-o dir] [--retire-
    read time; the SQL filter is not, so `effectiveStatus eq Completed` can match a parent that
    serves `Busy`. For "is this flow finished?" filter on **`status`**.
 3. **`type` ≠ `instanceType`.** Filtering `type` targets `attributes.type`.
-4. **Schema-side names.** Wire spellings in `x-filterOperators` validate fine and make the field
-   unfilterable with those operators at runtime (`900010`).
+4. **Declaration names.** Query tokens in `x-filterOperators` (`ge`, `le`, `ne`, `like`) fail <!-- lint:allow -->
+   `npm run validate` (0.0.56) and publish (0.0.100). On an older runtime/schema they published and made
+   every such filter fail with `900010`.
 5. Envelope `orderBy` **plus** separate `groupBy`/`aggregations` params ⇒ `filter.ambiguousEnvelope`;
    legacy `field=op:value` cannot combine with groupBy (`filter.legacyNotAggregatable`).
 
@@ -225,7 +240,7 @@ Master schema fragment (`attributes.type: "master"`):
     "properties": {
       "amount":     { "type": "number", "x-indexed": true,
                       "x-filterOperators": ["eq","gte","lte","between"], "x-sortable": true },
-      "customerNo": { "type": "string", "x-filterOperators": ["eq","in"] },
+      "customerNo": { "type": "string", "x-indexed": true, "x-filterOperators": ["eq","in"] },
       "appliedAt":  { "type": "string", "format": "date-time", "x-indexed": true,
                       "x-filterOperators": ["gte","lte"], "x-sortable": true }
     }
@@ -260,8 +275,9 @@ GET /api/v1/credit/workflows/loan/instances
   `src/BBT.Workflow.Application/Instances/DTOs/GetInstanceInput.cs`, `InstanceQueryAppService.cs`
 - Runtime docs: `docs/runtime/instance-filtering-and-queries.md`, `docs/runtime/manual-attribute-index-maintenance.md`,
   `docs/contracts/instance-query-validation-breaking-changes.md`
-- vnext-docs: `how-to/instance-filtering.md` (operator example uses wire names — wrong), `how-to/attribute-indexes.md`, `components/schema.md`
+- vnext-docs: `how-to/instance-filtering.md` (declaration vs query token, v0.0.100), `how-to/attribute-indexes.md`, `components/schema.md`, `concepts/schema-roles.md`
 - CLI: `vnext-workflow-cli/bin/workflow.js` (`indexes generate`), `src/commands/indexes.js`
 - PRs: #881 (fail-closed validation, 0.0.81–84), #911 (GIN `@>`/includes, 0.0.86), #987 (value limit, identity paging, `x-indexed`, `instanceType`, 0.0.94)
-- vnext-meta: features `instanceQueryPaging`, `masterAttributeIndexes`; migrations `instance-filter-value-length-enforced`, `x-indexed-requires-master-schema`
-- Related: `schema-vocabularies.md`, `incidents-and-retry.md`, `task-types.md` (GetInstancesTask)
+- vnext-meta: features `instanceQueryPaging`, `masterAttributeIndexes`; migrations `instance-filter-value-length-enforced`, `x-indexed-requires-master-schema`, `publish-rejects-filter-operator-tokens`; known issue `list-filter-probes-guarded-fields`
+- Schema: `vnext-schema` v0.0.56 `vocabularies/view-vocab.json` (`x-filterOperators`), `record-vocab.json` (`x-indexed`)
+- Related: `schema-vocabularies.md`, `field-protection.md`, `incidents-and-retry.md`, `task-types.md` (GetInstancesTask)

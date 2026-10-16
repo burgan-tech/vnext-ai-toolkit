@@ -1,17 +1,17 @@
 # Task Types — The Full `type` Catalog (1–23)
 
-> **Caveat.** `attributes.type` is a **numeric string** (`"6"`, not `6`). The runtime enum (`TaskType`) is the source of truth for membership; the vnext-schema package lags it (see §4). Runtime baseline for this file: **v0.0.97** (schema 0.0.54, vnext-meta 0.0.53).
+> **Caveat.** `attributes.type` is a **numeric string** (`"6"`, not `6`). The runtime enum (`TaskType`) is the source of truth for membership; the vnext-schema package lags it (see §4). Runtime baseline for this file: **v0.0.100** (schema 0.0.56).
 
 ## 1. Catalog
 
-"Runs" is the v0.0.97 **shipped default** — where the prepared binding executes. It is host configuration, not a task field (§2).
+"Runs" is the v0.0.100 **shipped default** — where the prepared binding executes. It is host configuration, not a task field (§2).
 
 | # | Name | Wire name | Runs (default) | Status | Notes |
 |---|------|-----------|----------------|--------|-------|
 | 1 | DaprHttpEndpoint | `daprhttpendpoint` | Remote (Execution) | stable | Dapr HTTPEndpoint component |
 | 2 | DaprBinding | `daprbinding` | Remote | stable | Output bindings (queue, blob, SMTP, …) |
 | 3 | DaprService | `daprservice` | **Local (Orchestration)** | stable | No `timeoutSeconds` field → §7 |
-| 4 | DaprPubSub | `daprpubsub` | Remote | stable | Publish an event |
+| 4 | DaprPubSub | `daprpubsub` | Remote | stable | Publish an event. `topic` is used **verbatim** — under Kafka it must sit inside `vnext.{domain}.*` (0.0.100, §3) |
 | 5 | Human | — | Orchestration **stub** | **do not author** | Returns 202 `"Pending"` and nothing else. The real HumanTask is **state `subType: 6` + the `human-task` function** (#1016, 0.0.94) — see `human-task.md` |
 | 6 | Http | `http` | **Local** | stable | Default REST call. Since 0.0.94 already orchestrator-local → replaces 22 |
 | 7 | Script | — | Orchestration | stable | Pure C# transform, no egress |
@@ -25,11 +25,11 @@
 | 15 | GetInstances | `getinstances` | same as 11 | stable | Filtered list |
 | 16 | Soap | `soap` | **Local** | stable | SOAP 1.1/1.2 |
 | 17 | StateStore | `statestore` | **Local** | stable (since 0.0.64) | get/set/delete on a Dapr state store; no `timeoutSeconds` |
-| 18 | CacheAside | `cacheaside` | **Local** | stable | Read-through cache around a `sourceTask`; no `timeoutSeconds` |
+| 18 | CacheAside | — (removed 0.0.99) | Orchestration executor; cache I/O follows `statestore`, the source follows **its own** type | stable | Read-through cache; the source runs as a real task (rewritten 0.0.99, #1053 — §3); no `timeoutSeconds` |
 | 19 | GetInstance | `getinstance` | same as 11 | stable | Full projection: metadata **and** data (13 returns data only) |
 | 20 | DaprConversation | `daprconversation` | Remote | stable | LLM call through the Dapr Conversation building block |
 | 21 | FanOut | — | **always Orchestration** | stable (meta since 0.0.80, shipped 0.0.85, #905) | N parallel copies of an inner task — see `fan-out.md` |
-| 22 | ExternalHttp | — | Orchestration, outside the dispatcher | **deprecated 0.0.94** | Use **6**. Schema 0.0.54 rejects it; runtime still runs it |
+| 22 | ExternalHttp | — | Orchestration, outside the dispatcher | **deprecated 0.0.94** | Use **6**. Schema ≥ 0.0.55 accepts it again; runtime still runs it |
 | 23 | Python | `python` | Remote (`python` route) | **experimental** (meta since 0.0.80, docs 0.0.88) | Off unless `Python:Enabled=true` on Execution. Schema rejects it |
 
 "—" in the wire column = the type never leaves the orchestrator (no invoker registration).
@@ -49,14 +49,16 @@ Shipped Orchestration `appsettings.json`:
 "Workflow": {
   "TaskInvocation": {
     "DefaultMode": "Remote",
-    "Modes": { "http": "Local", "daprservice": "Local", "soap": "Local", "statestore": "Local", "cacheaside": "Local" }
+    "Modes": { "http": "Local", "daprservice": "Local", "soap": "Local", "statestore": "Local" }
   }
 }
 ```
 
+`Modes:cacheaside` was **removed in 0.0.99** (#1053) — delete it from environment config; CacheAside cache I/O now follows `Modes:statestore`.
+
 | Knob | Default | Meaning |
 |------|---------|---------|
-| `Workflow:TaskInvocation:LocalInvocationTimeoutSeconds` | **60** | Deadline around every in-process call; the only bound for 3/17/18 (no own `timeoutSeconds`) |
+| `Workflow:TaskInvocation:LocalInvocationTimeoutSeconds` | **60** | Deadline around every in-process call; the only bound for 3/17 and CacheAside's cache I/O (no own `timeoutSeconds`; an 18 source keeps its own type's timeout) |
 | `Workflow:TaskInvocation:MaxConnectionsPerServer` | 50 | Per-target connections for orchestrator HTTP/SOAP egress |
 | `Python:Enabled` (Execution host) | `false` | Type 23 fails until enabled |
 
@@ -72,19 +74,31 @@ Timeout layering, local path: `task timeoutSeconds (http/soap only, default 30) 
 
 `command` (`get` | `set` | `delete`, required); `key` (get/set/single delete), `keys[]` or `query` (bulk delete); `value`, `ttlInSeconds` (≥1) on set; `etag`, `concurrency` (`FirstWrite`|`LastWrite`), `consistency` (`Eventual`|`Strong`), `metadata`. `storeName` omitted → the **executing host's** `DAPR_STATE_STORE_NAME` — since 0.0.94 that host is the orchestrator. Keys are persisted with a `custom:` prefix. Dynamic key: `task.SetCacheKey(...)` in an `IMapping.InputHandler`.
 
-### 18 CacheAside
+### 18 CacheAside (rewritten 0.0.99, #1053 — breaking)
 
 ```json
 { "type": "18", "config": {
-  "key": "branches:all", "ttlInSeconds": 600, "bypassOnCacheError": true,
-  "sourceTask": { "key": "get-branches-http", "domain": "core", "version": "1.0.0" } } }
+  "key": { "location": "dynamicExpresso", "encoding": "NAT", "code": "\"customer:\" + context.Headers.customerid + \":profile\"" },
+  "ttlInSeconds": 300, "bypassOnCacheError": true,
+  "sourceTask": { "key": "get-customer-http", "domain": "core", "version": "1.0.0" },
+  "sourceMapping": { "location": "./src/GetCustomerSourceMapping.csx", "code": "<base64>" } } }
 ```
 
-`sourceTask` (required; `flow` defaults to `sys-tasks`) must be a remotely invokable type (6/16/1–4/13). Hit → return cached; miss → **re-enters the router** with `sourceTask`, caches the (optionally `sourceMapping`-shaped) result, returns it. `ttlInSeconds` absent or `0` = never expires. `bypassOnCacheError` default `true` (cache errors fall back to source instead of failing); `forceRefresh` skips the read; `keyExpression` (Dynamic Expresso) or `SetCacheKey` for dynamic keys.
+- **Source runs as a real task.** On a miss (or `forceRefresh: true`) `sourceTask` (required; `flow` defaults to `sys-tasks`) runs through **its own type's executor and routing** — any type except another CacheAside (rejected at execution, log 10177). It has no error boundary or journal row of its own; the boundary applies once, on the CacheAside task.
+- **`sourceMapping` is the source task's full `IMapping`**: `InputHandler` configures the call (URL, body, `SetKey`), `OutputHandler` produces **the value that is cached**. No mapping → the raw source `data` is cached. Its side effects on the context are discarded.
+- **Task-level mapping** (`onExecutionTasks[].mapping`): `InputHandler` may `SetCacheKey(...)`; `OutputHandler` runs on **hit and miss**, with `context.Body.metadata` = `CacheHit`, `Refreshed`, `Key` (`custom:`-prefixed), `StoreName`, `ETag`.
+- **`key` is `string | ScriptCode`.** A string is used verbatim. A ScriptCode is a Dynamic Expresso expression (`location: "dynamicExpresso"`) or a Roslyn class implementing **`ICacheKeyMapping`** (`Task<string?> Handler(ScriptContext)`); encodings `NAT` / `B64` / `REF`, **default `B64`** — plain-text code needs `"encoding": "NAT"`. A non-blank script result overrides a `SetCacheKey` key; a blank key at invoke time fails the task.
+- `ttlInSeconds` absent or `0` = never expires; `consistency` `Eventual`|`Strong`; `bypassOnCacheError` default `true` (cache errors fall back to the source, log 10176).
+- **Removed:** `keyExpression`, the `cacheaside` wire type and `Modes:cacheaside`. Entries written by ≤ 0.0.98 hold raw values until their TTL expires; StateStore pre-warm writes must now write the **shaped** value.
+- Not to be confused with the **function-level** `attributes.cache` block: that one still has its own `keyExpression` (a Dynamic Expresso ScriptCode, plus `generationKey` / `generationKeyExpression`) — unchanged.
 
 ### 19 GetInstance
 
 `domain` + `flow` required; target by `key` or `instanceId`; optional `extensions[]`, `useDapr` (false), `headers`, `timeoutSeconds` (30), `validateSsl`, `acceptedStatusCodes`. Response: `{ id, key, flow, domain, status, currentState, createdAt, modifiedAt, data, extensions }`. Prefer 13 when you only need `data`; prefer `context.Related` when the target is this instance's parent/child.
+
+### 4 DaprPubSub — topic names (0.0.100, #1095)
+
+`topic` (and domain `Subscription` topics) are used **verbatim** — the runtime adds no prefix. The runtime's own topics are now `vnext.{APP_DOMAIN}.{environment}.{event}.v{n}` (`environment` = lower-cased `ASPNETCORE_ENVIRONMENT`, default `production`). Under Kafka the broker ACL grants each domain only `vnext.{domain}.*`, so a domain topic such as `user-events` is rejected there — name it `vnext.{domain}.{environment}.{event}` unless the platform team grants it explicitly. Redis / RabbitMQ setups have no such ACL.
 
 ### 20 DaprConversation
 
@@ -104,12 +118,12 @@ Contract `main(input) -> JSON`. Limits: code 256 KiB, input 2 MiB, output 2 MiB,
 
 ## 4. The schema-validation ceiling
 
-vnext-schema **0.0.54** `task-definition.schema.json` enumerates `attributes.type` as `"1"`–`"21"`. Consequences:
+vnext-schema **0.0.55+** `task-definition.schema.json` enumerates `attributes.type` as `"1"`–`"22"` (0.0.54 stopped at `"21"`). Consequences:
 
-| Type | `npm run validate` | runtime publish/run |
+| Type | `npm run validate` (schema ≥ 0.0.55) | runtime publish/run |
 |------|--------------------|---------------------|
 | 1–21 | passes | runs |
-| 22 | **fails** (not planned to be added — deprecated) | runs |
+| 22 | passes (still **deprecated** — write 6) | runs |
 | 23 | **fails** | runs if `Python:Enabled` |
 
 Workaround: never author 22; for 23 keep the file outside the validated set until a schema release carries it. See `schema-runtime-gaps.md` D1.
@@ -144,7 +158,7 @@ A domain function named `tasks` or `actions` is **shadowed**, like every other s
 | Independent child, fire-and-forget | **14** (never state-level `P`) |
 | Reusable nested sequence sharing data, wait for it | not a task: state `stateType: 4` + `subFlow.type: "S"` |
 | N parallel copies, N known only at runtime | **21** — `fan-out.md` |
-| Fixed parallel set known at design time | same `order`, **distinct task definitions** (journal key is transition+task+order) |
+| Fixed parallel set known at design time | same `order`; the same task twice needs a distinct `variableKey` on one entry (0.0.99, §7) |
 | LLM completion | 20 |
 | Python snippet | 23 (opt-in, experimental) |
 | Wait for a human | not a task: state `subType: 6` + `human-task` function |
@@ -155,18 +169,19 @@ A domain function named `tasks` or `actions` is **shadowed**, like every other s
 - **Dormant `errorTypes` rules now fire.** Before 0.0.94, `errorBoundary.onError[].errorTypes` never matched on the remote path (PascalCase/camelCase key mismatch). Fixed at both seams — audit boundaries whose `errorTypes` handlers have never run.
 - **Task timeout has no status code.** A timeout surfaces as `Exception:TaskCanceledException` with `statusCode: null`; `errorCodes` written for HTTP codes miss it. Catch it with `"errorTypes": ["TaskCanceledException"]`.
 - **`errorBoundary.onTimeout` is schema-only.** The runtime never reads it (`schema-runtime-gaps.md` D8). Use `errorTypes` as above.
-- **Custom `storeName` breaks silently under Local.** A Dapr component scoped to the execution app-id resolved under `Remote` and fails at first execution under the new default, with no publish-time or startup signal. Re-scope it to the orchestrator app-id or set `"statestore": "Remote"` / `"cacheaside": "Remote"`.
+- **Custom `storeName` breaks silently under Local.** A Dapr component scoped to the execution app-id resolved under `Remote` and fails at first execution under the new default, with no publish-time or startup signal. Re-scope it to the orchestrator app-id or set `"statestore": "Remote"` (CacheAside cache I/O follows it since 0.0.99).
 - **3/17/18 have no `timeoutSeconds`.** `LocalInvocationTimeoutSeconds` (60 s) is their only bound; there is no per-task dial.
 - **No task-level mode override**, whatever the docs say (§2).
-- **Same-`order` parallel branches** sharing one task definition collide on the journal key — define distinct tasks.
+- **Same-`order` parallel branches** are merged by response slot = `variableKey ?? camelCase(task.key)`. Listing the same task twice at one order used to throw `Parallel tasks produced conflicting output…`; since **0.0.99** (#1072) give at least one entry a `variableKey` (`^[A-Za-z_][A-Za-z0-9_]*$`, ≤ 100 chars). Publish rejects a slot collision within one order (workflows: `onEntries`, `onExits`, `onExecutionTasks`) and across all `onExecutionTasks` (functions); a later order may reuse a slot and overwrites it.
+- **CacheAside `keyExpression` is gone** (0.0.99). The runtime no longer reads it (deprecation `cacheaside-key-expression-removed`, severity error) — move it into `key` as a ScriptCode with `"encoding": "NAT"`.
 - **12 ignores `version`.** Drop it; the deprecation is a warning today.
 - **Human (5), Condition (8), Timer (9)** publish and validate fine and do nothing useful.
 
 ## Sources
 
-- Runtime `vnext` @ `eca5b466` (v0.0.97): `src/BBT.Workflow.Domain/Definitions/Tasks/TaskEnums.cs`, `src/BBT.Workflow.Execution.Abstractions/TaskTypes.cs`, `src/BBT.Workflow.Application/Tasks/Invocation/{TaskInvocationRouter,TaskInvocationOptions}.cs`, `src/BBT.Workflow.Execution/Configuration/PythonOptions.cs`, `src/BBT.Workflow.Application/Execution/ErrorHandling/ErrorNormalizer.cs`, `src/BBT.Workflow.Application/Tasks/Executors/Human/HumanTaskExecutor.cs`, `src/BBT.Workflow.Domain/WorkflowErrorCodes.cs`
+- Runtime `vnext` @ `f06961ec` (v0.0.100): `src/BBT.Workflow.Domain/Definitions/Tasks/{TaskEnums,CacheAsideTask}.cs`, `src/BBT.Workflow.Application/Tasks/Executors/Cache/CacheAsideTaskExecutor.cs`, `src/BBT.Workflow.Application/Tasks/Invocation/{TaskInvocationRouter,TaskInvocationOptions}.cs`, `orchestration/BBT.Workflow.Orchestration.HttpApi.Host/appsettings.json` (`Workflow:TaskInvocation`), `src/BBT.Workflow.Domain/WorkflowErrorCodes.cs`
 - Runtime docs: `docs/runtime/task-invocation-routing.md`, `task-executors-and-invokers.md`, `instance-task-and-action-history.md`, `state-store-task.md`, `cache-aside-task.md`, `get-instance-task.md`, `python-task.md`
-- vnext-docs @ `adf9bf4`: `docs/components/tasks/{index,state-store,cache-aside,get-instance,dapr-conversation,external-http,python,trigger}.md`; release notes `blog/2026-09-21-v0-0-94.md` (#1018), `2026-09-14-v0-0-93.md` (#981), `2026-08-25-v0-0-86.md` (#917)
-- vnext-schema @ `ac42026` (0.0.54): `schemas/task-definition.schema.json`
-- vnext-meta 0.0.53: features `taskInvocationRouting` (0.0.94), `externalHttpTask` (0.0.88), `pythonTask` (0.0.80, experimental), `fanOutTask` (0.0.80), `taskAndActionHistory` (0.0.93), `stateStoreTask` (0.0.64); deprecations `external-http-task`, `direct-trigger-task-version`
-- PRs: #905, #917, #981, #1016, #1018, #1026
+- vnext-docs: `docs/components/tasks/{index,state-store,cache-aside,dapr-pubsub,get-instance,dapr-conversation,external-http,python,trigger}.md`, `how-to/event-driven-workflows.md`; release notes `blog/2026-10-05-v0-0-99.md` (#1053, #1072), `2026-10-15-v0-0-100.md` (#1095), `2026-09-21-v0-0-94.md` (#1018), `2026-09-14-v0-0-93.md` (#981)
+- vnext-schema 0.0.56: `schemas/task-definition.schema.json` (type enum `"1"`–`"22"`)
+- vnext-meta (master): features `taskInvocationRouting`, `taskVariableKey` (0.0.99), `pythonTask` (experimental), `fanOutTask`; deprecations `cacheaside-key-expression-removed`, `external-http-task`, `direct-trigger-task-version`
+- PRs: #905, #917, #981, #1016, #1018, #1026, #1053, #1072, #1095

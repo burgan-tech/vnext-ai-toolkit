@@ -47,15 +47,39 @@ Any mapping object (transition/state/task/function/extension/subflow `mapping`, 
 - **`helpers`** — `sys-mappings` refs whose static classes become callable in the script. The mapping
   code then calls them directly by class name (e.g. `JsonHelper.Serialize(x)`, `RsaCryptoHelper.Encrypt(...)`).
 - **`allowedAssemblies`** — the .NET assemblies the script is permitted to use (e.g.
-  `System.Security.Cryptography`). Declare every assembly the helper or inline code needs.
+  `System.Security.Cryptography`). Declare every assembly the helper or inline code needs. Use the
+  simple name, without `.dll`.
+  - **Since 0.0.99 every name must resolve at publish** (#1069): a framework assembly, or a DLL in the
+    environment's plugin directory. An unresolvable name fails the publish with **400 naming the field**
+    (e.g. `sys-flows.states[0].onEntries[1].mapping.scripts.allowedAssemblies[0]`), even where the sandbox
+    is off. Remove stale/misspelled names; for a missing DLL, ask the platform team / environment owner.
+  - The check does not compile: an assembly the script uses but never declares still fails only at run time.
+  - `System.ObjectModel` (needed to `foreach` over an `ExpandoObject`) is in the sandbox baseline since
+    0.0.99; on older sandboxed environments grant it here.
 
 Flow-level `attributes.scripts` applies workflow-wide; per-mapping `scripts` is local to that mapping.
-(How the two combine is in the docs portal.)
+The two are unioned (helpers deduped, assemblies merged) on top of the environment's baseline.
+
+### Script plugins (third-party DLLs)
+
+There is no per-domain DLL upload. The **platform team** mounts approved DLLs (e.g. a database driver)
+in the environment's plugin directory (`Scripting:Sandbox:PluginDirectory`); a mapping uses one by listing
+its name in `allowedAssemblies`. Product teams do not control this directory or runtime config — ask the
+platform team / environment owner. Since **0.0.100** (#1090):
+
+- a plugin is loaded **once per process** and shared by every script and helper (one connection pool);
+- a **helper-less mapping** can call a plugin type directly (before, it compiled and then failed with
+  `FileNotFoundException` — on older runtimes keep plugin calls inside a `sys-mappings` helper);
+- a DLL **added** after start is found after at most `PluginRescanIntervalSeconds` (default 30) —
+  re-publish a component rejected before it arrived; **replacing** a loaded DLL needs a restart;
+- pass `context.CancellationToken` to driver calls.
+
+Details and the cancellation/security notes: `csx-contracts.md` § Runtime notes.
 
 ## `REF` encoding — reference a mapping instead of inlining
 
-`scriptCode` / task `mapping` / extension `mapping` `encoding` accepts `B64`, `NAT`, or **`REF`**. With
-`REF`, `code` is a `mappingRef` (not a string):
+`scriptCode` / task `mapping` / extension `mapping` / CacheAside `key` script `encoding` accepts `B64`
+(default), `NAT`, or **`REF`**. With `REF`, `code` is a `mappingRef` (not a string):
 
 ```jsonc
 "mapping": {
@@ -77,6 +101,13 @@ formatting). When reviewing or writing mappings, actively look for repeated stru
 
 - Schema: `node_modules/@burgan-tech/vnext-schema/schemas/mapping-definition.schema.json` (+ the
   `scripts`/`mappingRef`/`scriptCode` definitions inside `workflow`/`function`/`extension` schemas).
-- Deep model (script sandbox, helper linking, REF designer UX, versioning): vNext docs portal + MCP.
+- Deep model (script sandbox, helper linking, REF designer UX, versioning): vNext docs portal + MCP —
+  `docs/configuration/scripting` and `docs/components/mappings`.
+- Runtime: vnext `docs/custom-script-helpers.md` §3–§4; vnext-meta migration
+  `publish-rejects-unavailable-allowed-assemblies` (0.0.99), known issue
+  `sandbox-baseline-missing-system-objectmodel` (fixed 0.0.99); release notes vnext-docs
+  `blog/2026-10-15-v0-0-100.md` (#1090).
+- Plugin example: `vnext-example/core/Functions/script-plugin-lab/` (helper-less and helper paths) +
+  `vnext-example/plugins/ScriptPluginLab.Sql`.
 - Working examples: `vnext-example/core/Mappings/account-opening/` and the `scripts`/`REF` usage in
   `vnext-example/core/Workflows/account-opening/account-opening-workflow.json`.

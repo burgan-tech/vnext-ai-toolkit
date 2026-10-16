@@ -35,14 +35,20 @@ Not a finding:
   [roles-and-authorization.md](roles-and-authorization.md)): the runtime does **not** 403 on
   built-in reads (`state`, `data`, `view`, `schema`, `master`, `tasks`, `actions`, `incidents`),
   on `POST …/longpoll/ack`, on `PATCH …/transitions/{key}` or on custom function calls. Admission is
-  the Internal Gateway's `authorize` pre-flight. A design or test that relies on an in-process 403
+  the Internal Gateway's `authorize` pre-flight. Only the `file` function (403/404) and the human-task
+  list (fail-closed) enforce in process. A design or test that relies on an in-process 403
   is a finding; a role grant is only as good as the gateway that consults `authorize`.
 - Review transition `roles`, `availableIn[].roles`, state/flow `queryRoles`, function `roles`,
   `interaction.longPoll.roles`, schema `x-roles`, exported visibility, and component-level
   exposure for over-broad access.
 - Apply the grant semantics when judging a set: deny is AND-ed across the caller's **whole** role
   set and wins over any allow; allows are OR-ed; a deny-only set is a **blacklist** (allowed unless
-  denied); an empty set allows; since 0.0.96 a role-less caller cannot clear a role-bound deny.
+  denied); an empty set allows. Since 0.0.99 evaluation is three-valued: a role-bound leaf is
+  *Unknown* for a role-less caller, a deny fires on Yes **or** Unknown, an allow admits only on Yes
+  (`allOf` / `anyOf` fold with Kleene logic).
+- Identity is **self-asserted** (`sub`, `act_sub`, `role`, `position`, `client_id`); the runtime
+  validates no token. Every identity-based grant is only as strong as the gateway that owns those
+  headers.
 - Look for broken access control patterns such as IDOR or privilege escalation paths.
 
 Hunt patterns:
@@ -64,7 +70,29 @@ Hunt patterns:
 - Under `CallerRoleProvider:Provider=morph-idm` (0.0.97+): a non-blank `role` header, or
   `authorize?role=`, **replaces** the identity service's answer. Confirm the gateway strips or owns
   the `role` header on every inbound request; a client that can set it asserts its own roles.
-- Sensitive schema fields (national ID, salary, limits) without restrictive `x-roles`.
+- **`queryRoles` only at the root/parent of a SubFlow while the leaf declares none** — open since
+  0.0.99: `authorize?queryRoles=true` and the human-task list decide at the leaf only, so the root no
+  longer restricts. Fix: `queryRoles` on the leaf, or `subFlow.overrides.states.<s>.queryRoles`.
+- **Combinator shape:** a grant with more than one of `role` / `allOf` / `anyOf`, a nested combinator,
+  a child carrying `grant` or extra members, an empty child list, or a combinator inside
+  `x-masking.roles` / `x-encryption.roles` (allow-only exemption lists). Combinators published before
+  every pod and every override-stamping domain runs ≥ 0.0.99 (known issue
+  `role-grant-combinators-rollback-floor`). "(A or B) and C" written as one grant cannot be expressed
+  at depth 1 — expect two `allOf` allows.
+- An **allow `$role.$.context…` grant expected to admit role-less callers** — it does not since 0.0.99
+  (Unknown never admits). Functional finding, not an exposure.
+- **Start without `act_sub`** (client, gateway route, test, or a Start/SubProcess task mapping that
+  blanks it): `Instance.CreatedBy` stays empty and `$InstanceStarter` / `$PreviousUser` grants never
+  match — an allow silently refuses, a deny silently never fires.
+- `$user.$.context.Instance.Data.CreatedBy` (wrong path — `CreatedBy` is an instance property; the
+  grant is inert). Use `$.context.Instance.CreatedBy`.
+- Mappings or docs treating `x-roles`, `user_reference` or `x-device-id` as **role headers** — the
+  runtime reads roles only from `role` (or morph-idm); those headers are plain, client-settable values.
+  A `$.context.Headers.*` grant on them trusts whatever the client sends unless the gateway owns them.
+- Outbound task mappings that set a **privileged `role` / `sub` / `act_sub`** (service identity) and
+  copy the response into instance data: the copy is then served to callers the target's `x-roles`
+  would have filtered (credential forwarding and `SystemRead` removal, 0.0.99).
+- Sensitive schema fields (national ID, salary, limits) without restrictive `x-roles` — see §5.
 - Functions with instance scope that accept an instance key but never constrain which caller
   may query it (IDOR via instance enumeration) — note `function.roles` is not a call gate since
   0.0.88; the constraint must exist in the gateway's `authorize?functionKey=` pre-flight.
@@ -116,6 +144,14 @@ Hunt patterns:
   untrusted first hop.
 - File paths in `.csx` composed from instance data (`../` reachable), archive extraction,
   or uploads stored without type/size checks.
+- `ScriptBase.GetFileAsync(domain, flow, instance, file)` called with ids taken from the request or
+  instance data and **no authorization check** in the script — that path evaluates neither
+  `queryRoles` nor `x-roles` and works cross-domain (`file-fields.md` §3). Returning the bytes or
+  copying them into data exposes another instance's documents.
+- A custom function with the key `file` — shadowed by the reserved system function (0.0.100), so the
+  author's own gate never runs.
+- `x-storage` fields holding identity documents without `queryRoles` on the states and `x-roles` on
+  the field path (the `file` function enforces both in process: 403 / 404).
 
 Not a finding:
 
@@ -132,6 +168,26 @@ Not a finding:
 - Verify that sensitive data is handled with appropriate protections and that cryptographic
   choices are documented.
 - Check that `.csx` logging and view labels/content do not emit tokens, credentials, or PII.
+
+Hunt patterns for schema field protection (details: [field-protection.md](field-protection.md)):
+
+- **PII without `x-roles`, `x-masking` or `x-encryption`** on a master schema (national ID, IBAN,
+  card/account numbers, phone, e-mail, address, salary, health). Report as a **warning (Medium)** by
+  default; **Critical** when the field is a regulated identifier or credential-grade value readable by
+  every caller.
+- **Encrypted values copied into transition or task records** — `encrypt` covers `InstancesData` only;
+  transition bodies, task request/response, outbox/job payloads and the human-task cache hold the
+  plaintext (known issue `field-encryption-plaintext-copies`). Flag designs that pass `encrypt` fields
+  through transition payloads or task bodies and claim "encrypted at rest".
+- **`x-roles`-hidden fields that are filterable or sortable** (`x-filterOperators` / `x-sortable`) —
+  list filters run on raw JSON and can probe the hidden value (known issue
+  `list-filter-probes-guarded-fields`).
+- **`x-encryption` `type: "hash"` on low-entropy values** (national IDs, phone numbers, birth dates):
+  pseudonymisation, brute-forceable from the per-instance salt (known issue
+  `field-hash-low-entropy-values`).
+- Scripts that `DecryptAsync` a value and write it to another field, a log line or a view label; PII in
+  `humanTask.title` / `description` (never field-protected).
+- `x-masking` / `x-encryption` exemption `roles` broader than the audience that really needs clear text.
 
 Not a finding: MD5/CRC used for non-security checksums or cache keys.
 
@@ -155,6 +211,11 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
   reads, `?ack=true` for `longpoll/ack`, `?transitionKey=`/`?functionKey=` for writes) on the
   `/workflows` routes, and that the configured `CallerRoleProvider` is known — an unrecognised
   value silently degrades to `default` (header-trusting).
+- Confirm the gateway owns **every** credential header (`sub`, `act_sub`, `role`, `position`,
+  `client_id`) — not only `role` — and that `CallerRoleProvider:MorphIdm:GetRolesPath` is set
+  explicitly (code default `/api/1/…`, orchestration appsettings `/api/v1/…`).
+- Keep the internal tooling routes off the public edge: `…/instances/{id}/data/history` (0.0.100,
+  hidden from Swagger but not blocked) and `internal/*` routes.
 - Confirm MockLab and other test surfaces are not wired into production configuration.
 
 ## Verification rubric
@@ -173,6 +234,10 @@ Possible 30–49, Informational <30. Cap severity by confidence (<30 → Info; 3
 Medium; 50–69 → max High). Merge duplicates that share a root cause into one finding listing
 all locations.
 
+If the root cause is the **runtime** (a documented guarantee it breaks, not the domain's grants or
+schema), report it as such and point the user to `/vnext-ai-toolkit:report-issue`; never recommend
+editing the vnext / vnext-example repositories.
+
 Common false positives in this toolkit:
 
 - MockLab seed data and integration-test fixtures flagged as secrets or PII
@@ -187,8 +252,8 @@ Common false positives in this toolkit:
 | Severity | Meaning in a vNext domain | Typical examples |
 |----------|---------------------------|------------------|
 | Critical | Direct compromise of the runtime or another domain's data, no auth required | Real credentials in committed config; untrusted `REF` code source; unauthenticated privileged transition |
-| High | Sensitive data exposure or privilege gain with minor preconditions | Over-broad or blacklist-by-accident `queryRoles` on sensitive states; `role` header not owned by the gateway under `morph-idm`; SSRF from instance data; SQL built from instance data |
-| Medium | Exploitable with user interaction or unusual conditions | Missing `x-roles` on sensitive fields; PII in logs; weakened `strictMode` |
+| High | Sensitive data exposure or privilege gain with minor preconditions | Over-broad or blacklist-by-accident `queryRoles` on sensitive states; root-only `queryRoles` over a role-less SubFlow leaf; credential headers not owned by the gateway; `GetFileAsync` without an auth check; SSRF from instance data; SQL built from instance data |
+| Medium | Exploitable with user interaction or unusual conditions | PII without `x-roles` / `x-masking` / `x-encryption` (Critical for regulated identifiers); `x-roles` field that is filterable; `hash` on low-entropy values; PII in logs; weakened `strictMode` |
 | Low | Hardening gaps, best-practice violations | `http://` internal endpoint; unpinned dependency without known CVE |
 | Info | Confidence <30, positive observations, defense-in-depth advice | Placeholder secrets in seeds; documentation gaps |
 
