@@ -86,7 +86,7 @@ Hunt patterns:
   match — an allow silently refuses, a deny silently never fires.
 - `$user.$.context.Instance.Data.CreatedBy` (wrong path — `CreatedBy` is an instance property; the
   grant is inert). Use `$.context.Instance.CreatedBy`.
-- Mappings or docs treating `x-roles`, `user_reference` or `x-device-id` as **role headers** — the
+- Mappings or docs treating `x-roles`, `user_reference` or `x-device-id` as **role headers** — the <!-- lint:allow -->
   runtime reads roles only from `role` (or morph-idm); those headers are plain, client-settable values.
   A `$.context.Headers.*` grant on them trusts whatever the client sends unless the gateway owns them.
 - Outbound task mappings that set a **privileged `role` / `sub` / `act_sub`** (service identity) and
