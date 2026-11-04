@@ -2,6 +2,31 @@
 
 All notable changes to the vNext AI Toolkit will be documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Plugin uses [Semantic Versioning](https://semver.org/).
 
+## [Unreleased] — 0.0.9
+
+**Runtime coverage: vNext runtime 0.0.103 / schema 0.0.59** (previously 0.0.100 / 0.0.56). Closed milestones v0.0.101, v0.0.102 and v0.0.103 folded in. The npm package `@burgan-tech/vnext-meta` has caught up with vnext master (0.0.103), so `metaPackageVersion` follows it again (`scripts/sync-vnext-meta.sh --npm 0.0.103`; same content as master).
+
+### Added
+
+- **Python task (type 23) as a handler container** (vnext #1157, breaking; answers the vnext handoff `docs/integration/vnext-ai-toolkit/python-task-container.md`):
+  - `component-task` emits only `handler` / `input` / `timeoutSeconds` (never `script` or `executionMode`) and offers to scaffold the domain side.
+  - New templates `templates/python-runtime/` (`Dockerfile` `FROM ghcr.io/burgan-tech/vnext/python-runtime:<runtimeVersion>`, hash-pinned `requirements.txt`, `handlers/` with `@handler`) and `templates/etc/runtime/docker-compose.python.override.yml.tmpl` (runtime + daprd sidecar, `Workflow__PythonRuntime__AppId`). `/vnext-init` writes them only when a type-23 task exists.
+  - The e2e preflight flags the removed inline-script form, a missing `AppId` and an unreachable runtime; Testcontainers cannot run Python tasks, so those suites go to local mode.
+- **Row security** (`attributes.rowSecurity`, vnext #1134, schema 0.0.58, experimental): new reference `row-security.md` (contract, parameters, never-widen evaluation, filtered vs unfiltered surfaces, RS-E/W codes, design checklist, gateway precondition, rollback). The scaffold and the architects ask the row-visibility question after the roles gate; the security reviewer flags `QueryParameters` rules, headers the gateway does not own and unfiltered instance-addressed routes.
+- **Flow default version — publish ≠ activate** (vnext #1130): `runtime-operations.md` §2.1 (`sys-version-registry`, pin modes, resolution, `set-default`, `Instance:100051/52/53`, `flowVersion` on start, pilot and cross-domain runbooks); `.http` and `CLAUDE.md` templates carry the registry calls.
+- **Streamed `x-storage` uploads** (`transport: inline|stream|any`), verified reads, `PutFileAsync` / `ScriptFile.OpenRead` / `FileObjectKey`, DaprBinding delete/list/get recipes (vnext #1144); `schema-design` asks inline vs stream.
+- **`x-validation` remote rule** (schema 0.0.57): `source`, `resultField`, `messageField`, `trigger`, `debounce`.
+- **Interaction wait** pattern (Busy subtype + `interaction`; `updateData` or the timer takes the parked Busy over, vnext #1128).
+
+### Changed
+
+- **Automatic transition order** (vnext #1140, schema 0.0.58): `priority` (absent = 100, lower first, ties in declaration order, `triggerKind: 10` last; first satisfied rule wins). The old "complementary pairs, no defined behaviour" guidance is replaced by "cover every branch" across references, agents, skills and the CLAUDE.md template; the reviewer flags states that mix an absent `triggerKind` with `triggerKind: 0` (order changed).
+- **SubFlow carried headers** (vnext #1141): the parent `OutputHandler` reads the settling request's headers and the resumed hop runs with them; switches, deny floor and the `AdditionalDenied` known issue documented (csx-contracts, runtime-operations, roles-and-authorization, security checklist).
+- Schema↔runtime gap **D1** rewritten: type 23 validates on schema 0.0.59 only as a handler reference; new publish-time rows for `rowSecurity`, `priority` and the Python input size.
+- Scripting: the in-memory `System.IO` / `System.IO.Compression` stream carve-out and the new banned reflection / `Environment` members (migration `script-sandbox-member-bans`); `rawResponse` functions answer `byte[]` / `ScriptFile` as bytes; SqlClient plugins need the ICU/GSSAPI images (0.0.101) plus `System.Data.Common` and `System.ComponentModel.Primitives`.
+- Operations and observability: `functions/tasks` lists completed tasks only (0.0.102); HTTP client pool dials on both hosts; same-domain parallel reads at one `order` were broken before 0.0.103 (#1166); `Db.LockAndReadHead` / `Db.InsertInstanceData` spans, `workflow_longpoll_resume_total` and log 20308, flow-version / row-security / settle / carried-header tags, baggage `+` → `_` (#1173).
+- Current-version statements, fixtures and examples move to 0.0.103 / 0.0.59; `scripts/lint-references.sh` bans `Python:Enabled`, inline Python `main(input)`, "23 does not validate", the old auto-pair claim and a `rowSecurity` `default` member.
+
 ## [0.0.8] — 2026-10-16
 
 **Runtime coverage: vNext runtime 0.0.100 / schema 0.0.56** (previously 0.0.97 / 0.0.54). Closed milestones v0.0.98, v0.0.99 and v0.0.100 folded in. `vnext-meta` is now read live from vnext master; the npm package (0.0.53) lags behind it, so `metaPackageVersion` stays 0.0.53.

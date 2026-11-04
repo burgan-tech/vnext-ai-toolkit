@@ -136,7 +136,7 @@ A type-23 task **references a handler** in the domain's own Python runtime image
 | `input` | no | Any JSON value — the default input; an input mapping may replace it. At most **2 MiB** as authored (publish checks it) |
 | `timeoutSeconds` | no | 1–50, default 30. Orchestration waits `timeoutSeconds + Workflow:PythonRuntime:TimeoutGraceSeconds` (5) |
 
-`config` is closed (`additionalProperties: false`): **`script` and `executionMode` are rejected** by schema 0.0.59 and at publish (deprecation `python-task-inline-script-config`, severity error; migration `python-task-handler-contract`). The Execution host's `Python:*` settings (`Python:Enabled`, `Python:ExecutionMode`, `Python:MaxTimeoutSeconds`, …) are ignored since 0.0.103 (`execution-python-settings`).
+`config` is closed (`additionalProperties: false`): **`script` and `executionMode` are rejected** by schema 0.0.59 and at publish (deprecation `python-task-inline-script-config`, severity error; migration `python-task-handler-contract`). The Execution host's `Python:*` settings (`Python:Enabled`, `Python:ExecutionMode`, `Python:MaxTimeoutSeconds`, …) are ignored since 0.0.103 (`execution-python-settings`). <!-- lint:allow -->
 
 **Mapping** — the standard `IMapping` (`csx-contracts.md`). `InputHandler` replaces the authored input with `((PythonTask)task).SetInput(new { … })`; `OutputHandler` reads the handler output from `context.Body.data` (plus `isSuccess`, `statusCode`, `errorMessage`, `taskType` = `"python"`). Without a mapping the handler output is the task result as is.
 

@@ -23,7 +23,7 @@ ban() {
 }
 
 echo "== stale phrases"
-ban '"1"[–-]"1[56]"|\b1[–-]1[56] task types|enum `?"?1"?[–-]"?1[56]' 'task enum ceiling stated as 15/16 (runtime 1–23, schema validates 1–22)'
+ban '"1"[–-]"1[56]"|\b1[–-]1[56] task types|enum `?"?1"?[–-]"?1[56]' 'task enum ceiling stated as 15/16 (runtime 1–23, schema 0.0.59 validates 1–23)'
 ban '\| *`?5`? *\| *HumanTask|HumanTask \(type 5\)|type 5 = ?HumanTask|"5" *= *HumanTask' 'HumanTask described as task type 5 (it is a human STATE subType 6 + human-task function)'
 ban 'schemas/\{componentType\}\.json|schemas/(workflow|task|view|schema|function|extension|mapping)\.json' 'wrong schema filename (real: {type}-definition.schema.json) — point to component-schemas.md'
 ban 'templates/(csx-contracts|function-mapping-pattern|mocklab-seed-format|view-author-guide)\.md|AGENTS\.md\.tmpl' 'reference to a deleted templates/ duplicate'
@@ -40,7 +40,12 @@ ban 'functions/hierarchy' 'hierarchy function was removed in 0.0.99 — use func
 ban '"cacheaside" *:|keyExpression`? \(Dynamic Expresso\) or|re-enters the router' 'CacheAside keyExpression / Modes:cacheaside were removed in 0.0.99 (source runs as a task; `key` is a string or script)'
 ban '[Ee]xactly (\*\*)?one(\*\*)? (initial|Initial)' 'Initial state is optional since 0.0.99 (at most one; implicit $start)'
 ban 'distinct task definitions|remotely invokable type' 'same task twice at one order uses variableKey (0.0.99); CacheAside source may be any task type'
-ban 'validates `"1"`[–-]`"21"` only|schema ceiling 1.21' 'schema 0.0.55+ validates task types "1"–"22"'
+ban 'validates `"1"`[–-]`"21"` only|schema ceiling 1.21' 'schema 0.0.55–0.0.58 validates "1"–"22", 0.0.59+ "1"–"23"'
+# runtime 0.0.101–0.0.103 / schema 0.0.57–0.0.59
+ban 'Python:Enabled|Python:MaxTimeoutSeconds|def main\(input\)' 'Python task type 23 is a handler in the domain runtime image since 0.0.103 (Workflow:PythonRuntime:AppId; Python:* settings ignored)'
+ban '"23"`? \(Python[^)]*\) (fails|does not (pass|validate))|`23` does not validate|23 is \*\*not\*\* in the schema' 'schema 0.0.59 validates task type 23 (handler contract) — say "on schema ≤ 0.0.58" if you mean the old ceiling'
+ban 'no defined behavior when the rule is false|lone conditional auto transition is invalid' 'automatic transitions are ordered by priority since 0.0.102 (first satisfied wins; triggerKind 10 last) — say "cover every branch"'
+ban '"rowSecurity"[^}]*"default"' 'rowSecurity has no default member (deny by default; write an unfiltered rule)'
 ban 'x-encrypt\b|x-persistance' 'x-encrypt never shipped — use x-encryption (source runtime|client)'
 ban '"type": *"(workflow|task-input|task-output|view-data|SchemaDefinition)"' 'schema attributes.type is a role since schema 0.0.56: master | transition | function | component'
 ban 'greaterOrEqual|lessOrEqual|notContains' 'condition operators are greaterThanOrEquals / lessThanOrEquals (schema 0.0.56 vocabulary)'

@@ -175,7 +175,7 @@ vnext-ai-toolkit/
 │   │                                 #   subflow-overrides, roles-and-authorization, instance-query,
 │   │                                 #   incidents-and-retry, runtime-operations, observability,
 │   │                                 #   schema-runtime-gaps, csx-contracts, field-protection,
-│   │                                 #   file-fields, schema-vocabularies, ...
+│   │                                 #   file-fields, row-security, schema-vocabularies, ...
 │   ├── runtime-feature-matrix.md     # GENERATED offline snapshot of vnext-meta (scripts/sync-vnext-meta.sh)
 │   ├── decision-tree.md  external-sources.md
 │   └── view-author-guide.md  function-mapping-pattern.md  mocklab-seed-format.md
@@ -184,7 +184,8 @@ vnext-ai-toolkit/
 │   │                                 #   integration tests from VNext.Testing.Template
 │   ├── CLAUDE.md.tmpl                # rendered twice → CLAUDE.md and AGENTS.md
 │   ├── docker-compose.yml.tmpl  .gitignore.tmpl  .http.tmpl
-│   ├── etc/{docker,dapr,runtime}/... # incl. the local blob-storage binding overlay
+│   ├── etc/{docker,dapr,runtime}/... # incl. the local blob-storage and Python runtime overlays
+│   ├── python-runtime/...            # PythonTask (type 23) domain image: Dockerfile, requirements, handlers
 │   └── tests/...                     # WorkflowTestBase, runsettings, TEST-SCENARIOS checklist
 ├── scripts/
 │   ├── sync-vnext-meta.sh            # regenerate the feature matrix + known versions (from vnext master)
@@ -200,9 +201,13 @@ vnext-ai-toolkit/
 When a new vNext runtime ships:
 
 1. Run `scripts/sync-vnext-meta.sh` — it reads `vnext-meta` from vnext master (`--from <dir>` or
-   `--npm` also work; the npm package can lag behind master). Review the diff of
+   `--npm <version>` also work). Master's `vnext-meta/package.json` version is not bumped per release, so
+   prefer `--npm <runtimeVersion>` once that package is published: same content, correct
+   `metaPackageVersion`. Review the diff of
    `references/runtime-feature-matrix.md` — new `since` rows, deprecations, migrations and known
-   issues are the to-do list. The release posts under vnext-docs `blog/` map PRs to versions.
+   issues are the to-do list. The release posts under vnext-docs `blog/` map PRs to versions, and each
+   vnext PR's `## Product impact` table says whether it hands work to the toolkit
+   (`docs/integration/vnext-ai-toolkit/*.md` in the vnext repo).
 2. Update the hand-written references under `references/concepts/` for anything that changed
    behaviour; mirror author-facing rules into the skills/agents and, briefly, `templates/CLAUDE.md.tmpl`.
 3. Add or adjust `<!-- lint:allow -->`-free wording and run `scripts/lint-references.sh`; fix every
