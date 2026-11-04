@@ -74,6 +74,12 @@ Same values for a direct customer action; for a backoffice operator acting for a
   caller's `sub`, `act_sub`, `position`, `client_id` and `role` for every one the mapping left absent
   or empty; a non-empty mapping value always wins. Set `role` (or the whole credential) in the mapping
   to call as a service identity. Nothing else of the caller travels.
+- **After a SubFlow (0.0.102, #1141).** The parent's resumed hop runs with the headers of the request
+  that settled the child (`Workflow:SubFlow:CarriedHeaders:ApplyToResume`, default `true`) — so the
+  parent's onEntry tasks forward the **settling caller's** `sub` / `act_sub` / `role`, not the original
+  starter's. `role` is always carried; names containing `authorization` / `token` / `secret` / `cookie` /
+  `session` never are. Timer-settled children carry nothing (the resume runs with no caller headers).
+  Opt out per environment with `Workflow__SubFlow__CarriedHeaders__ApplyToResume=false`.
 - **Audit:** instance GET/list `metadata` carries `createdBy`, `createdByBehalfOf`, `modifiedBy`,
   `modifiedByBehalfOf` (`state-function-response.md` §4).
 

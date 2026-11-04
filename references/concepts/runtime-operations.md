@@ -35,6 +35,7 @@ outcome as `vnext.settle.cas = flipped | lost | skipped`).
 | `Instance:100032` | 503 | Subflow terminal-outcome lock not acquired — transient, inbox relay redelivers |
 | `Instance:100027` | 400 | `retry` on an instance that is not Faulted |
 | `Instance:100037` | 404 | `incidents/active` when no incident is open — normal; re-read state |
+| `Instance:100031` on an interaction-wait state (`subType: 5` + `interaction`) | 409 | expected for client transitions; data goes in through `updateData`, and the timer takes the parked Busy over (0.0.102). On ≤ 0.0.101 `updateData` continuations were dropped here — upgrade, then `cancel`/`exit` stuck instances (`long-poll-interaction.md` §3b) |
 | `Instance:100031` on a SubFlow parent | 409 | (0.0.100 proxy) the child just completed or does not exist yet behind an open correlation — retry |
 | `Instance:100045` | 409 | `retry` on a `history: "none"` instance — not supported (`workflow-types.md` §8) |
 | `Instance:100051` | 404 | (0.0.102) a floating version request (none, `latest`, `2`, `2.1`) matches only **pending** versions above the flow's default — send an explicit version or move the pointer (§2.1) |
@@ -302,6 +303,22 @@ Tests must not hard-code `/api/v1` when parsing hrefs; read them from the state 
 | `GET …/instances/{id}/data/history`, `…/data/history/{rowId}` | 0.0.100 (#1079) | **Internal** (Forge Instance Monitor). Same exposure as the data function; hidden from Swagger but **not blocked** — keep it off the public gateway |
 | `POST …/instances/schedule?scheduleId=` | 0.0.100 (#1076) | Scheduler-driven start — `workflow-types.md` §6 |
 | `GET \| HEAD …/instances/{id}/functions/file?file=` | 0.0.100 (#1085) | `x-storage` file read. **`file` is a reserved system function name** — a domain function keyed `file` is shadowed |
+
+## 5.1a SubFlow carried headers (0.0.102, #1141)
+
+`instance.sub.completed` / `faulted` / `canceled` carry the headers of the request that settled the
+child (`csx-contracts.md` § `ISubFlowMapping`). Section `Workflow:SubFlow:CarriedHeaders`:
+
+| Key | Default | Effect |
+|---|---|---|
+| `Emit` | `true` | `false`: no headers on terminal events |
+| `ExposeToOutputMapping` | `true` | parent `OutputHandler` reads them as `context.Headers` |
+| `ApplyToResume` | `true` | parent's resumed hop runs with them (completion, fault, cancel) — migration `subflow-resume-carried-headers` (warning): set `false` for the pre-0.0.102 behaviour |
+| `AdditionalDenied` | `[]` | extra exact names never carried — add custom secret headers (`x-api-key`) here: the floor only denies names containing `authorization`, `cookie`, `token`, `secret`, `session` (known issue `subflow-carried-headers-denylist`) |
+| `MaxEntries` / `MaxValueLength` | `64` / `4096` | caps; dropped counts in log 40140 (Debug), values never logged |
+
+Span tag `vnext.subflow.carried_header_count`. Values reach the outbox row, the Inbox body and the
+parent's output mapping.
 
 ## 5.2 Platform notes with no author action
 

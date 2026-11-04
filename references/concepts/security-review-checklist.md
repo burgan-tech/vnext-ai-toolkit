@@ -221,6 +221,12 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
 - Confirm the gateway owns **every** credential header (`sub`, `act_sub`, `role`, `position`,
   `client_id`) — not only `role` — and that `CallerRoleProvider:MorphIdm:GetRolesPath` is set
   explicitly (code default `/api/1/…`, orchestration appsettings `/api/v1/…`).
+- **SubFlow carried headers (0.0.102):** a domain header carrying a secret under a name the deny floor
+  does not catch (`x-api-key`, `x-client-secret` is caught, `x-signature` is not) travels from the child's
+  settling request into the outbox row, the Inbox body and the parent's output mapping unless the
+  environment lists it in `Workflow:SubFlow:CarriedHeaders:AdditionalDenied`. Also flag parent
+  `OutputHandler`s that copy `context.Headers` into instance data, and onEntry tasks after a SubFlow that
+  assume they still run with the **starter's** credential (they run with the settling caller's).
 - **Row security (`attributes.rowSecurity`, 0.0.102):**
   - a rule parameter on `$.context.QueryParameters.*` presented as a restriction — client-controlled, never
     a boundary (High when it guards personal data);

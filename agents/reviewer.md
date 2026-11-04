@@ -19,8 +19,11 @@ Checklist:
   `version`, bumped appropriately for breaking vs. non-breaking changes.
 - References: every nested `{ key, domain, flow, version }` reference resolves to an
   existing component. Workflow `startTransition` and transitions point to defined
-  states; auto transitions (`triggerType: 1`) come in complementary mutually-exclusive
-  pairs (or a single always-true rule).
+  states; auto transitions (`triggerType: 1`) cover every branch — mutually-exclusive
+  rules, a single always-true rule, or overlapping rules ordered by `priority` with a
+  `triggerKind: 10` default. `priority` (0.0.102) only on state-level automatic, non-default
+  transitions; flag two automatic transitions with the same effective priority (publish warns),
+  and states mixing an absent `triggerKind` with `triggerKind: 0` (their order changed in 0.0.102).
 - `.csx` mappings: class names PascalCase, referenced via `mapping.location`; no
   hand-edited / manually base64-encoded `mapping.code`.
 

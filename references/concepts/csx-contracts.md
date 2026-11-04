@@ -395,11 +395,26 @@ public class MySubFlowMapping : ScriptBase, ISubFlowMapping
 
     public Task<ScriptResponse> OutputHandler(ScriptContext context)
     {
-        // Called on child completion; ScriptResponse.Data is merged into the PARENT instance
-        return Task.FromResult(new ScriptResponse { /* … */ });
+        // Called on child completion (and fault); ScriptResponse.Data is merged into the PARENT instance.
+        // Since 0.0.102 context.Headers = the headers of the request that settled the child
+        // (lower-cased keys; null/empty when a timer, timeout or downward cascade settled it).
+        var channel = GetPropertyValue<string>(context.Headers, "x-channel", null); // null-safe
+        return Task.FromResult(new ScriptResponse { Data = new { approvedVia = channel } });
     }
 }
 ```
+
+**Carried headers (0.0.102, #1141).** When the child is settled by a request (finish/exit, cancel, or a
+fault on a request), its headers travel to the parent on `instance.sub.completed|faulted|canceled`:
+the parent's `OutputHandler` reads them as `context.Headers`, and — `ApplyToResume`, on by default —
+the parent's **resumed hop** runs with them (auto rules, onEntry tasks, the next SubFlow's
+`InputHandler`, and the credential headers `sub` / `act_sub` / `role` / `position` / `client_id` that
+outbound tasks forward). `Actor` stays System. Never carried: names containing `authorization`,
+`cookie`, `token`, `secret`, `session`, names in `AdditionalDenied`, and framework headers
+(`x-subflow-depth`, parent/root/instance ids, `traceparent`, `content-*`, `dapr-*`, `grpc-*` …); `role`
+is always carried. Timer-, timeout- or cascade-settled children carry nothing. Before 0.0.102 the parent
+saw no headers after a SubFlow — read them with `GetPropertyValue` / `HasProperty`, never directly. Switches:
+`runtime-operations.md` § SubFlow carried headers.
 
 ### `ISubProcessMapping` — SubProcess input (fire-and-forget)
 

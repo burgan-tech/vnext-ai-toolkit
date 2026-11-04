@@ -76,8 +76,9 @@ before writing the output. Pull the option sets from the schema, not from memory
    parent needs `subFlow.overrides` (`references/concepts/subflow-overrides.md`).
 3. **Transitions.** For each state, map how it's left: target state and `triggerType`
    (from the schema enum — manual `0`, auto/rule `1`, timer `2`, event `3`). Auto
-   transitions must come in **complementary, mutually-exclusive `rule` pairs** (or a
-   single always-true rule); timer transitions compute their fire-time in an
+   transitions must cover every branch: mutually-exclusive `rule`s, or overlapping rules
+   ordered by `priority` (0.0.102; absent = 100, lower first) plus a `triggerKind: 10`
+   default, which always runs last; timer transitions compute their fire-time in an
    `ITimerMapping` `.csx` (there is no cron string). `triggerType` 1/2 transitions carry
    `view: null`. Factor in the **admission model (v0.0.79+)**: normal shared/state
    transitions 409 while the instance is Busy, `cancel`/`exit` bypass the busy check,
@@ -131,8 +132,8 @@ Produce a design (markdown, no JSON authoring) that the `component-author` can i
 
 1. The full path list of component files to add/change and each one's responsibility.
 2. For workflows: the states, the `startTransition`, the transition map (with
-   `triggerType` per transition; auto transitions in complementary mutually-exclusive
-   pairs), and the `.csx` mappings/rules/timers needed under `src/`, plus a `.http`
+   `triggerType` per transition; auto transitions covering every branch —
+   exclusive rules or `priority` + a `triggerKind: 10` default), and the `.csx` mappings/rules/timers needed under `src/`, plus a `.http`
    test file.
 3. For tasks/functions/extensions: chosen `type`/`scope` and how they're referenced
    (nested `{ key, domain, flow, version }` shape).

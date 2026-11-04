@@ -129,8 +129,9 @@ Confirm the exact shape against the schema each time; this is the gist:
   transitions, `cancel`/`exit`/`updateData` and `timeout` may carry `annotations`
   (see `references/concepts/{human-task,long-poll-interaction,subflow-overrides,transition-pipeline}.md`).
   Transitions have a `triggerType`
-  (`0` manual, `1` auto/rule, `2` timer, `3` event); auto transitions must come in
-  complementary pairs with mutually exclusive rules (or a single always-true rule).
+  (`0` manual, `1` auto/rule, `2` timer, `3` event); auto transitions must cover every
+  branch — mutually exclusive rules, a single always-true rule, or `priority`-ordered overlapping rules
+  plus a `triggerKind: 10` default (0.0.102).
   **Domain rule — every workflow MUST declare a master payload schema** at
   `attributes.schema.schema` (a nested reference `{ key, domain, flow: "sys-schemas",
   version }`), even though the JSON schema marks it optional. `npm run validate`
@@ -207,8 +208,11 @@ A transition's `triggerType` decides what carries its logic (enum, verified):
   the `timer` `.csx` returns `TimerSchedule.FromDateTime(...)` (e.g. derived from an
   instance field like `scheduledDate`, with a fallback). The schedule is *not* a JSON
   field on the transition.
-- **Auto transitions** must come in complementary, mutually-exclusive `rule` pairs (or a
-  single always-true rule). `triggerKind: 10` ("default auto") makes the `rule` optional.
+- **Auto transitions** must cover every branch: complementary, mutually-exclusive `rule`s, a
+  single always-true rule, or overlapping rules ordered by **`priority`** (0.0.102; integer ≥ 1,
+  absent = 100, lower first, ties in declaration order — first satisfied wins). `triggerKind: 10`
+  ("default auto") makes the `rule` optional and is always evaluated last; it may not carry
+  `priority`, and neither may manual/timer/event, shared or start transitions.
 - **`rule`/`timer` are `scriptCode`** (see above) — so `{ "location": "./src/X.csx" }`
   validates and the extension fills `code` later. `triggerType` 1/2 transitions must have
   `view: null` (the runtime fires them without user interaction).

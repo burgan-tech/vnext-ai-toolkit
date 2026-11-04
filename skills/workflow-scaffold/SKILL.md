@@ -92,6 +92,11 @@ Walk through the flow with the user. For each state capture:
   required by the schema (write `"roles": []` for "everyone"). Keep the fallback short (5–10 s) when
   other clients wait on the instance. Never put a `rule` on a long-lived human state (it disables the
   shared body cache). `references/concepts/long-poll-interaction.md`.
+- **Must the instance wait for data pushed later (client upload, partner callback) and give up after a
+  timeout?** (runtime ≥ 0.0.102) → **interaction wait**: `subType: 5` + an `interaction` block, automatic
+  transitions whose rules read the pushed data, a timer transition as the fallback, and a workflow
+  `updateData` the client calls (`long-poll-interaction.md` §3b). Client transitions in that state get
+  409 by design.
 - **SubFlow state (`stateType: 4`)?** Ask whether the parent must adjust the child's
   `timeout`, transition `roles`/`views`, or state `queryRoles`/`interaction.longPoll`/`views` →
   `subFlow.overrides` (`references/concepts/subflow-overrides.md`; the old `viewOverrides` /
@@ -126,7 +131,7 @@ For each transition capture:
 
 - **From state → to state**
 - **`triggerType`**: `0` (manual / user action), `1` (auto / condition-evaluated), `2` (timer), `3` (event)
-- **For auto transitions**: confirm complementary pair (mutually exclusive `rule` conditions) — a lone conditional auto transition is invalid; if there's only one, it must be unconditional.
+- **For auto transitions**: ask what happens when each condition is false. Prefer mutually exclusive `rule`s; if rules overlap on purpose ("VIP first, then amount"), set `priority` (runtime ≥ 0.0.102 / schema ≥ 0.0.58: integer ≥ 1, absent = 100, lower first) and add a `triggerKind: 10` default as the fallback — never leave a state whose rules can all be false (`references/concepts/workflow-types.md` §3).
 - **For timer**: `duration` (ISO 8601, e.g. `PT15M`)
 - **`onExecutionTasks`**: which tasks run during the transition, and which `.csx` mapping shapes each task's input/output. Entries at the same `order` run in parallel and merge by slot `variableKey ?? camelCase(task.key)`; if the **same task** is bound twice at one order (e.g. two SubProcess starts), give at least one a `"variableKey"` (0.0.99; publish rejects a slot collision — same rule for `onEntries` / `onExits`). "Do X for each item in a list" → a **FanOut task** (type 21), not an auto loop — `references/concepts/fan-out.md`.
 - **`executionType`** (optional, `"S"` / `"A"`) if this transition must not depend on the caller's `?sync`.
@@ -242,7 +247,7 @@ and review will keep reporting it." Running the tests is `/vnext-ai-toolkit:e2e 
 ## Notes
 
 - **At most one** Initial state (0.0.99+; none → implicit `$start`). `startTransition.target` must be a declared state; `$start` is a reserved key.
-- Auto transitions must come in complementary pairs (or be unconditional) — the validator catches this; the skill should catch it earlier in step 4.
+- Auto transitions must cover every branch (exclusive rules, or `priority` + a `triggerKind: 10` default) — ask in step 4; `priority` never goes on manual/timer/event, default, shared or start transitions.
 - `history: "none"` flows: automatic transitions only, no human states, no retry — reject the option as soon as the design needs any of them.
 - Never hardcode `core/Workflows/...` — always resolve from `vnext.config.json`.
 - For component references, the shape is `{ "key", "domain", "flow", "version" }` — strict mode is on, so a wrong `flow` value will fail validation.

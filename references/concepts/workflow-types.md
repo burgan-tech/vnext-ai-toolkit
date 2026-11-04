@@ -27,7 +27,7 @@ Each state in `attributes.states[]` carries a `stateType`. Conceptual mapping:
 | `4` | SubFlow | Invokes a SubFlow child | Carries `subFlow` reference with `type: "S"` only (`"P"` rejected at publish since 0.0.95 — §5) |
 | `5` | Wizard | Step-by-step form | Exactly one outgoing manual transition; the transition's view is returned on state entry (fast-path), so `state.view` stays `null` |
 
-**`subType`.** `#/definitions/stateSubType` enum 0–8 (0 none, 1 Success, 2 Error, 3 Terminated, 4 Suspended, 5 Busy, **6 Human**, 7 Cancelled, 8 Timeout). `subType: 6` on an Intermediate state makes it a **human task** candidate for `GET /{domain}/functions/human-task` — it needs `queryRoles` and a root-level `humanTask: {title, description}` in data. See `human-task.md`. This is unrelated to task type 5.
+**`subType`.** `#/definitions/stateSubType` enum 0–8 (0 none, 1 Success, 2 Error, 3 Terminated, 4 Suspended, 5 Busy, **6 Human**, 7 Cancelled, 8 Timeout). `subType: 5` **with** an `interaction` block is an *interaction wait* (0.0.102): the instance parks Busy until `updateData` satisfies an automatic rule or the state's timer fires — `long-poll-interaction.md` §3b. `subType: 6` on an Intermediate state makes it a **human task** candidate for `GET /{domain}/functions/human-task` — it needs `queryRoles` and a root-level `humanTask: {title, description}` in data. See `human-task.md`. This is unrelated to task type 5.
 
 **Pattern: wizard view placement.** When `stateType: 5`, attach the form to the single transition's `view`, not the state's `view`. The runtime exposes that form on state entry; reproducing it as `state.view` causes double-render bugs.
 
@@ -113,11 +113,28 @@ How the transition fires.
 | Value | Type | Fired by | Required fields | Notes |
 |-------|------|----------|-----------------|-------|
 | `0` | Manual | User click | — | Carry a `view` for input form / confirmation |
-| `1` | Auto | Engine evaluates a rule | `rule` (`.csx` `IConditionMapping`) unless `triggerKind: 10` (always-true) | Auto transitions must come in **complementary pairs** with mutually exclusive rules — OR be a single unconditional transition. A lone conditional auto transition is invalid. |
+| `1` | Auto | Engine evaluates a rule | `rule` (`.csx` `IConditionMapping`) unless `triggerKind: 10` (always-true default) | Rules are evaluated by `priority` (0.0.102: integer ≥ 1, absent = 100, lower first, ties in declaration order; `triggerKind: 10` default always last) and the first satisfied rule wins. Cover every branch: mutually exclusive rules, or overlapping rules ordered by `priority` plus a `triggerKind: 10` fallback. |
 | `2` | Timer | Scheduler at a moment in time | `timer` (ISO 8601 duration like `PT15M` OR `ITimerMapping` for dynamic schedule) | View must be `null`. |
 | `3` | Event | External event listener | (event source spec — confirm in the schema; this is the least-documented trigger) | View must be `null`. |
 
-**Pattern: auto-pair rule.** A state with a conditional auto transition (e.g. `triggerType: 1` with `if x > 0`) MUST also have its complement (`if x <= 0`) targeting a different state. Otherwise the engine has no defined behavior when the rule is false. The validator catches this; the scaffolding skill should catch it earlier by asking the user "what happens when the condition is false?"
+**Automatic transition order (0.0.102, #1140).** A state's automatic transitions are evaluated **one by one** and the **first satisfied rule wins**:
+
+1. non-default automatic transitions by `priority` ascending (integer, minimum 1; absent counts as **100**), ties in declaration order;
+2. the default automatic transition (`triggerKind: 10`, no rule) **always last**.
+
+A rule that throws fails the step (incident) and later rules are not evaluated. `priority` is accepted only on state-level automatic, non-default transitions — on a manual/timer/event, `triggerKind: 10`, shared or start transition it fails schema 0.0.58 and publish; publish also **warns** (log only) when two automatic transitions of one state share an effective priority and one of them declares it.
+
+```json
+"transitions": [
+  { "key": "to-low",      "target": "low",      "triggerType": 1, "priority": 30, "rule": { "location": "./src/IsLowRisk.csx",  "code": "<base64>" } },
+  { "key": "to-vip",      "target": "vip",      "triggerType": 1, "priority": 10, "rule": { "location": "./src/IsVip.csx",      "code": "<base64>" } },
+  { "key": "to-fallback", "target": "fallback", "triggerType": 1, "triggerKind": 10 }
+]
+```
+
+`to-vip` is evaluated first although it is declared second; `to-fallback` runs only when neither rule matches.
+
+**Pattern: cover every branch.** Ask "what happens when the condition is false?" for every conditional automatic transition. Either write mutually exclusive rules (`x > 0` / `x <= 0`), or let rules overlap on purpose, order them with `priority` and add a `triggerKind: 10` fallback. A state whose automatic rules can all be false keeps the instance there until a write (`updateData`), timer or event re-evaluates — almost always a design bug. **Upgrade note** (migration `auto-transition-absent-trigger-kind-order`, 0.0.102): before 0.0.102 an automatic transition **without** `triggerKind` ran before one with an explicit `triggerKind: 0`; both now keep declaration order — re-check states that mix them, or set `priority`.
 
 **Pattern: no view on auto/timer.** `triggerType` 1, 2, and 3 transitions have `view: null`. They fire without user interaction; attaching a view is a no-op at best, a runtime error at worst.
 
@@ -189,6 +206,12 @@ through the child flow's **default-version pointer** (`runtime-operations.md` §
 domain, with the callee's pointer — and the correlation stores the **resolved** version, so forwards,
 resume and retry never re-resolve to a different definition. Reference `"1.2"` / `"latest"` to follow
 the child's pointer; reference a full version to pin it.
+
+**Carried headers (0.0.102, #1141).** The request that settles a child (finish/exit, cancel, a fault on
+a request) hands its headers to the parent: `ISubFlowMapping.OutputHandler` reads them as
+`context.Headers`, and the parent's resumed hop runs with them (auto rules, onEntry tasks, credential
+forwarding). Timer- or timeout-settled children carry none. Details and switches: `csx-contracts.md`
+§ `ISubFlowMapping`, `runtime-operations.md` § SubFlow carried headers.
 
 Parent-side tuning of a child (roles, queryRoles, long-poll window, view swaps, timeout) lives in
 `subFlow.overrides` — see `subflow-overrides.md`. Scripts reach related instances through
