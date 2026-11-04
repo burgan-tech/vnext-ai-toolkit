@@ -46,7 +46,10 @@ Scan areas:
   task URLs or `.csx` outbound calls take their destination from instance data (SSRF)?
 - Unsafe execution: does `.csx` logic pass untrusted `ScriptContext` instance data
   into SQL strings, process execution, dynamic code evaluation, or unsafe
-  deserialization?
+  deserialization? The same for Python handlers (`python-runtime/handlers/*.py`, task
+  type 23): `eval`/`exec`/`pickle`/`subprocess` on handler input, secrets in
+  `config.input`, handler input written to logs, an unpinned base image or requirements
+  without hashes, a final `USER root`.
 - Data handling: sensitive data placed into view content, labels, or logs.
 
 Verify before reporting: confirm each candidate is reachable (component actually

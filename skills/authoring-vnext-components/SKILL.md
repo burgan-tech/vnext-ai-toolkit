@@ -136,9 +136,9 @@ Confirm the exact shape against the schema each time; this is the gist:
   version }`), even though the JSON schema marks it optional. `npm run validate`
   enforces this. Author the referenced schema component first, and normally point the
   `startTransition.schema` at the same schema so the start payload is validated.
-- **task** — required `type` (string number; since schema 0.0.55 the schema validates `"1"`–`"22"`
-  (`"22"` ExternalHttp, deprecated); `"23"` Python (experimental) is runtime-only and not
-  schema-validated — e.g. `"6"`=HTTP, `"7"`=Script, `"15"`=GetInstances, `"18"`=CacheAside,
+- **task** — required `type` (string number; schema 0.0.59 validates `"1"`–`"23"`
+  (`"22"` ExternalHttp, deprecated; `"23"` Python = a `handler` reference into the domain's Python
+  runtime image, runtime ≥ 0.0.103 — never `script`/`executionMode`) — e.g. `"6"`=HTTP, `"7"`=Script, `"15"`=GetInstances, `"18"`=CacheAside,
   `"21"`=FanOut; full catalog and default execution location in `references/concepts/task-types.md`)
   and `config`.
 - **view** — required `type` (integer) and `content`; optional `labels`, `display`.

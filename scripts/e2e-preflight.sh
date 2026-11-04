@@ -183,6 +183,23 @@ if grep -rlq '"allowedAssemblies"' "$croot" 2>/dev/null; then
   else info "allowedAssemblies used — the runtime needs Scripting__Sandbox__PluginDirectory"; fi
 fi
 
+# ---- Python runtime (task type 23) ---------------------------------------------------
+if grep -rlqE '"type"[[:space:]]*:[[:space:]]*"23"' "$croot" 2>/dev/null; then
+  if grep -rlqE '"(script|executionMode)"[[:space:]]*:' $(grep -rlE '"type"[[:space:]]*:[[:space:]]*"23"' "$croot" 2>/dev/null) 2>/dev/null; then
+    warn "type-23 task with script/executionMode — the inline-script Python form was removed in runtime 0.0.103; rewrite it as config.handler (task-types.md §3)"
+  fi
+  if [ "$mode" = container ]; then
+    warn "task type 23 used: Testcontainers does not start the domain's Python runtime — those tasks answer 503; run Python scenarios in local mode with etc/runtime/docker-compose.python.override.yml"
+  elif [ "$docker_up" -eq 1 ] && docker inspect "vnext-app-$domain" >/dev/null 2>&1; then
+    docker inspect "vnext-app-$domain" --format '{{json .Config.Env}}' 2>/dev/null | grep -q 'Workflow__PythonRuntime__AppId=[^"]' \
+      && ok "vnext-app-$domain has Workflow__PythonRuntime__AppId" \
+      || warn "task type 23 used but vnext-app-$domain has no Workflow__PythonRuntime__AppId — every Python task answers 503; apply etc/runtime/docker-compose.python.override.yml"
+    if curl -sf -m 3 "http://$host:${PYTHON_RUNTIME_PORT:-8089}/v1/health" >/dev/null 2>&1; then
+      ok "Python runtime answers on :${PYTHON_RUNTIME_PORT:-8089} (handlers: $(curl -sf -m 3 "http://$host:${PYTHON_RUNTIME_PORT:-8089}/v1/manifest" 2>/dev/null | tr -d '\n' | cut -c1-200))"
+    else warn "Python runtime not reachable on :${PYTHON_RUNTIME_PORT:-8089}/v1/health — build and start python-runtime (etc/runtime/README.md)"; fi
+  else info "task type 23 used — the runtime needs Workflow:PythonRuntime:AppId and the domain's Python runtime image"; fi
+fi
+
 # ---- caller-role provider ------------------------------------------------------------
 if [ -n "$pdir" ] && grep -rlq 'VNEXT_CALLER_ROLE_PROVIDER' "$pdir" 2>/dev/null; then
   if [ "${VNEXT_CALLER_ROLE_PROVIDER:-}" = "morph-idm" ]; then info "morph-idm provider tests enabled (runtime must run with CallerRoleProvider__Provider=morph-idm)"

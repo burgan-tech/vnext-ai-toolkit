@@ -84,7 +84,7 @@ enrichment of the whole instance.
 
 **Role.** A discrete action invoked inside a workflow — typically inside a transition's `onExecutionTasks[]`, a state's `onEntries[]` / `onExits[]`, or a function's task list.
 
-**Most-used types** (`attributes.type` is a numeric **string**; the schema enum is `"1"`–`"22"` since 0.0.55, the runtime knows 1–23 — see `schema-runtime-gaps.md` D1):
+**Most-used types** (`attributes.type` is a numeric **string**; the schema enum is `"1"`–`"23"` since 0.0.59 (`"1"`–`"22"` in 0.0.55–0.0.58); 23 is the Python handler task — see `task-types.md` §3–§4):
 
 | Value | Type | Purpose |
 |-------|------|---------|

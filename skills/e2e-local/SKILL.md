@@ -34,7 +34,8 @@ Show the WARN/STOP lines (not the OK ones). Exit 3 = a STOP for that mode:
 Container-mode WARNs to fix (with the user's OK, by rendering `${CLAUDE_PLUGIN_ROOT}/templates/tests/*`):
 image tag not pinned (`VNextImageVersion` → `runtimeVersion`), daprd/MockLab unpinned, system package not
 loaded, `x-storage` binding missing, hard-coded `localhost` task URLs (→ `API_BASEURL` + `GetConfigValue`,
-see `mocklab-spec.md`), `allowedAssemblies` (plugin suites need local mode).
+see `mocklab-spec.md`), `allowedAssemblies` (plugin suites need local mode), task type `23` (the SDK does not start the domain's
+Python runtime — Python suites need local mode with `etc/runtime/docker-compose.python.override.yml`).
 
 ## 2. Mode
 
@@ -51,7 +52,8 @@ Then **ask** (AskUserQuestion): "Do you have a local vNext runtime running (vnex
   `runtimeVersion` is a warning to state in the report. Show the rendered
   `${CLAUDE_PLUGIN_ROOT}/templates/tests/test.runsettings.local.tmpl` (`{{runtimePort}}`, `{{domain}}`)
   and write `tests/<Domain>.IntegrationTests/test.runsettings.local` **only after approval**; confirm it
-  is git-ignored. Local mode is also the answer for script-plugin suites and large file uploads.
+  is git-ignored. Local mode is also the answer for script-plugin suites, large file uploads and Python (type 23)
+  tasks.
 
 Remember the choice for the session; to go back to Testcontainers, delete `test.runsettings.local`.
 
@@ -85,7 +87,7 @@ Cluster by error signature first, then classify each cluster — with evidence, 
 
 | Cause | Typical evidence | Next step |
 |---|---|---|
-| **environment** | Docker/pull errors, `/health` down, wrong domain/port, MockLab unreachable, seed not re-imported (`down -v`), missing blob binding → 503 `Instance:100047`, plugin dir missing, system package missing, `localhost` URL from a container | fix the environment; re-run |
+| **environment** | Docker/pull errors, `/health` down, wrong domain/port, MockLab unreachable, seed not re-imported (`down -v`), missing blob binding → 503 `Instance:100047`, plugin dir missing, system package missing, type-23 task → 503 (no `Workflow__PythonRuntime__AppId` / runtime not started) or 404 `unknown_handler` (image not rebuilt after a handler change), `localhost` URL from a container | fix the environment; re-run |
 | **fixture** (the test) | trap list in `TEST-SCENARIOS.md`: waiting on status instead of state (parked Busy), discarded `RunAsync` status, 409 lock not retried, expecting 403 from a read, no `act_sub` for `$InstanceStarter`, payload not matching the transition schema, stale version → 409 `Instance:100002` | fix the test / bump the version |
 | **domain** (the components) | task fault in `incidents/active` with a domain error (mapping exception, wrong URL/route, rule logic), wrong grant, schema rejection | fix the component (validate-and-fix / component skills) |
 | **runtime** | behaviour contradicts the documented contract on the pinned version, reproducible on a clean instance, not in `schema-runtime-gaps.md` / vnext-meta known issues | offer **`/vnext-ai-toolkit:report-issue`** with the evidence below |

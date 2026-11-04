@@ -561,7 +561,7 @@ if (task is HttpTask httpTask)
 }
 ```
 
-Common concrete types: `HttpTask`, `ScriptTask`, `NotificationTask`, `SoapTask`, `DaprServiceTask`, `DaprPubSubTask`, `GetInstancesTask`, `GetInstanceTask`, `StateStoreTask`, `CacheAsideTask` (`SetCacheKey`; a `key` script overrides it — see `ICacheKeyMapping`), `DaprConversationTask`, `FanOutTask` (its per-item binding is `IFanOutMapping`, not `IMapping`). Catalog: `task-types.md`.
+Common concrete types: `HttpTask`, `ScriptTask`, `NotificationTask`, `SoapTask`, `DaprServiceTask`, `DaprPubSubTask`, `GetInstancesTask`, `GetInstanceTask`, `StateStoreTask`, `CacheAsideTask` (`SetCacheKey`; a `key` script overrides it — see `ICacheKeyMapping`), `DaprConversationTask`, `FanOutTask` (its per-item binding is `IFanOutMapping`, not `IMapping`), `PythonTask` (`SetInput(object)` replaces the authored `config.input`; the `OutputHandler` reads the handler output from `context.Body.data` — 0.0.103, `task-types.md` §3). Catalog: `task-types.md`.
 
 ### Outbound headers the runtime fills for you (0.0.99+)
 

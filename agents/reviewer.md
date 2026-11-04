@@ -85,7 +85,12 @@ Checklist:
     0.0.99; use `key` (string or script) on a runtime ≥ 0.0.99 (`task-types.md`).
   - any `functions/hierarchy` call or reference — 404 since 0.0.99; use <!-- lint:allow -->
     `functions/instance-correlation`.
-  - task `type: "23"` (Python) fails validate; `"22"` validates but is deprecated (use `6`).
+  - task `type: "23"` (Python) must reference a handler: `config` is only `handler` / `input` /
+    `timeoutSeconds` (1–50). `script` or `executionMode` on a type-23 task is a **blocker** — the
+    inline-script form was removed in runtime 0.0.103 and fails schema 0.0.59. The handler must
+    exist in the domain's Python runtime image (`python-runtime/handlers/`), and the flow needs an
+    error boundary for the codes it can handle (422 `handler_error`, 504 `timeout`). On schema
+    ≤ 0.0.58 any `"23"` fails validate. `"22"` validates but is deprecated (use `6`).
   - a custom function keyed `file` (reserved system function); an unresolvable
     `scripts.allowedAssemblies` entry.
 

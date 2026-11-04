@@ -68,10 +68,11 @@ location and pitfalls). Most common picks:
 
 Do **not** offer `5` Human (a stub — human approval is a *state* with `subType: 6`, see
 `references/concepts/human-task.md`), `8` Condition / `9` Timer (no executor), `22` ExternalHttp
-(deprecated 0.0.94 → use 6) or `23` Python unless the user asks (experimental; `Python:Enabled` is
-off by default). **Schema ceiling:** vnext-schema ≥ 0.0.55 validates `"1"`–`"22"` (22 is still
-deprecated — write 6); `23` Python is **not** in the schema and fails `npm run validate` even though
-the runtime runs it (`references/concepts/schema-runtime-gaps.md`).
+(deprecated 0.0.94 → use 6) or `23` Python unless the user asks for Python (experimental; it needs
+the domain's own Python runtime image — see **Python (23)** below). **Schema ceiling:** vnext-schema
+0.0.59 validates `"1"`–`"23"` (22 is still deprecated — write 6). On schema ≤ 0.0.58 or runtime
+≤ 0.0.102 type 23 is unavailable (the old inline-script form is gone) — say so and propose a bump
+(`references/concepts/schema-runtime-gaps.md` D1).
 
 Before continuing: if the workspace `runtimeVersion` is below a type's `since` in
 `references/runtime-feature-matrix.md`, say so and pick an older alternative.
@@ -105,6 +106,35 @@ field). Details: `references/concepts/task-types.md` §3.
 a function's `onExecutionTasks`), entries at the same `order` merge by slot `variableKey ??
 camelCase(task.key)`. When the user binds this task twice in parallel, add `"variableKey": "…"` to at
 least one binding (0.0.99; publish rejects a collision).
+
+**Python (23) — handler container (runtime ≥ 0.0.103, schema ≥ 0.0.59; #1157).** The task carries
+no code: emit **only** `handler` (required, `^[A-Za-z_][A-Za-z0-9_.-]{0,127}$`), `input` (optional
+default input, ≤ 2 MiB) and `timeoutSeconds` (optional, 1–50, default 30). **Never emit `script` or
+`executionMode`** — both fail schema 0.0.59 and publish on 0.0.103. Ask:
+1. *Handler name and module* — e.g. `risk_score` in `python-runtime/handlers/scoring.py`.
+2. *Input and output shape* — if the input comes from instance data, scaffold an `IMapping` whose
+   `InputHandler` calls `((PythonTask)task).SetInput(new { … })` and whose `OutputHandler` reads
+   `context.Body.data` (`references/concepts/csx-contracts.md`).
+3. *Failure handling* — add an `errorBoundary` for the codes the flow can handle (422
+   `handler_error`/`invalid_output`, 504 `timeout`); 404 `unknown_handler` and 503 (no runtime) are
+   deployment errors. Keep `timeoutSeconds` + 5 s well under the transition job budget (300 s).
+
+Then **offer** to scaffold the domain side if `python-runtime/` does not exist yet (copy from the
+toolkit's `templates/python-runtime/`, replacing `{{runtimeVersion}}` with the workspace
+`runtimeVersion` and `{{handlerName}}` / `{{handlerModule}}`):
+- `python-runtime/handlers/__init__.py` and `python-runtime/handlers/<module>.py` with
+  `@handler("<name>")` (return strict JSON — `json.dumps(allow_nan=False)`; convert NumPy/pandas
+  values with `.tolist()` / `.item()`),
+- `python-runtime/requirements.txt` — pinned and hash-locked (`pip-compile --generate-hashes`); an
+  empty file is fine when the handler needs only the standard library,
+- `python-runtime/Dockerfile` — `FROM ghcr.io/burgan-tech/vnext/python-runtime:<runtimeVersion>`,
+  wheels only, `--require-hashes`, non-root `USER 65532:65532`.
+
+If the handler module already exists, add the new `@handler` function to it instead. For a local run,
+point to `etc/runtime/docker-compose.python.override.yml` (written by `/vnext-ai-toolkit:vnext-init`)
+and check `curl localhost:8089/v1/manifest` lists the handler. Building and pushing the image belongs to
+the domain's pipeline (Helm `pythonRuntime` block in shared environments) — never claim the toolkit did
+it. Handler input is raw instance data (PII): no secrets in the task, none logged by the handler.
 
 **FanOut (21).** If chosen, walk `references/concepts/fan-out.md`: `itemsPath` XOR `ItemSelector`, inner `task` reference (distinct task definition), `execution.{maxDegreeOfParallelism,itemTimeoutSeconds ≤ batchTimeoutSeconds}`, `join.{policy,resultKey}` (default `allSettled`; branch on `{resultKey}Summary` with an order-80 auto transition), and scaffold an `IFanOutMapping` `.csx` with at least `ItemInputHandler`.
 
@@ -189,6 +219,7 @@ Re-validate.
 ## Notes
 
 - Task `type` numeric values come from the schema — never hardcode them.
+- A type-23 task with `script`/`executionMode` is the removed pre-0.0.103 form — rewrite it as a handler reference, never "fix" it by deleting fields until validate passes.
 - Production URLs in task config are a code-review red flag during development; MockLab during dev, environment overrides at deploy time.
 - A `NotificationTask` without an `INotificationMapping` is a runtime no-op — always pair them.
 - If the same task config is duplicated across many transitions, consider extracting to a Function with a single shared task.

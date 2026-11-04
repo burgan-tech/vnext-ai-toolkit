@@ -80,7 +80,7 @@ the **plugin's install directory**, never in the workspace) by substituting ONLY
 `{{domain}}` and `{{workflowKey}}` from `vnext.config.json`; `{{Domain}}` = PascalCase of `domain`
 (`my-domain` → `MyDomain`; used by `docker-compose.yml`, `etc/runtime/**` and `templates/tests/**`); `{{toolkitVersion}}` from
 `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `.version` and `{{knownRuntimeVersion}}` from
-`.vnext.knownRuntimeVersion`; and the agent-file pair `{{agentFile}}` / `{{agentAudience}}` /
+`.vnext.knownRuntimeVersion`; `{{runtimeVersion}}` from `vnext.config.json` (Python runtime templates only); `{{handlerName}}` / `{{handlerModule}}` (handler scaffold only); and the agent-file pair `{{agentFile}}` / `{{agentAudience}}` /
 `{{peerFile}}` / `{{peerAudience}}` (values in Step 3).
 
 > **Placeholder allowlist — do not blanket-replace `{{...}}`.** Tokens like `{{baseUrl}}`,
@@ -123,6 +123,14 @@ If only one of the two exists, offer to create the other. The bodies are identic
   set to the binding), `etc/runtime/docker-compose.blob.override.yml`, `etc/runtime/README.md`, and
   `data/blobs/` in `.gitignore`. Explain in one line: it is applied with `-f` on top of vnext-runtime's
   compose and never edits vnext-runtime.
+- **Only if a task declares `"type": "23"`** (grep the tasks folder for `"type": "23"`): the Python
+  runtime — `etc/runtime/docker-compose.python.override.yml` (from
+  `templates/etc/runtime/docker-compose.python.override.yml.tmpl`), `etc/runtime/README.md`, and — when
+  `python-runtime/` does not exist yet — `python-runtime/{Dockerfile,requirements.txt,handlers/__init__.py}`
+  from `templates/python-runtime/` (`{{runtimeVersion}}` = the workspace `runtimeVersion`). Write a
+  handler module (`handlers/example.py.tmpl`, `{{handlerName}}` / `{{handlerModule}}`) only for handler
+  names the tasks reference but no module defines. Requires runtime ≥ 0.0.103 / schema ≥ 0.0.59; on an
+  older pin, say so and offer the Step 2 bump instead.
 - Task URLs: tell the user HTTP tasks use the `API_BASEURL` placeholder + `GetConfigValue("{Domain}:ApiBaseUrl", …)`
   (`.claude/references/mocklab-seed-format.md` §8) — `localhost:3001` works only from the host.
 - Warn about port conflicts (3001 MockLab, 3500 Dapr, 4201 runtime, 3005 vnext-runtime init).
@@ -193,6 +201,7 @@ staleness later (create `.claude/` if needed):
     "etc/dapr/config.yaml",
     "etc/dapr/components/.gitkeep",
     "etc/runtime/docker-compose.blob.override.yml   // only when written (x-storage)",
+    "etc/runtime/docker-compose.python.override.yml   // only when written (task type 23)",
     "tests/{Domain}.IntegrationTests/Infrastructure/WorkflowTestBase.cs   // and the other templates/tests files written",
     "TEST-SCENARIOS.md",
     ".claude/references/<basename>   // one entry per workspaceReferences item actually written"

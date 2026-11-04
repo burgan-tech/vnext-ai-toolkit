@@ -123,6 +123,9 @@ Hunt patterns in `.csx` (mappings receive untrusted data via `ScriptContext` —
   reflection driven by instance data.
 - String-concatenated XML/JSON/HTML bodies sent downstream without encoding.
 - `JsonConvert.DeserializeObject` with `TypeNameHandling` other than `None`.
+- Python handlers (`python-runtime/handlers/*.py`, task type 23): `eval` / `exec` / `pickle.loads` /
+  `subprocess` / `os.system` on handler input, SQL or shell strings built from it. The input is raw
+  instance data; the handler is trusted code running inside the domain's runtime pod.
 
 Not a finding:
 
@@ -198,6 +201,10 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
 - Verify `scripts.helpers` / `encoding: "REF"` sources and `allowedAssemblies` point only to
   trusted, allow-listed origins — externally referenced code executes inside the runtime.
 - Ensure third-party integrations are scoped and validated.
+- Python runtime image (`python-runtime/`): base image `ghcr.io/burgan-tech/vnext/python-runtime` pinned
+  to a runtime version (not `latest`), `requirements.txt` hash-locked and installed with
+  `--require-hashes --only-binary :all:`, `USER 65532:65532` kept after the install. Unpinned packages
+  or a final `USER root` are findings (Medium).
 
 ## 7. Misconfiguration and deployment hygiene
 
@@ -217,6 +224,10 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
 - Keep the internal tooling routes off the public edge: `…/instances/{id}/data/history` (0.0.100,
   hidden from Swagger but not blocked) and `internal/*` routes.
 - Confirm MockLab and other test surfaces are not wired into production configuration.
+- Type-23 tasks: no secrets in `config.input` (secrets come from the Dapr secret store or the pod
+  environment); handlers do not log their input. Local Python overlays keep `read_only`, `cap_drop: ALL`
+  and `no-new-privileges`; shared environments use the Helm `pythonRuntime` block, whose NetworkPolicy
+  admits only the Orchestration pods.
 
 ## Verification rubric
 

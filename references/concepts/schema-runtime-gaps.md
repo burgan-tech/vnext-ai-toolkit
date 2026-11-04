@@ -1,9 +1,9 @@
 # Schema ↔ Runtime Gaps — Where `npm run validate` and the Runtime Disagree
 
-> **Scope.** `@burgan-tech/vnext-schema` **0.0.56** (the package `npm run validate` uses) against runtime **v0.0.100**. The schema is the authoring contract and the runtime is the execution contract; they are released separately and are *not* identical. Two consequences:
+> **Scope.** `@burgan-tech/vnext-schema` **0.0.59** (the package `npm run validate` uses) against runtime **v0.0.103**. The schema is the authoring contract and the runtime is the execution contract; they are released separately and are *not* identical. Two consequences:
 >
 > 1. **Validate passes ≠ runtime accepts.** A shape the schema allows can still be rejected at `publish` (D5 and the publish-time rules below) or silently ignored at execution (D7, D8).
-> 2. **Runtime accepts ≠ validate passes.** The runtime tolerates shapes the schema rejects (D1, D2, D6, D11) — a domain package that only ever ran through `publish` can fail `npm run validate` later.
+> 2. **Runtime accepts ≠ validate passes.** The runtime tolerates shapes the schema rejects (D2, D6, D11) — a domain package that only ever ran through `publish` can fail `npm run validate` later.
 >
 > Everything below is verified against the files in `## Sources`. When the runtime and the schema disagree, **author the schema-valid form** unless a row says otherwise — the schema is what CI runs.
 
@@ -23,7 +23,7 @@ When `npm run validate` fails or a `publish` returns 400:
 
 | You see | Go to |
 |---|---|
-| validate: `attributes.type must be equal to one of the allowed values` on a task with `"23"` | D1 |
+| validate: `attributes.type must be equal to one of the allowed values` on a task with `"23"` (schema < 0.0.59), or `must NOT have additional properties` (`script`, `executionMode`) on a type-23 task (schema ≥ 0.0.59) | D1 |
 | validate: `attributes.type must be equal to one of the allowed values` on a **schema** component (`workflow`, `schema`, `view`, `task-input` …) — runtime publish only warns | D11 | <!-- lint:allow -->
 | validate: `must be equal to one of the allowed values` / `propertyNames` on an `x-*` keyword inside a schema component | D12 |
 | validate prints `⚠ Warning: Could not compile validator for schema` and still passes | D13 |
@@ -52,7 +52,7 @@ When `npm run validate` fails or a `publish` returns 400:
 
 | # | Where (schema path / runtime file) | Symptom | Author workaround | vnext-meta id |
 |---|---|---|---|---|
-| **D1** | `task-definition.schema.json` → `properties.attributes.properties.type.enum` = `"1"`…`"22"` (0.0.55+) / `TaskEnums.cs` (`Python = 23`) | A task with `type: "23"` **fails validate**; the runtime parses, publishes and runs it. `"22"` validates since schema 0.0.55. | Never author `22` — it is deprecated since 0.0.94 and `type: "6"` (HttpTask) already runs orchestrator-local under the default `Workflow:TaskInvocation` routing. For `23` (Python, experimental) keep the file outside `validateSchemas` coverage or wait for a schema release that adds it. | `external-http-task` (deprecation) |
+| **D1** | `task-definition.schema.json` → `properties.attributes.properties.type.enum` = `"1"`…`"22"` (0.0.55–0.0.58), `"1"`…`"23"` **since 0.0.59** / `TaskEnums.cs` (`Python = 23`) | **Closed for type 23 by schema 0.0.59 + runtime 0.0.103**, but the contract changed: 23 now validates only as a handler reference (`handler`, `input`, `timeoutSeconds`; `additionalProperties: false`). An old inline-`script` Python task (written for runtime 0.0.80–0.0.102) **fails validate** on 0.0.59 *and* publish on 0.0.103. On schema ≤ 0.0.58, `"23"` fails validate in any form. `"22"` validates since 0.0.55. | Never author `22` — deprecated since 0.0.94; `type: "6"` runs orchestrator-local. For `23` pin schema ≥ 0.0.59 **and** runtime ≥ 0.0.103 together, move each script into a handler of the domain's Python runtime image and reference it by name (`task-types.md` §3). | `external-http-task`, `python-task-inline-script-config` (deprecations); `python-task-handler-contract` (migration) |
 | **D2** | `workflow-definition.schema.json` → `definitions.errorAction` (`type: integer`, enum `0–5`) / `src/BBT.Workflow.Domain/Shared/JsonSerializerConstants.cs` (`JsonStringEnumConverter(CamelCase)`) | The schema accepts only integers for `errorBoundary.onError[].action`; reference fixtures (e.g. `vnext-example/core/Workflows/fan-out-config-matrix/fan-out-config-matrix.json`) write strings such as `"rollback"`; the runtime accepts **both**. | Write the integer: `0` Abort, `1` Retry, `2` Rollback, `3` Ignore, `4` Notify, `5` Log. Same for `onTimeout.action`. | — |
 | **D3** | `definitions.longPoll` → `oneOf: [{required:[roles]}, {required:[rule]}]`, `additionalProperties: false` | `"interaction": { "longPoll": { "terminate": false } }` alone **fails validate** (neither arm satisfied). The runtime's `WorkflowValidator` only rejects declaring **both** arms; an arm-less long poll publishes. | Add an explicit arm: `"roles": []` for "any caller", or a real `roleGrant[]` / one `rule`. Never both arms. | — |
 | **D4** | `definitions.roleGrant.grant` enum `["allow","deny"]` (lower-case) | Docs pages (e.g. `how-to/subflow-overrides`) show `"grant": "ALLOW"`; the schema **rejects** upper-case. The runtime compares case-insensitively. | Author `allow` / `deny`. `deny` always wins. | — |
