@@ -184,6 +184,12 @@ State type check:
 Decision: reusable nested sequence whose progress the parent must show → `S`. Independent parallel
 work → `P` via task 14 (`task-types.md`).
 
+**Child version (0.0.102, #1130).** A SubFlow / SubProcess reference without a full version resolves
+through the child flow's **default-version pointer** (`runtime-operations.md` §2.1) — in the callee's
+domain, with the callee's pointer — and the correlation stores the **resolved** version, so forwards,
+resume and retry never re-resolve to a different definition. Reference `"1.2"` / `"latest"` to follow
+the child's pointer; reference a full version to pin it.
+
 Parent-side tuning of a child (roles, queryRoles, long-poll window, view swaps, timeout) lives in
 `subFlow.overrides` — see `subflow-overrides.md`. Scripts reach related instances through
 `context.Related` (`ParentAsync`, `SubAsync`, `SubsAsync`): **one hop** up or down, read with the
@@ -219,7 +225,7 @@ input form on that state's `view`, not on the start transition (which has none).
 
 | Path | When |
 |------|------|
-| `POST …/instances/start` | Client or service call (body = initial payload) |
+| `POST …/instances/start` | Client or service call (body = initial payload). Without `?version=` (or with `latest`, `2`, `2.1`) it starts the flow's **default** version (0.0.102, `runtime-operations.md` §2.1); the response carries the resolved **`flowVersion`** |
 | `POST …/instances/events?action=start` | A published message; needs the workflow's `event.mapping` to compute the key (`event-driven-workflows` docs) |
 | `POST …/instances/schedule?scheduleId=&version=&sync=` (**0.0.100**, #1076) | A Dapr `bindings.cron` component whose `route` points here — one component YAML per schedule, owned by the domain's deployment. No body: every non-reserved query parameter becomes a **string** attribute; key = `{scheduleId}-{yyyyMMddTHHmmssZ}`; `sync` defaults to `false`. Assumes one delivery per tick (no lock) — verify before scaling the orchestrator beyond one replica |
 | SubFlow state / SubProcess task (14) / StartTrigger task (11) | From another instance |

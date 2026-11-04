@@ -105,14 +105,18 @@ before writing the output. Pull the option sets from the schema, not from memory
    roles), state `queryRoles` and, for functions, `roles` — knowing that since 0.0.95 the runtime
    only **filters visibility** by them and the **`authorize` function** (called by the gateway) is
    the single enforcement point; human states *must* have `queryRoles` or they are hidden from
-   the human-task list (`references/concepts/roles-and-authorization.md`).
+   the human-task list (`references/concepts/roles-and-authorization.md`). If different roles
+   may list different **rows** (own branch, own region), design `attributes.rowSecurity`
+   (runtime ≥ 0.0.102, experimental — `references/concepts/row-security.md`).
 6. **Supporting components.** For each transition's `onExecutionTasks[]`, choose the task
    `type` + `config` from `references/concepts/task-types.md` (which types run in-process on
    Orchestration, which are deprecated/experimental, schema ceiling `"1"`–`"23"` since
    0.0.59, CacheAside's 0.0.99 contract). A Python step (`23`, runtime ≥ 0.0.103) is a named
    handler in the domain's own Python runtime image — plan the handler names, their input/output
    and the image (`python-runtime/`) as part of the design, plus the error boundary for 422/504; extract reusable logic
-   into a Function. Decide which states/
+   into a Function. Plan the **release path** when the domain needs pilots or staged rollouts
+   (runtime ≥ 0.0.102): a `sys-version-registry` default-version pointer keeps newly published
+   versions pending until `set-default` (`references/concepts/runtime-operations.md` §2.1). Decide which states/
    transitions need Views, which Schemas are needed (master + per-transition payloads),
    and whether instance-read enrichment needs an Extension. Use
    `references/concepts/function-vs-extension-vs-task.md` to pick the right component.

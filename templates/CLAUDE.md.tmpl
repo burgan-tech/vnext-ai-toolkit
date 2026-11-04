@@ -209,6 +209,7 @@ Every workflow has a `.http` file (scaffolded from the toolkit's `.http.tmpl`; t
 ### Incident / retry     → GET   …/instances/{id}/incidents/active · POST …/instances/{id}/retry
 ### Human-task inbox     → GET   {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/functions/human-task
 ### Query                → GET   …/instances?filter={"status":{"eq":"A"}}&sort={"field":"createdAt","direction":"desc"}
+### Default version      → PATCH …/workflows/sys-version-registry/instances/{id}/transitions/set-default   (0.0.102)
 ```
 
 Contract details: [`state-function-response.md`](./.claude/references/state-function-response.md), [`instance-query.md`](./.claude/references/instance-query.md).
@@ -225,6 +226,7 @@ Contract details: [`state-function-response.md`](./.claude/references/state-func
 - Every workflow is expected to have an xUnit integration test (`integration-test` skill): happy path to each Final state, one unhappy path per conditional auto pair, and authorization scenarios via `authorize` verdicts. Missing tests are **reported as warnings** (validator, reviewer, a PostToolUse reminder) — skipping is allowed, never silent.
 - `npm test` checks the package structure; the e2e suite is `dotnet test`, driven by `/vnext-ai-toolkit:e2e`. It defaults to Testcontainers pinned to `runtimeVersion` and asks before using a local runtime you already run (port, default `4201`).
 - Publishing is version-immutable: a changed component that answers 409 `Instance:100002` needs a patch-version bump.
+- **Publish ≠ activate (0.0.102):** if the flow has a `sys-version-registry` pointer, a newly published version stays *pending* until `set-default` moves the pointer; floating starts (`latest`, `2`, `2.1`) get the default, explicit versions always work, and the start response carries the resolved `flowVersion`. 404 `Instance:100051` / 409 `100052` / 503 `100053` are pointer/registry problems, not component bugs ([`runtime-operations.md`](./.claude/references/runtime-operations.md) §2.1).
 - Local file fields: `x-storage` needs the `etc/runtime` blob overlay (or the test project's `DaprComponents` binding); without it a start answers 503 `Instance:100047` ([`file-fields.md`](./.claude/references/file-fields.md)).
 - Domain-authored pub/sub topics are used verbatim; under Kafka they must follow `vnext.{domain}.{environment}.*`.
 

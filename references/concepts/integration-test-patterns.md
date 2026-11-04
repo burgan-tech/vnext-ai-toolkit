@@ -179,13 +179,16 @@ Testcontainers: `Infrastructure/DaprComponents/orchestration/<name>.yaml` from
 uploads ≤ ~3 MiB). Local: `templates/etc/runtime/**` overlay (`--max-body-size 64Mi`). Contract:
 `file-fields.md`.
 
-## Runtime surfaces worth asserting (0.0.100)
+## Runtime surfaces worth asserting (0.0.103)
 
 Paths are `/api/v1/{domain}/workflows/{wf}/instances/{id}/…`; endpoints without an SDK method go through
 `CallInstanceFunctionAsync`, `GetRawAsync` or `SendRawAsync`.
 
 | Surface | Path | Assert |
 |---|---|---|
+| Start | `…/instances/start` | 200/202; `flowVersion` = the version the test expects (0.0.102 — a registry pointer may hold a newer published version back) |
+| Pending version | `…/instances/start?version=<full or artifact>` | explicit versions start even when pending; floating `?version=2` above the pointer → 404 `Instance:100051` |
+| Row security | list + `GET …/instances/{id}` per role / header case | own rows only; excluded single GET → 404; header missing → empty list (`row-security.md` §5) |
 | Observed state | `…/functions/state` → `state`, `status`, `transitions[]`, `activeCorrelations` | poll the state, not `status` (parked auto-chains rest in Busy) |
 | State ETag / 304 | `…/functions/state` + `If-None-Match` | 304, empty body (own `HttpClient`; SDK cannot send it) |
 | Busy admission | second transition while Busy | 409 `Instance:100031` (not retried) |

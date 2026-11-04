@@ -1,7 +1,7 @@
 # Runtime Operations — Locks, Caches, Discovery, URL Templates
 
 > Audience: domain authors running or debugging a domain against a local or shared runtime
-> (v0.0.100). This is the "why did the runtime answer 409 / 304 / stale?" reference. Helm and
+> (v0.0.103). This is the "why did the runtime answer 409 / 304 / stale?" reference. Helm and
 > operator detail is kept to what an author needs to *recognise*, not to operate. For tracing and
 > log lookup see `observability.md`; for incident/retry see `incidents-and-retry.md`.
 
@@ -37,6 +37,9 @@ outcome as `vnext.settle.cas = flipped | lost | skipped`).
 | `Instance:100037` | 404 | `incidents/active` when no incident is open — normal; re-read state |
 | `Instance:100031` on a SubFlow parent | 409 | (0.0.100 proxy) the child just completed or does not exist yet behind an open correlation — retry |
 | `Instance:100045` | 409 | `retry` on a `history: "none"` instance — not supported (`workflow-types.md` §8) |
+| `Instance:100051` | 404 | (0.0.102) a floating version request (none, `latest`, `2`, `2.1`) matches only **pending** versions above the flow's default — send an explicit version or move the pointer (§2.1) |
+| `Instance:100052` | 409 | (0.0.102) the flow's default-version pointer is malformed or matches no published version — start, transition, list and GET of that flow fail closed; fix it with `set-default` (§2.1) |
+| `Instance:100053` | 503 | (0.0.102) the version registry could not be read — transient, retry; check the database |
 | — | 413 | Async transition body over **10 MB** (Kestrel `MaxRequestBodySize`, 0.0.99 #1067; before that > ~2 MiB could strand the instance Busy) |
 
 ### SubFlow transition proxy (0.0.100, #1085)
@@ -105,6 +108,62 @@ Prefer `?sync=true` for transitions whose policy may change between accept and r
   Consequence: pods other than the publisher may serve the **old** generation for ≤ 5 s after a
   publish, rollback or deactivation. **Wait N + 1–2 s after the last publish before smoke tests.**
 - Manual flush: `POST /api/v1/utilities/invalidate`.
+
+### 2.1 Flow default version — publish ≠ activate (0.0.102, #1130)
+
+Publishing a version makes it **reachable**; the flow's **default-version pointer** decides which version
+a *floating* request starts with (no version, `latest`, `2`, `2.1`). Versions above the pointer stay
+**pending** until a caller names them. **Opt-in per flow:** a flow without a pointer behaves exactly as
+before (newest published version wins). A domain whose core package lacks the registry flow is unaffected.
+
+The pointer is an instance of the system flow **`sys-version-registry`** (ships with
+`@burgan-tech/vnext-core-runtime`), **instance key = flow key**, data
+`{ "type": "Flow", "defaultVersion": "…", "reason": "CHG-12345" }` (`type` is informational):
+
+```http
+### Create the pointer (once per flow)
+POST {{baseUrl}}/api/v1/{{domain}}/workflows/sys-version-registry/instances/start?sync=true
+Content-Type: application/json
+
+{ "key": "loan-application", "attributes": { "type": "Flow", "defaultVersion": "1.2.0", "reason": "pin before pilot" } }
+
+### Move it (or "latest" to clear — null does NOT clear an existing pointer)
+PATCH {{baseUrl}}/api/v1/{{domain}}/workflows/sys-version-registry/instances/{{registryId}}/transitions/set-default?sync=true
+Content-Type: application/json
+
+{ "attributes": { "defaultVersion": "1.2.1", "reason": "pilot finished" } }
+```
+
+| Pointer | Mode | New patch in the line | Higher minor / major |
+|---|---|---|---|
+| `"latest"` / none | Automatic (pre-0.0.102 behaviour) | live | live |
+| `2.1.0-pkg.1.0.168` | one package build (write it without `+metadata`; partial `-pkg.1.0` → 409) | pending | pending |
+| `2.1.0` | artifact pin (follows re-published builds of 2.1.0) | pending | pending |
+| `2.1` | minor line | live | pending |
+| `2` | major line | live | live within `2`, `3.0.0` pending |
+
+- **Explicit always wins:** a full (`-pkg.`) or artifact (`2.2.0`) request is served even when it is
+  pending or the pointer is broken — that is how pilots and integration tests reach a pending version.
+  `sys-*` keys bypass the policy.
+- Running instances stay on the version they started with. SubFlow / SubProcess correlations store the
+  child's **resolved** version, so a parent never re-resolves a floating child reference mid-flight.
+  Cross-domain references resolve with the **callee's** pointer.
+- Start responses carry **`flowVersion`** (the resolved version) — assert it in tests and log it in
+  clients. Spans: `vnext.flow.version.requested`, `vnext.flow.version`, `vnext.flow.version.pointer`,
+  `vnext.flow.version.source` (`automatic|explicit|default|ceiling`); logs 20500–20504.
+- A pointer change reaches every pod within ≈ `GenerationMemoSeconds` (5 s). A write with an invalid or
+  unmatched pointer is refused with 409 `100052`; the registry instance stays Active.
+- Since 0.0.102 the **instance list, GET and `GetInstance(s)` tasks** also load the flow, so a broken
+  pointer or registry outage fails reads too (migration `instance-read-fails-on-flow-lookup-error`); the
+  same lookup picks the `rowSecurity` rules in force (`row-security.md`).
+
+**Rollout runbook.** *Pilot in one domain* (live `1.2.0`, pilot `1.2.1`): `set-default 1.2.0` (an exact
+pin — a line pointer `1.2` would make `1.2.1` live at once) → publish `1.2.1` (pending) → pilot clients
+start with `?version=1.2.1` → `set-default 1.2.1` (or `1.2` to let patches flow). Rollback =
+`set-default 1.2.0`; instances already on `1.2.1` stay there. *Cross-domain:* publish the callee's new
+version (pending), reference it by full version from the pilot caller, flip the callee's default first,
+then the caller's — the two registries are not atomic. Symptoms: 404 `100051` → explicit version or move
+the pointer; 409 `100052` → `set-default` to a published version or `"latest"`; 503 `100053` → retry.
 
 ## 3. Domain discovery via Dapr
 
@@ -278,6 +337,7 @@ Tests must not hard-code `/api/v1` when parsing hrefs; read them from the state 
 
 ## Sources
 
+- Runtime `vnext` @ `74587011` (0.0.103): `docs/runtime/flow-default-version.md` (#1130).
 - Runtime `vnext` @ `f06961ec` (0.0.100):
   `src/BBT.Workflow.Domain/Execution/Transitions/Pipeline/ITransitionAdmissionService.cs`,
   `src/BBT.Workflow.Domain/WorkflowErrorCodes.cs`, `src/BBT.Workflow.Domain/Logging/WorkflowErrors.cs`,

@@ -68,13 +68,15 @@ Load `node_modules/@burgan-tech/vnext-schema/schemas/workflow-definition.schema.
 
 4b. **Should the caller choose sync/async?** (runtime ≥ 0.0.99) Default yes (omit `executionType`; caller sends `?sync`). If a flow or specific transitions must always be sync (`"S"`, 200) or async (`"A"`, 202), record `executionType` at flow or transition level (transition → flow → `?sync`).
 
-Capture: `workflowKey`, `businessGoal`, `actorModel` (single/multi), `workflowType`, `historyMode`, `executionType`.
+4c. **How do new versions go live?** (runtime ≥ 0.0.102) Default: as soon as they are published (no pointer). If releases need a pilot, a staged rollout or a quick rollback, plan a **default-version pointer** in `sys-version-registry` (publish ≠ activate): pin an exact version, publish the next one as *pending*, pilot it with an explicit `?version=`, then `set-default` (`references/concepts/runtime-operations.md` §2.1). Cross-domain callers follow the callee's pointer only when they reference it floating (`"1.2"`, `latest`).
+
+Capture: `workflowKey`, `businessGoal`, `actorModel` (single/multi), `workflowType`, `historyMode`, `executionType`, `rolloutMode` (immediate / pinned default).
 
 ### Phase 2 — Flow Architecture
 
 Goal: lay out the state machine.
 
-5. **Multi-actor?** **Roles require explicit user confirmation: always ask the user whether this flow should configure roles at all before adding any** (roles add real complexity for vNext newcomers — make "no roles" the default/Recommended option). Only if the user confirms, plan `queryRoles[]` (the canonical schema and `roles-and-authorization.md` describe the system role tokens — `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` — and JSONPath grants). For most flows the answer is "no" — skip if the user said single actor in Phase 1.
+5. **Multi-actor?** **Roles require explicit user confirmation: always ask the user whether this flow should configure roles at all before adding any** (roles add real complexity for vNext newcomers — make "no roles" the default/Recommended option). Only if the user confirms, plan `queryRoles[]` (the canonical schema and `roles-and-authorization.md` describe the system role tokens — `$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser` — and JSONPath grants). For most flows the answer is "no" — skip if the user said single actor in Phase 1. If roles are confirmed, also ask whether **every caller who may list instances sees every row** — if not, plan `attributes.rowSecurity` (runtime ≥ 0.0.102, experimental; deny by default, unfiltered rule for admins, scope from gateway-written headers — `references/concepts/row-security.md` §5) and note that it does not cover `functions/data`, transitions or SubFlow children.
 
 6. **Are there reusable sub-procedures, independent child processes, or per-item parallel work?**
    - Reusable nested procedure whose result flows back → **SubFlow** (`stateType: 4` + child of type `S`) — note the child workflow keys; ask whether the parent must override the child's timeout/roles/views/long-poll (`subFlow.overrides`, `references/concepts/subflow-overrides.md`).
@@ -88,6 +90,7 @@ Goal: lay out the state machine.
    - Does this state show the user something (a view)? What kind — an input form, or read-only summary?
    - **Does a person act here** (approve / review / complete a manual step)? → human task state: `subType: 6`, `queryRoles` (mandatory, fail-closed), and `humanTask: {title, description}` written into instance data on entry (`references/concepts/human-task.md`). A human state is **forbidden** in a `history: "none"` flow — if one appears, switch `historyMode` back to full.
    - **Must the engine wait for a specific client to render this state** before it continues (result screen, hand-over to another actor)? → `interaction.longPoll { terminate: true, fallbackTimeoutSeconds, roles|rule }` (`references/concepts/long-poll-interaction.md`).
+   - **Must the instance wait for the client to push data (`updateData`) and continue on its own, with a timeout fallback?** (runtime ≥ 0.0.102) → an **interaction wait**: Busy subtype (`subType: 5`) + `interaction`, auto transitions whose rules read the pushed data, and a timer transition as the fallback (`long-poll-interaction.md` § Interaction wait).
    - **First-state input convention** — if this is the first state (Initial or the start target) AND it gathers input, default to placing the form on `state.view` (not on the outgoing transition). Confirm with `AskUserQuestion`; mark state-view as Recommended. The runtime serves state views immediately on instance start — putting the form on the transition forces an extra discovery hop. Wizard states (5) are the exception: their form belongs on the single transition by design.
 
 8. **Map the transitions.** Keep the **admission model (v0.0.79+)** in mind while designing:
@@ -101,7 +104,7 @@ Goal: lay out the state machine.
    ask what happens to leave it:
    - Target state
    - Trigger — render `triggerType.enum` from the schema. Annotate: "Manual — user clicks (Recommended for most)"; "Auto — engine evaluates a rule"; "Timer — fires after a duration"; "Event — external signal".
-   - For auto transitions: warn that they must come in **complementary pairs** with mutually exclusive rules, OR be a single unconditional transition. Ask the user to specify both branches.
+   - For auto transitions: ask what happens on **every** branch. Rules are evaluated in `priority` order (runtime ≥ 0.0.102: integer ≥ 1, absent = 100, lower first, ties in declaration order) and the first satisfied rule wins; a `triggerKind: 10` default auto transition always runs last as the fallback. Prefer mutually exclusive rules or an explicit default (`triggerKind: 10`) so no state is left without a matching rule; use `priority` only when rules may overlap on purpose ("VIP before amount check") — `references/concepts/transition-pipeline.md`.
    - For timer transitions: capture the duration (ISO 8601) or note that a dynamic `ITimerMapping` is needed.
    - If `historyMode` is `none`: only Auto is allowed — stop and revisit 4a if the user needs anything else.
    - Same task twice in parallel (same `order`) → note a `variableKey` for one binding (0.0.99).
