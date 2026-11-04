@@ -63,6 +63,10 @@ Use lowercase `allow`/`deny`.
    Finish → Finalize → ResolveAvailable.
 4. **Fallback.** No ack in time → the job resumes the same way. Ack on a non-awaiting instance is a
    **200 no-op**. Ack and fallback are serialized (`:lpack` lock); the second one no-ops.
+   **Diagnosing a client that never acks (0.0.103):** a fallback resume logs 20308
+   `LongPollFallbackResumed` (ack: 20301) and the counter `workflow_longpoll_resume_total` splits resumes by
+   `vnext.activation.trigger` (`ack` | `ack-timeout`) — when `ack-timeout` ≈ all resumes, fix the client's
+   ack call or shorten `fallbackTimeoutSeconds` (`observability.md`).
 
 ErrorBoundary and AutoChain profiles never pause at 75.
 

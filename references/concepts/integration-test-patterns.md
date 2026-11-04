@@ -198,7 +198,7 @@ Paths are `/api/v1/{domain}/workflows/{wf}/instances/{id}/…`; endpoints withou
 | Long-poll ack | `POST …/longpoll/ack` | 200; instance leaves Busy |
 | Authorize | `…/functions/authorize?transitionKey=…` / `queryRoles=true` / `functionKey=…` / `ack=true` | 200 allowed / 403 denied |
 | Human-task list | `GET /api/v1/{domain}/functions/human-task` | filtered by caller roles (fail-closed) |
-| Task journal | `…/functions/tasks` | executed task keys and outcomes |
+| Task journal | `…/functions/tasks` | executed task keys and outcomes — **completed tasks only** since 0.0.102 (a running task is not listed; assert after the transition settles) |
 | Correlations | `…/functions/instance-correlation` | SubFlow/SubProcess tree |
 | File | `…/functions/file?file=<guid>` | bytes + headers; state `queryRoles` deny → 403 (enforced here); `x-roles`-hidden or foreign handle → 404 |
 | Filter + sort | `…/instances?filter={json}&sort={json}` | `x-filterOperators` declaration names; filtered fields `x-indexed` |

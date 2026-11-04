@@ -60,6 +60,7 @@ Shipped Orchestration `appsettings.json`:
 |------|---------|---------|
 | `Workflow:TaskInvocation:LocalInvocationTimeoutSeconds` | **60** | Deadline around every in-process call; the only bound for 3/17 and CacheAside's cache I/O (no own `timeoutSeconds`; an 18 source keeps its own type's timeout) |
 | `Workflow:TaskInvocation:MaxConnectionsPerServer` | 50 | Per-target connections for orchestrator HTTP/SOAP egress |
+| `Workflow:TaskInvocation:PooledConnectionLifetimeSeconds` / `PooledConnectionIdleTimeoutSeconds` | 600 / 120 | (0.0.102, `httpTaskClientPool`) HTTP/SOAP tasks reuse warm TCP+TLS connections; lifetime bounds how long a DNS/gateway change goes unnoticed, keep idle below the gateway keep-alive. The Execution host reads the same three dials from `WorkflowHttpClient:*` (its cap was a hardcoded 10) — override both hosts together |
 | `Workflow:PythonRuntime:AppId` (Orchestration) | empty | Dapr app-id of the domain's Python runtime (Helm `pythonRuntime` sets it). Empty → every type-23 task fails with **503**. Type 23 is not routed: no `python` entry belongs in `Modes` |
 | `Workflow:PythonRuntime:InvokeMethod` / `TimeoutGraceSeconds` | `v1/invoke` / `5` | Invoke route of the contract; extra wait beyond the handler timeout so the runtime's own 504 arrives first |
 
@@ -195,7 +196,7 @@ Two read-only **system functions** expose the task journal — metadata only, no
 
 | Call | Returns | Errors |
 |------|---------|--------|
-| `GET /{domain}/workflows/{flow}/instances/{id}/functions/tasks` | every `InstanceTasks` row, `StartedAt` ascending | — |
+| `GET /{domain}/workflows/{flow}/instances/{id}/functions/tasks` | every **completed** `InstanceTasks` row, `StartedAt` ascending. Since 0.0.102 (`bookkeepingCommitReduction`) a row is written once, at completion — a **running** task is no longer listed, and a task interrupted by a crash leaves no row (it re-runs on retry) | — |
 | `GET …/instances/{id}/functions/actions?taskId={guid}` | the row's `InstanceActions` sub-steps | missing/non-GUID → 400 `Instance:100039`; task not on this instance → 404 `Instance:100038` |
 
 A domain function named `tasks` or `actions` is **shadowed**, like every other system function key.
@@ -233,6 +234,7 @@ A domain function named `tasks` or `actions` is **shadowed**, like every other s
 - **Custom `storeName` breaks silently under Local.** A Dapr component scoped to the execution app-id resolved under `Remote` and fails at first execution under the new default, with no publish-time or startup signal. Re-scope it to the orchestrator app-id or set `"statestore": "Remote"` (CacheAside cache I/O follows it since 0.0.99).
 - **3/17/18 have no `timeoutSeconds`.** `LocalInvocationTimeoutSeconds` (60 s) is their only bound; there is no per-task dial.
 - **No task-level mode override**, whatever the docs say (§2).
+- **Parallel same-domain reads (fixed 0.0.103, #1166).** On runtime ≤ 0.0.102, two or more same-domain `GetInstances` / `GetInstance` / `GetInstanceData` tasks (or DirectTrigger by key) at the **same `order`** shared one database context and failed with `A second operation was started on this context instance` — silently wrong without an error boundary. On older runtimes put them at different `order`s; 0.0.103 gives each read its own unit of work.
 - **Same-`order` parallel branches** are merged by response slot = `variableKey ?? camelCase(task.key)`. Listing the same task twice at one order used to throw `Parallel tasks produced conflicting output…`; since **0.0.99** (#1072) give at least one entry a `variableKey` (`^[A-Za-z_][A-Za-z0-9_]*$`, ≤ 100 chars). Publish rejects a slot collision within one order (workflows: `onEntries`, `onExits`, `onExecutionTasks`) and across all `onExecutionTasks` (functions); a later order may reuse a slot and overwrites it.
 - **CacheAside `keyExpression` is gone** (0.0.99). The runtime no longer reads it (deprecation `cacheaside-key-expression-removed`, severity error) — move it into `key` as a ScriptCode with `"encoding": "NAT"`.
 - **12 ignores `version`.** Drop it; the deprecation is a warning today.

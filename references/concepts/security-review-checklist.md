@@ -153,6 +153,12 @@ Hunt patterns:
   copying them into data exposes another instance's documents.
 - A custom function with the key `file` — shadowed by the reserved system function (0.0.100), so the
   author's own gate never runs.
+- **Streamed uploads (`x-storage.transport: stream|any`, 0.0.102):** `POST …/workflows/{flow}/files` has no
+  runtime authorization — the gateway must gate it like `start` (and size-limit it); `PutFileAsync` writing
+  caller-controlled bytes or names without validation; a DaprBinding `delete`/`list` mapping whose object key
+  comes from request data instead of a stored handle (`FileObjectKey(handle.file)`).
+- **Remote validation functions** (`x-validation.rule: "remote"`): the function is a public client call —
+  enumeration oracle ("is this IBAN/username taken?") without `authorize` and rate limiting at the gateway.
 - `x-storage` fields holding identity documents without `queryRoles` on the states and `x-roles` on
   the field path (the `file` function enforces both in process: 403 / 404).
 
