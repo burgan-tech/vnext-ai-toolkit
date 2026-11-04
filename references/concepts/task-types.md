@@ -9,7 +9,7 @@
 | # | Name | Wire name | Runs (default) | Status | Notes |
 |---|------|-----------|----------------|--------|-------|
 | 1 | DaprHttpEndpoint | `daprhttpendpoint` | Remote (Execution) | stable | Dapr HTTPEndpoint component |
-| 2 | DaprBinding | `daprbinding` | Remote | stable | Output bindings (queue, blob, SMTP, …) |
+| 2 | DaprBinding | `daprbinding` | Remote | stable | Output bindings (queue, blob, SMTP, …). Since 0.0.102 the output mapping sees the binding's answer and a mapping sets `operation` / `data` / `metadata` per call (§3) — the way to delete/read/list `x-storage` objects |
 | 3 | DaprService | `daprservice` | **Local (Orchestration)** | stable | No `timeoutSeconds` field → §7 |
 | 4 | DaprPubSub | `daprpubsub` | Remote | stable | Publish an event. `topic` is used **verbatim** — under Kafka it must sit inside `vnext.{domain}.*` (0.0.100, §3) |
 | 5 | Human | — | Orchestration **stub** | **do not author** | Returns 202 `"Pending"` and nothing else. The real HumanTask is **state `subType: 6` + the `human-task` function** (#1016, 0.0.94) — see `human-task.md` |
@@ -92,6 +92,18 @@ Timeout layering, local path: `task timeoutSeconds (http/soap only, default 30) 
 - `ttlInSeconds` absent or `0` = never expires; `consistency` `Eventual`|`Strong`; `bypassOnCacheError` default `true` (cache errors fall back to the source, log 10176).
 - **Removed:** `keyExpression`, the `cacheaside` wire type and `Modes:cacheaside`. Entries written by ≤ 0.0.98 hold raw values until their TTL expires; StateStore pre-warm writes must now write the **shaped** value.
 - Not to be confused with the **function-level** `attributes.cache` block: that one still has its own `keyExpression` (a Dynamic Expresso ScriptCode, plus `generationKey` / `generationKeyExpression`) — unchanged.
+
+### 2 DaprBinding — response and per-call shape (0.0.102, #1144)
+
+- **Answer to the output mapping** (migration `daprbinding-task-output-mapping-data`): `Data` is the binding's
+  body as JSON when it parses, else text, else base64 (`Metadata["DataEncoding"]` = `json|text|base64|none`);
+  `Headers` = the binding's response metadata; a failure carries the sidecar's reason. An unmapped task still adds
+  no instance data. Before 0.0.102 the response carried only `BindingName` / `Operation`.
+- **Per-call shape** in the `InputHandler`: `((DaprBindingTask)task).SetOperation("delete" | "get" | "list" | …)`,
+  `SetData(…)`, `SetMetadata(new() { ["key"] = FileObjectKey(fileId) })` (`fileName` for `bindings.localstorage`).
+- **Reaching `x-storage` components:** they are scoped to the orchestration app-id while type 2 runs Remote by
+  default — the platform sets `Workflow:TaskInvocation:Modes:daprbinding = Local` (orchestration sidecar) or
+  scopes the component to Execution too. Recipe: `file-fields.md` § Deleting, reading and listing objects.
 
 ### 19 GetInstance
 

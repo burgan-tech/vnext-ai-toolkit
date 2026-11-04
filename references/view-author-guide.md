@@ -204,6 +204,8 @@ Compound: `allOf`, `anyOf`, `not`. `x-conditional` takes at least one of `showIf
 
 `x-validation` is an object `{ rule, parameters?, errorMessages? }`. `delegate.onValidationRequest(field, value, formData)` is called asynchronously; the host returns an error string or `null`. It runs after schema-level pattern + length checks. The runtime never executes `rule` — enforce server-side rules in the transition's own validation.
 
+**Remote rule (schema 0.0.57+).** `{ "rule": "remote", "source": "urn:vnext:fn:get:<domain>:<function>", "resultField": "$.data.valid", "messageField": "$.data.message", "trigger": "blur", "debounce": 400 }` — the renderer calls the function with the value (on `change` or `blur`, after `debounce` ms) and shows `messageField` when `resultField` is falsy. `source` is required for `remote`; the five extra members are refused on other rules. Create the Function first (`component-function`, usually `rawResponse: true`) and still re-check the value server-side. Details: `schema-vocabularies.md` § `x-validation`.
+
 ---
 
 ## 3. View authoring — node types

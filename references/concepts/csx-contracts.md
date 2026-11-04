@@ -249,6 +249,21 @@ public sealed record ScriptFile(byte[] Content, string? Name, string? MimeType, 
 - **Cross-domain.** Works for a handle owned by another domain (internal route, network isolation only). The handle must be in that instance's **latest** data.
 - Throws `InvalidOperationException` when no file reader is available or the read fails; blank arguments throw `ArgumentException`.
 - **Bytes stay in memory and land wherever you put them.** Copying `Content` into a task request stores it in that task record (known issue `file-in-task-record`). Pass the handle through mappings; fetch bytes only in the mapping of the task that needs them, and don't echo them into responses.
+- **Verified since 0.0.102:** bytes that do not match the handle's `size` / `eTag` throw (503 `Instance:100047` on the client routes).
+
+**Process and write back (0.0.102, #1144).**
+
+```csharp
+Stream ScriptFile.OpenRead();   // new read-only MemoryStream over Content on every call
+protected Task<ScriptStoredFile> PutFileAsync(string domain, string flow, string instance, string component,
+    byte[] content /* or Stream */, string? name = null, string? mimeType = null);   // returns the persisted handle
+protected string FileObjectKey(string file);   // FileStorage:KeyPrefix + file id, for a DaprBinding task's metadata
+```
+
+`PutFileAsync` stores the bytes through the flow's binding (`component` must be one of the flow's `x-storage`
+bindings or in `FileStorage:AllowedBindings`; size ≤ `FileStorage:Upload:MaxBytes`; refusals throw). Put the
+returned handle on an `x-storage` path of the output — anything else is an orphan object. Full example and the
+delete/list recipe: `file-fields.md` §3.
 
 ## Encrypted fields — `context.Instance.DecryptAsync` (0.0.99+)
 
@@ -598,7 +613,7 @@ Functions have a top-level `attributes.rawResponse` boolean (separate from the `
 | Value | Effect |
 |-------|--------|
 | `false` (default) | Runtime wraps `ScriptResponse.Data` under the function key: `{ "{functionKey}": { ...Data... } }` |
-| `true` | Runtime returns `Data` raw: `{ ...Data... }` |
+| `true` | Runtime returns `Data` raw: `{ ...Data... }`. Since 0.0.102 a `byte[]` or `ScriptFile` `Data` answers the **bytes** (`Content-Length`; your `Content-Type`, else the file's `mimeType`, else `application/octet-stream`) — before, a quoted base64 JSON string (migration `function-raw-byte-array-body`: clients that decoded base64 must read bytes) |
 
 **Required `true`** for any function whose output a view binds directly (`dataSchema`, `x-lov.source`, `x-lookup.source`, `$lov.X` / `$lookup.X` expressions). With `false`, JsonPath like `$.data[*]` silently misses the array under the function-name wrapper and the view shows an empty result with no error.
 
@@ -649,7 +664,7 @@ Default **`false`** — flipping it changes affected instances' content hash onc
 
 Before **v0.0.87** the compiler replaced the script's using list with the platform list, so an author's `using System.Text;` was silently discarded and `StringBuilder` failed at **runtime** with `CS0246` — despite the import being right there. Since 0.0.87 author usings are **merged** (aliases and `using static` included). Two rules still hold on every version: the default usings are `System`, `System.Collections.Generic`, `System.Linq`, `System.Threading.Tasks`, `System.Text.Json`; anything from an assembly outside the default reference set needs `scripts.allowedAssemblies` regardless of the `using`. A `CS0246` for a namespace you clearly imported on a workspace pinned below 0.0.87 is this bug, not your code.
 
-## Runtime notes that bite scripts (v0.0.98 – v0.0.100)
+## Runtime notes that bite scripts (v0.0.98 – v0.0.103)
 
 ### `allowedAssemblies` must resolve at publish (0.0.99, #1069)
 
@@ -659,6 +674,23 @@ Every simple name under `scripts.allowedAssemblies` (flow level or any script sl
 
 `System.ObjectModel` is in the sandbox baseline since 0.0.99. On **0.0.26–0.0.98**, where the environment enables the sandbox, a mapping that `foreach`-es over an `ExpandoObject` failed to compile with `CS0012` (known issue `sandbox-baseline-missing-system-objectmodel`). Workaround on older runtimes: grant `"System.ObjectModel"` in `scripts.allowedAssemblies`, or read the expando through `as IDictionary<string, object>` instead of enumerating the expando itself.
 
+### Sandbox: in-memory streams allowed, reflection members banned (0.0.102, #1144)
+
+Where the environment enables the sandbox (`Scripting:Sandbox`), `System.IO` stays banned **except** these
+in-memory types: `Stream`, `MemoryStream`, `BufferedStream`, `BinaryReader`/`Writer`, `TextReader`/`Writer`,
+`StringReader`/`Writer`, `StreamReader`/`Writer` (not the `string path` constructors), `SeekOrigin`,
+`IOException`, `EndOfStreamException`, `InvalidDataException`; and from `System.IO.Compression` (assembly in
+`scripts.allowedAssemblies`) `GZipStream`, `DeflateStream`, `BrotliStream`, `ZLibStream`, `ZipArchive`,
+`ZipArchiveEntry` and their enums. `File`, `FileStream`, `Directory`, `Path`, `ZipFile` stay banned.
+
+**New compile-time bans** (migration `script-sandbox-member-bans`, warning): non-generic `Activator`
+members (`Activator.CreateInstance<T>()` stays allowed), static `Type.GetType(string …)`,
+`GetTypeFromProgID/CLSID`, `Type.GetMethod(s)` / `GetConstructor(s)` / `GetMember(s)` / `GetField(s)` /
+`GetEvent(s)` / `FindMembers` / `GetDefaultMembers` / `TypeInitializer` / `InvokeMember`,
+`Environment.Exit` / `FailFast` / `SetEnvironmentVariable`. A script using one fails to compile with
+"banned member" after the upgrade — replace reflection with typed code or `ScriptBase` helpers. The analyzer
+is a guard, not an isolation boundary (known issue `script-sandbox-reflection-gaps`).
+
 ### Script plugins (0.0.100, #1090)
 
 A plugin is a DLL (e.g. a database driver) the **platform team** mounts in the environment's plugin directory (`Scripting:Sandbox:PluginDirectory`); a mapping uses it by listing its name in `scripts.allowedAssemblies`. Product teams do not control this directory or runtime config — ask the platform team / environment owner.
@@ -667,6 +699,7 @@ A plugin is a DLL (e.g. a database driver) the **platform team** mounts in the e
 - **Usable from a helper-less mapping.** Before 0.0.100 only `sys-mappings` helper sets loaded plugins; a mapping that used a plugin type directly compiled, then failed at run time with `FileNotFoundException`. On older runtimes, wrap plugin calls in a `sys-mappings` helper.
 - **Added DLL:** picked up without a restart (re-read on a miss, at most every `PluginRescanIntervalSeconds`, default 30). A component rejected at publish before the DLL arrived must be published again. **Replacing or removing** a loaded DLL needs a runtime restart.
 - **Pass `context.CancellationToken`** to driver calls so a cancelled request/job stops the query.
+- **SQL Server (`Microsoft.Data.SqlClient`) needs three things** (runtime images ≥ **0.0.101**, #1115, ship ICU and GSSAPI for it): the platform mounts the `runtimes/unix/lib/<tfm>/` build (the `lib/` copy throws `PlatformNotSupportedException`) and sets `DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=0` (Helm `global.dotnetEnv`; images before 0.0.101 crash at start with it); the mapping lists `System.Data.Common` **and** `System.ComponentModel.Primitives` in `scripts.allowedAssemblies` (else `CS0012`). Example: vnext-example `core/Functions/script-plugin-lab/` `spl-sqlserver-query` (PR #42).
 - The banned-namespace analyzer checks your script, not the plugin: a mounted DB driver gives network access to every mapping that lists it. Working example: vnext-example `core/Functions/script-plugin-lab/` + `plugins/ScriptPluginLab.Sql`.
 
 If a script fails in a way these notes don't explain and the runtime is at fault, draft an issue with `/vnext-ai-toolkit:report-issue`.

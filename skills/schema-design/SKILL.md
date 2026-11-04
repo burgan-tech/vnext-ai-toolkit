@@ -95,7 +95,9 @@ Offer per field, only if the role's `allowedKeywords` lists them:
   `contains`, `greaterThan`, `lessThan`, `greaterThanOrEquals`, `lessThanOrEquals`, `startsWith`,
   `endsWith`. "Required when …" → JSON Schema `allOf` + `if`/`then`.
 - `x-validation` — an **object** `{ rule, parameters?, errorMessages? }` run by the client delegate; the
-  runtime never executes it.
+  runtime never executes it. For "check against the backend" (username/IBAN taken, eligibility) use
+  `rule: "remote"` with `source` (function URN, required), `resultField`, `messageField`, `trigger`
+  (`change`|`blur`), `debounce` (schema ≥ 0.0.57) — offer to scaffold the Function, and keep a server-side check.
 
 ### 5. Sensitive data — ASK for every PII / sensitive field (mandatory, no silent default)
 
@@ -177,6 +179,13 @@ If a field holds a document/image upload: on the master,
 **transition** schema with the upload shape (`name`, `mimeType`, `size`, `content` base64). Ask the
 binding name (local dev: `vnext-blob-local`) and point to `references/concepts/file-fields.md` for the
 local binding and `functions/file`.
+
+Then ask **how clients send the bytes** (runtime ≥ 0.0.102, schema ≥ 0.0.58) — `x-storage.transport`:
+`inline` (default; base64 `content` in the JSON body, up to ≈ 7.5 MiB of file), `stream` (large files —
+upload to `POST …/workflows/{flow}/files?path=<field>&name=` first, then reference the returned `file` id;
+no transition-schema `content` member needed for that field) or `any` (both). Recommend `stream` for scans,
+video or anything that may exceed ≈ 7 MiB. Client members kept next to the handle (`documentType`) must be
+declared on a strict (`additionalProperties: false`) master node. Always emit `$schema` (2020-12).
 
 ### 9. Client context — per role
 
