@@ -70,6 +70,8 @@ auto/timer transitions). Clients must then branch on the status code.
 
 **Roles gate (mandatory question).** Before designing any state or transition, **ask the user whether this flow should configure roles (`queryRoles`/`roles`) at all** — via `AskUserQuestion`, with "no roles" as the Recommended default. Roles add real complexity, especially for vNext newcomers; never add role configuration without explicit user confirmation. If confirmed, follow `references/concepts/roles-and-authorization.md` — and remember the 0.0.95 model: the runtime only *filters visibility* by roles; the **`authorize` function** (called by the gateway) is the single enforcement point, so a local runtime without a gateway will not 403 on reads.
 
+**Row visibility (only if roles are confirmed; runtime ≥ 0.0.102, schema ≥ 0.0.58).** Ask: *"Should every caller who may list this flow see every instance, or only some rows (own branch, own region, own applications)?"* If rows differ per role, design `attributes.rowSecurity` with `references/concepts/row-security.md` §5: one rule per role group, an explicit unfiltered rule for admins/auditors (it is deny by default — there is no `default`), scope values from gateway-written headers or `CurrentUser` (never `QueryParameters`), filtered fields `x-indexed` and not masked/encrypted, `$InstanceStarter` for "own instances". State the limits plainly: it filters the list, the single GET and `GetInstance(s)` tasks only — `functions/data`, transitions and SubFlow children are not covered (experimental).
+
 ### 3. Map the states
 
 Walk through the flow with the user. For each state capture:

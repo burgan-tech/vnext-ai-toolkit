@@ -221,6 +221,18 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
 - Confirm the gateway owns **every** credential header (`sub`, `act_sub`, `role`, `position`,
   `client_id`) — not only `role` — and that `CallerRoleProvider:MorphIdm:GetRolesPath` is set
   explicitly (code default `/api/1/…`, orchestration appsettings `/api/v1/…`).
+- **Row security (`attributes.rowSecurity`, 0.0.102):**
+  - a rule parameter on `$.context.QueryParameters.*` presented as a restriction — client-controlled, never
+    a boundary (High when it guards personal data);
+  - a rule header the gateway does not strip/overwrite (append = the caller widens its own scope);
+  - rowSecurity treated as the access control for instance-addressed routes — `functions/data|state|view`,
+    history and transitions still serve excluded instances by id (known issue
+    `row-security-instance-surfaces-unfiltered`, existence oracle GET 404 vs data 200): those routes need
+    `authorize` at the gateway;
+  - a flow with SubFlow states whose children carry no rules of their own (RS-W7);
+  - a `GetInstances` / `GetInstance` task mapping that sets `role` / `sub` or a rule header to read
+    another domain wider than its caller could;
+  - a deployment plan that may roll the runtime back below 0.0.102 (older runtimes serve every row).
 - Keep the internal tooling routes off the public edge: `…/instances/{id}/data/history` (0.0.100,
   hidden from Swagger but not blocked) and `internal/*` routes.
 - Confirm MockLab and other test surfaces are not wired into production configuration.

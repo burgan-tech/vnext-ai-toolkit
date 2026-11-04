@@ -92,6 +92,7 @@
     "references/concepts/observability.md",
     "references/concepts/schema-runtime-gaps.md",
     "references/concepts/field-protection.md",
+    "references/concepts/row-security.md",
     "references/concepts/file-fields.md"
   ],
   "vnext": {
@@ -137,6 +138,7 @@
       "references/concepts/runtime-operations.md",
       "references/concepts/schema-runtime-gaps.md",
       "references/concepts/field-protection.md",
+      "references/concepts/row-security.md",
       "references/concepts/file-fields.md",
       "references/concepts/integration-test-patterns.md",
       "references/runtime-feature-matrix.md"

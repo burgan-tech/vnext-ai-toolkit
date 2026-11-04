@@ -196,7 +196,7 @@ Read order is fixed: **`x-roles` (prune) → `x-masking` → `x-encryption` (run
 | Surface | Applied? |
 |---|---|
 | Instance GET, instance list, `data` function, data history, sync start / transition response | yes |
-| `GetInstance` / `GetInstances` / `GetInstanceData` tasks (same- and cross-domain) | yes, **as the task's credential** (0.0.99: `SystemRead` removed). A task with no headers reads as its caller; set `role` (or the whole credential) in the input mapping to read as a service role on the allow list |
+| `GetInstance` / `GetInstances` / `GetInstanceData` tasks (same- and cross-domain) | yes, **as the task's credential** (rows of a flow with `rowSecurity` are filtered too for 15/19, not 13 — `row-security.md`) (0.0.99: `SystemRead` removed). A task with no headers reads as its caller; set `role` (or the whole credential) in the input mapping to read as a service role on the allow list |
 | `functions/file` for an `x-storage` field | `x-roles` of the file path and its ancestors → `404` (`file-fields.md`) |
 | Scripts (`context.Instance.Data`, runtime-filled `context.Body`, `LatestData`) | **no** — they see stored values (tokens, digests) |
 | Transition history, `context.Related`, custom functions, human-task `title`/`description`, outbox events, internal endpoints | **no** — the row as stored |

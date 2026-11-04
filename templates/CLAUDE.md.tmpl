@@ -38,6 +38,7 @@ The toolkit copies its runtime knowledge into `.claude/references/`. This file o
 | [`subflow-overrides.md`](./.claude/references/subflow-overrides.md) | a parent must change a child's timeout/roles/views/long-poll (`subFlow.overrides`) |
 | [`roles-and-authorization.md`](./.claude/references/roles-and-authorization.md) | anything with `roles`, `queryRoles`, `availableIn`, `x-roles`, `$` roles, credential headers, morph-idm, the `authorize` function, the gateway |
 | [`field-protection.md`](./.claude/references/field-protection.md) | a field holds personal or sensitive data (`x-roles`, `x-masking`, `x-encryption`, `x-computed`, `DecryptAsync`) |
+| [`row-security.md`](./.claude/references/row-security.md) | some callers may list/read only some instances (`attributes.rowSecurity`, deny by default, 0.0.102) |
 | [`file-fields.md`](./.claude/references/file-fields.md) | a field carries a file (`x-storage`, `functions/file`, `GetFileAsync`, the blob binding) |
 | [`function-vs-extension-vs-task.md`](./.claude/references/function-vs-extension-vs-task.md) | decide which component type a requirement needs |
 | [`schema-vocabularies.md`](./.claude/references/schema-vocabularies.md) / [`instance-query.md`](./.claude/references/instance-query.md) | design a schema (role × `x-*` keyword matrix, `x-context-*`) or query/filter/sort instances (`x-filterOperators` names, `x-indexed`, error codes) |
@@ -151,7 +152,8 @@ Functions wrap upstream task results as a `StandardTaskResponse` (`{ data, body,
 - Grant rule: each grant is exactly one of `role` / `allOf` / `anyOf` (depth 1). Denies win and fire on Yes **or Unknown** (a role-bound grant is Unknown for a role-less caller); allows admit only on Yes; an empty set allows (except the human-task list, which hides). `grant` values are lowercase `allow`/`deny`. Reserved roles start with `$`: `$InstanceStarter`, `$InstanceBehalfOfStarter`, `$PreviousUser`, `$PreviousBehalfOfUser`, `$user.$.context.…`, `$userBehalfOf.$.context.…`, `$role.$.context.…`.
 - `authorize?queryRoles=true` decides at the **SubFlow leaf only** (0.0.99) — a root-only `queryRoles` no longer protects the child. `x-roles` prunes **reads** only. Test authorization through `authorize` verdicts and the `transitions[]` list, not through 200s.
 - `availableIn` entries may carry `roles` (AND-ed with `transition.roles`). Caller roles come from `CallerRoleProvider` `default` (`role` header) or `morph-idm` (called with `act_sub`/`sub`/`position`/`client_id`; a `role` header overrides it since 0.0.97; failures yield an empty role set).
-- **Confirm-first:** never add `roles`/`queryRoles` without the user asking for them. Full model: [`roles-and-authorization.md`](./.claude/references/roles-and-authorization.md).
+- **Row security (0.0.102, experimental):** `attributes.rowSecurity.rules[{roles, filter?}]` hides whole instances per role on the list, the single GET (404) and `GetInstance(s)` tasks. Deny by default — no `default` member; write an unfiltered rule for admins. Scope values only from gateway-written headers or `CurrentUser`, never `QueryParameters`; `functions/data`, transitions and SubFlow children stay unfiltered. A task reading such a flow must set the rule's header in its input mapping. [`row-security.md`](./.claude/references/row-security.md).
+- **Confirm-first:** never add `roles`/`queryRoles`/`rowSecurity` without the user asking for them. Full model: [`roles-and-authorization.md`](./.claude/references/roles-and-authorization.md).
 
 ### Schema design — plan with the user
 

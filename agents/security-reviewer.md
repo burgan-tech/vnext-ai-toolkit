@@ -34,7 +34,11 @@ Scan areas:
   `anyOf` with wrong shape or depth > 1, or inside `x-masking` / `x-encryption` exemptions; an
   allow `$role.` grant expected to admit role-less callers; start requests or task mappings
   without `act_sub` (starter grants never match); `x-roles` / `user_reference` treated as role
-  headers. Identity headers are self-asserted — the gateway must own them.
+  headers. Identity headers are self-asserted — the gateway must own them. For
+  `attributes.rowSecurity` (0.0.102) flag rules on `QueryParameters`, rule headers the gateway
+  does not own, designs that rely on it for `functions/data` / transitions / SubFlow children
+  (unfiltered), and task mappings that set `role` or rule headers to widen a cross-domain read
+  (`references/concepts/row-security.md` §6–§7).
 - Sensitive data: PII fields in master schemas without `x-roles`, `x-masking` or `x-encryption`
   (warning; Critical for regulated identifiers); `encrypt` values copied into transition or
   task records; `x-roles`-hidden fields that are filterable/sortable; `hash` on low-entropy
