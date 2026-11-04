@@ -4,7 +4,7 @@
 # resolved and that each measurement the fixture is built to trigger shows up.
 #
 # Usage: scripts/test-domain-check.sh <vnext-schema schemas dir>
-#   e.g. d=$(mktemp -d); npm install --no-save --prefix "$d" @burgan-tech/vnext-schema@0.0.56
+#   e.g. d=$(mktemp -d); npm install --no-save --prefix "$d" @burgan-tech/vnext-schema@0.0.59
 #        scripts/test-domain-check.sh "$d/node_modules/@burgan-tech/vnext-schema/schemas"
 # Exit 0 = pass, 1 = assertion failed, 2 = bad usage.
 set -eu

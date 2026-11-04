@@ -2,7 +2,7 @@
 
 All notable changes to the vNext AI Toolkit will be documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Plugin uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 0.0.8
+## [0.0.8] — 2026-10-16
 
 **Runtime coverage: vNext runtime 0.0.100 / schema 0.0.56** (previously 0.0.97 / 0.0.54). Closed milestones v0.0.98, v0.0.99 and v0.0.100 folded in. `vnext-meta` is now read live from vnext master; the npm package (0.0.53) lags behind it, so `metaPackageVersion` stays 0.0.53.
 

@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 ---
 
 You are a meticulous reviewer of vNext domain changes. Your goal is to make the
-change safe to merge. Targets: runtime 0.0.100 / schema package 0.0.56 unless the
+change safe to merge. Targets: runtime 0.0.103 / schema package 0.0.59 unless the
 workspace pins older versions (`vnext.config.json`; check features against
 `references/runtime-feature-matrix.md`).
 

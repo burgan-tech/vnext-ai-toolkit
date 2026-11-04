@@ -43,7 +43,7 @@ node_modules/@burgan-tech/vnext-schema/schemas/<schema-file>.json
 If `node_modules` is absent, run `npm install` first, or read the schema via
 `npm pack @burgan-tech/vnext-schema && tar -xzf *.tgz`.
 
-This toolkit is aligned to **runtime 0.0.100 / schema 0.0.56**. When the workspace pins older
+This toolkit is aligned to **runtime 0.0.103 / schema 0.0.59**. When the workspace pins older
 `runtimeVersion` / `schemaVersion` values in `vnext.config.json`, check a feature's since-version in
 `references/runtime-feature-matrix.md` before using it.
 

@@ -48,7 +48,7 @@ https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/sche
 https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/vocabularies/{file}.json
 ```
 
-where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.56` for runtime 0.0.100) and `{type}` is one of `workflow`, `task`, `view`, `schema`, `function`, `extension`, `mapping`.
+where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.59` for runtime 0.0.103) and `{type}` is one of `workflow`, `task`, `view`, `schema`, `function`, `extension`, `mapping`.
 
 **3. If the tag 404s** → retry against `master` and warn "schemaVersion tag missing, using master; output may not match the validator".
 

@@ -2,7 +2,7 @@
 
 > Claude Code plugin for building [vNext](https://burgan-tech.github.io/vnext-docs/) workflow-domain components with AI assistance — analyze a request, design it, author the JSON, validate, security-review, and document it. Built for projects scaffolded from [`@burgan-tech/vnext-template`](https://github.com/burgan-tech). **Schema-first**: every component is authored against the JSON Schemas shipped in `@burgan-tech/vnext-schema` (pinned in the project's `package.json`), never from hardcoded assumptions.
 
-**Runtime coverage:** the toolkit describes vNext runtime **0.0.100** / schema **0.0.56**. `vnext-meta` is read live from vnext master (`scripts/vnext-meta-live.sh`); [`references/runtime-feature-matrix.md`](references/runtime-feature-matrix.md) is its offline snapshot (feature → since-version). See "Updating runtime knowledge" below.
+**Runtime coverage:** the toolkit describes vNext runtime **0.0.103** / schema **0.0.59**. `vnext-meta` is read live from vnext master (`scripts/vnext-meta-live.sh`); [`references/runtime-feature-matrix.md`](references/runtime-feature-matrix.md) is its offline snapshot (feature → since-version). See "Updating runtime knowledge" below.
 
 **Who it is for:** product teams that build vNext domains. They work in their own domain repository and have no write access to the vNext runtime, vnext-schema, vnext-docs or vnext-example repositories — the toolkit only *reads* those, and routes runtime defects to `/vnext-ai-toolkit:report-issue`.
 
