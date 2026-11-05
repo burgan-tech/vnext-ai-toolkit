@@ -43,7 +43,7 @@ Rules:
   stops a task — validate before it or `throw`. `encrypt` fields reach scripts as
   tokens (`context.Instance.DecryptAsync`); `GetFileAsync` has no authorization check.
 
-Awareness (runtime 0.0.100 / schema 0.0.56) — follow the reference, don't restate it:
+Awareness (runtime 0.0.103 / schema 0.0.59) — follow the reference, don't restate it:
 - **Schema roles:** a schema's `attributes.type` is its role (`master` / `transition` /
   `function` / `component`, or absent); legacy values fail validation. One schema per
   role. → `references/concepts/schema-vocabularies.md`

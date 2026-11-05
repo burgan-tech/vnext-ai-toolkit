@@ -1,0 +1,4 @@
+# Pin every package with hashes so the image is reproducible and can be scanned before it ships:
+#   pip-compile --generate-hashes requirements.in -o requirements.txt
+# The Dockerfile installs with --require-hashes --only-binary :all:. Leave this file without
+# requirement lines when the handlers need only the standard library.

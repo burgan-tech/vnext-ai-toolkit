@@ -123,6 +123,9 @@ Hunt patterns in `.csx` (mappings receive untrusted data via `ScriptContext` —
   reflection driven by instance data.
 - String-concatenated XML/JSON/HTML bodies sent downstream without encoding.
 - `JsonConvert.DeserializeObject` with `TypeNameHandling` other than `None`.
+- Python handlers (`python-runtime/handlers/*.py`, task type 23): `eval` / `exec` / `pickle.loads` /
+  `subprocess` / `os.system` on handler input, SQL or shell strings built from it. The input is raw
+  instance data; the handler is trusted code running inside the domain's runtime pod.
 
 Not a finding:
 
@@ -150,6 +153,12 @@ Hunt patterns:
   copying them into data exposes another instance's documents.
 - A custom function with the key `file` — shadowed by the reserved system function (0.0.100), so the
   author's own gate never runs.
+- **Streamed uploads (`x-storage.transport: stream|any`, 0.0.102):** `POST …/workflows/{flow}/files` has no
+  runtime authorization — the gateway must gate it like `start` (and size-limit it); `PutFileAsync` writing
+  caller-controlled bytes or names without validation; a DaprBinding `delete`/`list` mapping whose object key
+  comes from request data instead of a stored handle (`FileObjectKey(handle.file)`).
+- **Remote validation functions** (`x-validation.rule: "remote"`): the function is a public client call —
+  enumeration oracle ("is this IBAN/username taken?") without `authorize` and rate limiting at the gateway.
 - `x-storage` fields holding identity documents without `queryRoles` on the states and `x-roles` on
   the field path (the `file` function enforces both in process: 403 / 404).
 
@@ -198,6 +207,10 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
 - Verify `scripts.helpers` / `encoding: "REF"` sources and `allowedAssemblies` point only to
   trusted, allow-listed origins — externally referenced code executes inside the runtime.
 - Ensure third-party integrations are scoped and validated.
+- Python runtime image (`python-runtime/`): base image `ghcr.io/burgan-tech/vnext/python-runtime` pinned
+  to a runtime version (not `latest`), `requirements.txt` hash-locked and installed with
+  `--require-hashes --only-binary :all:`, `USER 65532:65532` kept after the install. Unpinned packages
+  or a final `USER root` are findings (Medium).
 
 ## 7. Misconfiguration and deployment hygiene
 
@@ -214,9 +227,31 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
 - Confirm the gateway owns **every** credential header (`sub`, `act_sub`, `role`, `position`,
   `client_id`) — not only `role` — and that `CallerRoleProvider:MorphIdm:GetRolesPath` is set
   explicitly (code default `/api/1/…`, orchestration appsettings `/api/v1/…`).
+- **SubFlow carried headers (0.0.102):** a domain header carrying a secret under a name the deny floor
+  does not catch (`x-api-key`, `x-client-secret` is caught, `x-signature` is not) travels from the child's
+  settling request into the outbox row, the Inbox body and the parent's output mapping unless the
+  environment lists it in `Workflow:SubFlow:CarriedHeaders:AdditionalDenied`. Also flag parent
+  `OutputHandler`s that copy `context.Headers` into instance data, and onEntry tasks after a SubFlow that
+  assume they still run with the **starter's** credential (they run with the settling caller's).
+- **Row security (`attributes.rowSecurity`, 0.0.102):**
+  - a rule parameter on `$.context.QueryParameters.*` presented as a restriction — client-controlled, never
+    a boundary (High when it guards personal data);
+  - a rule header the gateway does not strip/overwrite (append = the caller widens its own scope);
+  - rowSecurity treated as the access control for instance-addressed routes — `functions/data|state|view`,
+    history and transitions still serve excluded instances by id (known issue
+    `row-security-instance-surfaces-unfiltered`, existence oracle GET 404 vs data 200): those routes need
+    `authorize` at the gateway;
+  - a flow with SubFlow states whose children carry no rules of their own (RS-W7);
+  - a `GetInstances` / `GetInstance` task mapping that sets `role` / `sub` or a rule header to read
+    another domain wider than its caller could;
+  - a deployment plan that may roll the runtime back below 0.0.102 (older runtimes serve every row).
 - Keep the internal tooling routes off the public edge: `…/instances/{id}/data/history` (0.0.100,
   hidden from Swagger but not blocked) and `internal/*` routes.
 - Confirm MockLab and other test surfaces are not wired into production configuration.
+- Type-23 tasks: no secrets in `config.input` (secrets come from the Dapr secret store or the pod
+  environment); handlers do not log their input. Local Python overlays keep `read_only`, `cap_drop: ALL`
+  and `no-new-privileges`; shared environments use the Helm `pythonRuntime` block, whose NetworkPolicy
+  admits only the Orchestration pods.
 
 ## Verification rubric
 

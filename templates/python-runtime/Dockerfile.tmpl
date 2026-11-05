@@ -1,0 +1,18 @@
+# {{domain}} Python runtime image — PythonTask (type 23) handlers on top of the vNext base image
+# (vnext docs/runtime/python-task.md § Domain image). Built and pushed by the domain's own pipeline;
+# shared environments run it through the Helm chart's `pythonRuntime` block.
+#
+#   docker build -t {{domain}}-python-runtime:local python-runtime
+#
+# The base tag follows vnext.config.json runtimeVersion (image tags carry no "v").
+ARG VNEXT_PYTHON_RUNTIME=ghcr.io/burgan-tech/vnext/python-runtime:{{runtimeVersion}}
+FROM ${VNEXT_PYTHON_RUNTIME}
+
+USER root
+COPY requirements.txt /tmp/requirements.txt
+# Wheels only (no setup scripts at build time) and hash-locked: generate requirements.txt with
+# pip-compile --generate-hashes. Nothing is installed at container start.
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes -r /tmp/requirements.txt \
+    && rm /tmp/requirements.txt
+COPY handlers /opt/vnext-python/app/handlers
+USER 65532:65532

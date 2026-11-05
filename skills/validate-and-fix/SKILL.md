@@ -47,7 +47,9 @@ Group failures by type:
 - **Reference broken** — `{domain}/{flow}/{key}/{version}` points to something that doesn't exist
 - **Filename / key inconsistency** — file name doesn't match `key` field (kebab-case enforcement)
 - **Version format** — not semver
-- **Auto-transition rule** — lone conditional auto transition (must be paired or unconditional)
+- **Auto-transition rule** — lone conditional auto transition (must be paired or unconditional); `priority` on a non-automatic, `triggerKind: 10`, shared or start transition (schema ≥ 0.0.58 — `references/concepts/transition-pipeline.md`)
+- **Row security** — schema `rowSecurity` shape errors (`rules` empty, unknown member, a `default` key) or a publish `RS-E01…E18` code: map the code with `references/concepts/row-security.md` §4; `RS-W*` lines are log-only warnings, report them but do not block
+- **Python task (23)** — `script` / `executionMode` on a type-23 task = the removed pre-0.0.103 form; rewrite as `handler` (`references/concepts/task-types.md` §3), never delete fields until it validates
 - **Other** — anything that doesn't fit above
 
 ### 3. Look up the rule for unclear failures

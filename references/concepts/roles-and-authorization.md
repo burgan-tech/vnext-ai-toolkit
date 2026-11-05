@@ -74,6 +74,12 @@ Same values for a direct customer action; for a backoffice operator acting for a
   caller's `sub`, `act_sub`, `position`, `client_id` and `role` for every one the mapping left absent
   or empty; a non-empty mapping value always wins. Set `role` (or the whole credential) in the mapping
   to call as a service identity. Nothing else of the caller travels.
+- **After a SubFlow (0.0.102, #1141).** The parent's resumed hop runs with the headers of the request
+  that settled the child (`Workflow:SubFlow:CarriedHeaders:ApplyToResume`, default `true`) — so the
+  parent's onEntry tasks forward the **settling caller's** `sub` / `act_sub` / `role`, not the original
+  starter's. `role` is always carried; names containing `authorization` / `token` / `secret` / `cookie` /
+  `session` never are. Timer-settled children carry nothing (the resume runs with no caller headers).
+  Opt out per environment with `Workflow__SubFlow__CarriedHeaders__ApplyToResume=false`.
 - **Audit:** instance GET/list `metadata` carries `createdBy`, `createdByBehalfOf`, `modifiedBy`,
   `modifiedByBehalfOf` (`state-function-response.md` §4).
 
@@ -348,6 +354,8 @@ it on every inbound request, or a client asserts its own roles.
   `x-sortable` on an `x-roles` field.
 - **Caching:** state, data, schema/master and human-task caches key on `CallerScopeHash` (roles, actor
   `act_sub`, subject `sub` since 0.0.99, headers, version), so callers never share a filtered body.
+- **Rows:** `x-roles` hides fields, never rows. Hiding whole instances from a role is `rowSecurity`
+  (0.0.102, `row-security.md`) — list, GET and the `GetInstance(s)` tasks only.
 - **`queryRoles` is not enforced** by any of these reads (gateway). The two in-process exceptions are
   the `file` function (`403` on `queryRoles`, `404` when `x-roles` hides the path —
   `file-fields.md`) and the human-task list (fail-closed, leaf-decided).
@@ -364,6 +372,7 @@ it on every inbound request, or a client asserts its own roles.
 | State `alias[]` | `roles` | which role sees which localized state label (`workflow-types.md`) |
 | SubFlow `overrides` | `transitions.<t>.roles`, `states.<s>.queryRoles`, `…longPoll.roles` | replace the child's grants for one hop (`subflow-overrides.md`) |
 | Master schema property | `x-roles` | field-level **read** pruning (`schema-vocabularies.md`, `field-protection.md`) |
+| Workflow `attributes.rowSecurity.rules[]` | `roles` (static or `$InstanceStarter` / `$InstanceBehalfOfStarter`) | **row**-level filter on the instance list, single GET and `GetInstance(s)` tasks; deny by default once declared (0.0.102, experimental — `row-security.md`). Not a boundary for a known instance id |
 | `x-masking.roles`, `x-encryption.roles` | allow-only exemption list | who sees the clear value; no combinators, no deny |
 | View | — | views carry no roles; select per role through state/transition view rules (`view-roles.md`) |
 

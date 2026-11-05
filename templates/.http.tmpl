@@ -16,6 +16,8 @@
 ### Start a new instance (sync → response carries metadata.effectiveStatus)
 # executionType (0.0.99) on the flow / startTransition overrides ?sync: "S" → 200 + instance, "A" → 202 { id, status }.
 # Branch on the status code. Async bodies are capped at 10 MB (413).
+# No ?version= → the flow's DEFAULT version (sys-version-registry pointer, 0.0.102); the response carries
+# the resolved flowVersion. A pending version is reached only explicitly: …/instances/start?version=1.2.1
 # @name start
 POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/start?sync=true
 Content-Type: application/json
@@ -138,3 +140,17 @@ GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instanc
 ### Scheduled start (0.0.100) — what a Dapr bindings.cron `route` calls. No body: non-reserved query
 ### params become STRING attributes; key = {scheduleId}-{yyyyMMddTHHmmssZ}; sync defaults to false.
 POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/schedule?scheduleId=manual-test
+
+### Flow default version (0.0.102) — publish ≠ activate. Pin which version floating starts get.
+### Create once per flow (instance key = flow key); later moves use set-default. "latest" clears the pin.
+# @name registry
+POST {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/sys-version-registry/instances/start?sync=true
+Content-Type: application/json
+
+{ "key": "{{workflowKey}}", "attributes": { "type": "Flow", "defaultVersion": "1.0.0", "reason": "pin" } }
+
+###
+PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/sys-version-registry/instances/{{registry.response.body.$.id}}/transitions/set-default?sync=true
+Content-Type: application/json
+
+{ "attributes": { "defaultVersion": "latest", "reason": "unpin" } }

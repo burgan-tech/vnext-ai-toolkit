@@ -1,7 +1,7 @@
 # Observability — Logs, Spans, Correlation, Debugging Recipes
 
 > Audience: domain authors debugging their own workflow against a local or shared runtime
-> (v0.0.100). What to search for, where, and in which order. For lock/cache/discovery behaviour see
+> (v0.0.103). What to search for, where, and in which order. For lock/cache/discovery behaviour see
 > `runtime-operations.md`; for the incident payload and `retry` rules see `incidents-and-retry.md`.
 
 ## 1. Log catalogue — `WorkflowLogs` EventIds
@@ -54,7 +54,7 @@ Activity sources: `BBT.Workflow.Pipeline`, `.BackgroundJobs`, `.SubFlow`, `.Task
 | `Step.{Name}` | One pipeline step that did work; tags `vnext.step.order`, `vnext.step.outcome` (`continue` / `stop` / `skipTo:{n}`) |
 | `Transition.Intake` → `Transition.LoadContext` → `Transition.Validate` / `ValidatePolicy` → `Transition.Enqueue` → `Transition.Settle` → `Uow.Commit` | Sync/async accept, load, validation, 202 enqueue (`vnext.enqueue.path` Direct \| Outbox), Busy→Active flip (`vnext.settle.cas`), commit |
 | `Transition.Continuation/{mode}` | Between hops (`Inline`) |
-| `Instance.Load` / `Create` / `AppendData` / `Fault` / `Persist` | Aggregate load, start, data version write (`vnext.data.version`, `vnext.data.size_bytes`), fault path |
+| `Instance.Load` / `Create` / `AppendData` / `Fault` / `Persist` | Aggregate load, start, data version write (`vnext.data.version`, `vnext.data.size_bytes`), fault path. Since 0.0.102 a data append is two pipelined round-trips with child spans `Db.LockAndReadHead` (row lock + head read — long = lock wait on a hot instance) and `Db.InsertInstanceData` |
 | `Instance.Activation/{key}` | **Synthetic**, one per activation episode, backdated to the request — "how long until the flow was available"; `vnext.activation.outcome` `active \| completed \| canceled \| faulted \| busy.parked \| busy.subtype` |
 | `Instance.Read/{kind}` | Built-in instance read (`state`, `data`, `view`, `schema`, `master`, `instanceCorrelation`…; `hierarchy` is gone since 0.0.99); the 304 branch creates **no span** — see `vnext.read.fastpath` on the transaction |
 | `Task.Execute.{key}` → `Task.Resolve` / `PrepareInput` / `Invoke` / `ProcessOutput` / `Journal.*` | One task; children are the mapping phases |
@@ -64,13 +64,18 @@ Activity sources: `BBT.Workflow.Pipeline`, `.BackgroundJobs`, `.SubFlow`, `.Task
 | `PostCommit.{job}` / `PostCommit.Coordinate` / `PostCommit.Settle` / `PostCommit.Fault` / `PostCommit.EventRelay` | Work after `Uow.Commit`: subflow forward, parent settle, event relay |
 | `BackgroundJob.Arm/{type}/{key}` | Timer / timeout / ack-fallback job scheduling |
 | `Trigger.Local` | In-process trigger task branch |
+| `LongPoll.AckResume` | Resume after a long-poll pause; `vnext.activation.trigger` = `ack` (client acknowledged) \| `ack-timeout` (fallback job fired) — 0.0.103 |
 | `Auth.ResolveRoles` / `Auth.Decide` | Caller-role resolution and the `authorize` / role-grant decision (`vnext.auth.*` tags) |
 
 ### Tags worth filtering on
 
 | Tag | Value |
 |---|---|
-| `vnext.domain`, `vnext.flow.key`, `vnext.flow.version` | Component identity |
+| `vnext.domain`, `vnext.flow.key`, `vnext.flow.version` | Component identity. `vnext.flow.version` is also trace **baggage**; since 0.0.103 (#1173) it is written propagation-safe (a `+` in a package version such as `1.0.0-pkg.1+core` travels as `_`) |
+| `vnext.flow.version.requested`, `vnext.flow.version.pointer`, `vnext.flow.version.source` | Default-version resolution on start (0.0.102 — `runtime-operations.md` §2.1) |
+| `vnext.rowsecurity.*` | Row-security decision on list/GET (0.0.102 — `row-security.md` §8) |
+| `vnext.settle.skipped=true` | An intermediate SubFlow start-chain level skipped its empty settle (0.0.103, perf only) |
+| `vnext.subflow.carried_header_count` | Headers carried from a settled child to its parent (0.0.102) |
 | `vnext.instance.id`, `vnext.root.instance.id`, `vnext.parent.instance.id`, `vnext.subflow.instance.id` | Instance tree |
 | `vnext.transition.key`, `vnext.step.order`, `vnext.step.outcome` | Pipeline position |
 | `vnext.task.key`, `vnext.task.type`, `vnext.task.trigger` (OnExecute \| OnEntry \| OnExit \| Extension) | Task identity |
@@ -158,6 +163,15 @@ Typical lookups: OpenObserve/Kibana logs `x_request_id = '<id>'`; APM transactio
 - The `functions/tasks` items also carry `hook` and `order` since 0.0.99.
 - **Instance data history** (`GET …/instances/{id}/data/history`, 0.0.100, #1079) is an **internal** tooling read (Forge Instance Monitor): paged, newest first, same field exposure as the data function. It is hidden from Swagger but not blocked — keep it off the public gateway; do not build client features on it.
 
+### Metric: long-poll resumes (0.0.103, #1156)
+
+`workflow_longpoll_resume_total` (meter `BBT.Workflow.Telemetry`; tags `vnext.domain`, `vnext.flow.key`,
+`vnext.activation.trigger` = `ack` | `ack-timeout`, `vnext.longpoll.ack_resume.outcome`) counts every resume of
+a `terminate: true` pause. A fallback resume logs **20308 `LongPollFallbackResumed`** (an ack resume logs 20301).
+**If a flow's `ack-timeout` count tracks its total resumes, the client never acknowledges** and every instance
+waits the full `fallbackTimeoutSeconds`: fix the client's ack call, or shorten the window / drop `terminate: true`
+(`long-poll-interaction.md` §3).
+
 ## 6. Recipe — instance looks stuck (Busy)
 
 1. `GET …/instances/{id}` → compare `metadata.status` and `metadata.effectiveStatus`. A parent is
@@ -165,7 +179,9 @@ Typical lookups: OpenObserve/Kibana logs `x_request_id = '<id>'`; APM transactio
    `EffectiveStatusDrift` 20445 in logs means the projection disagreed with the live read.
 2. State body: is `interaction` present **with `ack.href`** (long-poll `terminate: true` waiting for
    `POST …/longpoll/ack`)? Ack it, or wait for `fallbackTimeoutSeconds` (default 60). An `interaction`
-   block without `ack` (`terminate: false`, 0.0.98+) never holds the instance.
+   block without `ack` (`terminate: false`, 0.0.98+) never holds the instance — unless the state is an
+   **interaction wait** (`subType: 5`), which parks Busy until `updateData` satisfies an automatic rule or
+   the state's timer fires (0.0.102, `long-poll-interaction.md` §3b).
 3. Any `transitions[]` entry with `kind: "scheduled"` and a future `executeAtUtc`, or a `timeout`
    block? It is waiting by design. Remember ETag gap #864: a stale `executeAtUtc` behind a 304 is
    possible — poll once **without** `If-None-Match`.

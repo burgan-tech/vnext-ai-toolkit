@@ -1,7 +1,7 @@
 # Long-Poll Interaction — `interaction.longPoll`
 
 > A **state-level** declaration that tells the polling client "stop, render, then acknowledge".
-> Runtime 0.0.100, state-function shape v14. Transitions cannot carry `interaction`.
+> Runtime 0.0.103, state-function shape v14. Transitions cannot carry `interaction`.
 
 ## 1. When to use
 
@@ -63,6 +63,10 @@ Use lowercase `allow`/`deny`.
    Finish → Finalize → ResolveAvailable.
 4. **Fallback.** No ack in time → the job resumes the same way. Ack on a non-awaiting instance is a
    **200 no-op**. Ack and fallback are serialized (`:lpack` lock); the second one no-ops.
+   **Diagnosing a client that never acks (0.0.103):** a fallback resume logs 20308
+   `LongPollFallbackResumed` (ack: 20301) and the counter `workflow_longpoll_resume_total` splits resumes by
+   `vnext.activation.trigger` (`ack` | `ack-timeout`) — when `ack-timeout` ≈ all resumes, fix the client's
+   ack call or shorten `fallbackTimeoutSeconds` (`observability.md`).
 
 ErrorBoundary and AutoChain profiles never pause at 75.
 
@@ -91,6 +95,41 @@ returns:
   screen renders within one poll cycle anyway.
 - Long windows (minutes) only when the acknowledging client is the sole actor and a duplicate
   continuation would be harmful.
+
+## 3b. Interaction wait — Busy subtype + `interaction` (0.0.102, #1128)
+
+Pattern for "park until the client (or a callback) pushes data, continue on your own, give up after a
+timeout": a state with **`subType: 5` (Busy) and an `interaction` block**, automatic transitions whose
+rules read the pushed data, a **timer** transition as the fallback, and a workflow-level `updateData`
+(`target: "$self"`) the client calls.
+
+```jsonc
+{
+  "key": "contract-wait", "stateType": 2, "subType": 5,
+  "interaction": { "longPoll": { "terminate": false, "fallbackTimeoutSeconds": 30, "roles": [] } },
+  "transitions": [
+    { "key": "contract-ready",   "target": "contract-signed",   "triggerType": 1, "rule":  { "location": "./src/ContractReadyRule.csx",    "code": "<base64>" } },
+    { "key": "contract-timeout", "target": "contract-timedout", "triggerType": 2, "timer": { "location": "./src/ContractTimeoutTimer.csx", "code": "<base64>" } }
+  ]
+}
+```
+
+The instance rests **Busy with no owner** there by design. Two exits:
+
+- **Data arrives** — `updateData` is never refused on Busy; when its data satisfies an automatic rule, the
+  continuation takes the parked Busy over and runs the transition. An **armed** timer that is not yet due
+  is not an owner.
+- **Data never arrives** — the state's timer fires and takes the parked Busy over (log
+  `ScheduledTransitionTookOverInteractionWait`, 10181). It is still refused while another transition's
+  job owns the Busy, while a `terminate: true` ack is pending, or while an open SubFlow holds the instance.
+
+Rules: only the **timer** may take over — a client transition in that state is still refused (409
+`Instance:100031`); a Busy-subtype state **without** `interaction` keeps the old behaviour (its timer is
+refused as busy). **Needs runtime ≥ 0.0.102**: on 0.0.101 and earlier an `updateData` on such a state
+dropped its continuation with `Instance:100031` (a far-off timer counted as the owner) and the timer
+never fired, so instances waited forever — and instances already stuck on 0.0.101 do not recover by
+themselves after the upgrade (`cancel` / `exit` them). Fixture: vnext-example
+`core/Workflows/busy-subtype-armed-timer/` (PR #43).
 
 ## 4. Roles vs rule arm
 
@@ -151,7 +190,9 @@ Details in `subflow-overrides.md`.
 5. Client contract: on `interaction.terminateLongPoll === true` → stop polling → render → POST
    `ack.href` → resume polling. On `terminateLongPoll === false` → keep polling, using
    `fallbackTimeoutSeconds` as the window.
-6. `roles` accept `allOf` / `anyOf` combinators (0.0.99); a role-less caller is refused by an allow-list
+6. Waiting for pushed data with a timeout? Use the interaction wait (§3b), not a manual transition the
+   client must find.
+7. `roles` accept `allOf` / `anyOf` combinators (0.0.99); a role-less caller is refused by an allow-list
    and by any role-bound deny (`roles-and-authorization.md`).
 
 ## Sources

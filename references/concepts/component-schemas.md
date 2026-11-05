@@ -48,7 +48,7 @@ https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/sche
 https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/vocabularies/{file}.json
 ```
 
-where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.56` for runtime 0.0.100) and `{type}` is one of `workflow`, `task`, `view`, `schema`, `function`, `extension`, `mapping`.
+where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.59` for runtime 0.0.103) and `{type}` is one of `workflow`, `task`, `view`, `schema`, `function`, `extension`, `mapping`.
 
 **3. If the tag 404s** → retry against `master` and warn "schemaVersion tag missing, using master; output may not match the validator".
 
@@ -79,7 +79,7 @@ where `{schemaVersion}` comes from `vnext.config.json` (currently `0.0.56` for r
 
 The schema is the **authoring** contract; the runtime is the **execution** contract, released separately. Known differences are catalogued in **`schema-runtime-gaps.md`** — read it whenever validate and the runtime disagree. Headline items:
 
-- Schema **0.0.56 validates task types `"1"`–`"22"`**; the runtime (v0.0.100) also knows `23` (Python, experimental), which fails `npm run validate` but publishes. `22` (ExternalHttp) validates but is deprecated — use `6`.
+- Schema **0.0.59 validates task types `"1"`–`"23"`**. `23` (Python, experimental) validates only as a handler reference (`handler`/`input`/`timeoutSeconds`) and needs runtime ≥ 0.0.103; on schema ≤ 0.0.58 it fails `npm run validate`. `22` (ExternalHttp) validates but is deprecated — use `6`.
 - Some shapes the schema accepts are rejected at `publish` (state-level `subFlow.type: "P"`, a multi-task slot collision without `variableKey`, `history: "none"` flows that cannot reach a Finish state), and some schema-required fields are ignored at runtime (`timeout.timer.reset`).
 - The runtime publishes a legacy schema `attributes.type` with a warning while the 0.0.56 package refuses it, and the runtime does not enforce the role vocabularies (apart from `x-indexed` and runtime `x-computed`, a keyword outside its role is simply not applied) — `npm run validate` is the only gate for roles.
 

@@ -1,6 +1,9 @@
 # Instance Query — list endpoint, filters, sort, `x-filterOperators`, `x-indexed`
 
-> Runtime 0.0.100 / schema 0.0.56. The list endpoint fails **closed** since 0.0.84: anything the runtime cannot
+> Runtime 0.0.103 / schema 0.0.59. A flow with `attributes.rowSecurity` (0.0.102, `row-security.md`) ANDs a
+> role-keyed row filter into every list query — paging, `groupBy` and aggregates cover visible rows only —
+> and since 0.0.102 the list fails with `Instance:100051/52/53` when the flow definition cannot be loaded
+> (migration `instance-read-fails-on-flow-lookup-error`). The list endpoint fails **closed** since 0.0.84: anything the runtime cannot
 > execute exactly as written is a 400, never a silently widened result set. `GetInstancesTask`
 > (type `15`) validates the same way and returns `Result.Fail` — under an `Abort` boundary rule
 > the calling instance can end up **Faulted** (see Pitfalls).

@@ -1,0 +1,47 @@
+# Compose overlay for vnext-runtime (burgan-tech/vnext-runtime, vnext/docker) — runs the {{domain}}
+# domain's Python runtime (PythonTask, type 23) beside the local runtime WITHOUT editing the
+# vnext-runtime checkout. See etc/runtime/README.md.
+#
+#   cd <vnext-runtime>/vnext/docker
+#   export VNEXT_DOMAIN_REPO=/absolute/path/to/this/domain/repo
+#   docker compose -p vnext-{{domain}} --env-file ./domains/{{domain}}/.env \
+#     -f docker-compose.yml -f "$VNEXT_DOMAIN_REPO/etc/runtime/docker-compose.python.override.yml" \
+#     --profile vnext up -d --build
+#
+# Combine with docker-compose.blob.override.yml by passing both -f files. The runtime runs as it
+# does in the Helm chart: read-only root, non-root, no capabilities. Its sidecar joins the
+# vnext-runtime network; Orchestration reaches it by app-id (Dapr service invocation, mDNS).
+services:
+  python-runtime:
+    profiles: [vnext]
+    build:
+      context: "${VNEXT_DOMAIN_REPO:?set VNEXT_DOMAIN_REPO to the domain repo path}/python-runtime"
+    image: "{{domain}}-python-runtime:local"
+    container_name: "vnext-python-runtime-${DOMAIN_NAME:-{{domain}}}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    tmpfs: ["/tmp:size=64m"]
+    environment:
+      VNEXT_PYTHON_MAX_WORKERS: "4"
+    ports: ["${PYTHON_RUNTIME_PORT:-8089}:8080"]
+    networks: [vnext-development]
+  python-runtime-dapr:
+    profiles: [vnext]
+    image: "daprio/daprd:${DAPR_RUNTIME_VERSION:-latest}"
+    container_name: "vnext-python-runtime-dapr-${DOMAIN_NAME:-{{domain}}}"
+    command: [
+      "./daprd",
+      "--app-id", "vnext-${DOMAIN_NAME:-{{domain}}}-python-runtime-app",
+      "--app-port", "8080",
+      "--app-channel-address", "vnext-python-runtime-${DOMAIN_NAME:-{{domain}}}",
+      "--dapr-http-port", "3500",
+      "--log-level", "info"
+    ]
+    ports: ["${PYTHON_RUNTIME_DAPR_PORT:-3589}:3500"]
+    depends_on: [python-runtime]
+    networks: [vnext-development]
+  vnext-app:
+    environment:
+      # Same app-id the Helm chart's pythonRuntime block sets; empty = every type-23 task fails with 503.
+      - Workflow__PythonRuntime__AppId=vnext-${DOMAIN_NAME:-{{domain}}}-python-runtime-app

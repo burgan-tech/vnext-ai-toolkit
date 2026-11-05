@@ -1,0 +1,13 @@
+"""{{handlerModule}} handlers — referenced by type-23 tasks as config.handler."""
+
+from vnext_runtime import HandlerContext, handler
+
+
+@handler("{{handlerName}}")
+def {{handlerName}}(input, context: HandlerContext):
+    # `input` is config.input, or what the task's InputHandler passed to PythonTask.SetInput.
+    # It is raw instance data (personal data included): never log it, never echo secrets.
+    # `context`: domain, workflow, workflow_version, instance_id, task_key, correlation_id, timeout_ms.
+    # Return strict JSON (json.dumps(allow_nan=False) must succeed): convert NumPy/pandas values with
+    # .tolist(), .item() or .to_dict(). An exception becomes a 422 handler_error task failure.
+    return {"received": input}

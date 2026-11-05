@@ -51,7 +51,7 @@ Every mapping receives a `ScriptContext`. The fields you'll use most (there is *
 | Field | Source | Used in |
 |-------|--------|---------|
 | `context.Body` | Request body, with each task's `StandardTaskResponse` **merged in** as tasks complete | InputHandler / OutputHandler |
-| `context.Headers` | HTTP headers (lowercased keys) | InputHandler (auth tokens, correlation IDs) |
+| `context.Headers` | HTTP headers (lowercased keys) | InputHandler (auth tokens, correlation IDs); `ISubFlowMapping.OutputHandler` on completion/fault = the headers of the request that settled the child (0.0.102; null when a timer settled it) |
 | `context.QueryParameters` | URL query string (Function calls in GET mode) | InputHandler for GET-mode functions |
 | `context.RouteValues` | URL path segments / routing values | InputHandler |
 | `context.Instance.Data` | The workflow instance's current data (**dynamic — use `HasProperty`/`GetPropertyValue`**). `x-encryption` `encrypt` fields hold a **token** since 0.0.99 — open with `await context.Instance.DecryptAsync(path, ct)` (own instance only) | All handlers |
