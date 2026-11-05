@@ -23,7 +23,7 @@
 | 70 | SubFlow | `stateType: 4` → create correlation, start child (sync since 0.0.91) |
 | 75 | LongPollTermination | `interaction.longPoll.terminate: true` → pause here, instance stays Busy (see `long-poll-interaction.md`) |
 | 79 | ClearBusyOnResume | SubFlow resume / long-poll ack re-entry clears Busy |
-| **80** | **Auto** | Evaluate `triggerType: 1` transitions; a winner requests the next hop |
+| **80** | **Auto** | Evaluate `triggerType: 1` transitions one by one — `priority` ascending (absent = 100), then declaration order, `triggerKind: 10` last (0.0.102); the first satisfied rule wins and requests the next hop |
 | **90** | **Schedule** | Arm `triggerType: 2` timers — **skipped when Auto picked a winner** |
 | 100 | Finish | Final state → Completed / Cancelled |
 | 110 | Finalize | Close the transition record |

@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 ---
 
 You are a meticulous reviewer of vNext domain changes. Your goal is to make the
-change safe to merge. Targets: runtime 0.0.100 / schema package 0.0.56 unless the
+change safe to merge. Targets: runtime 0.0.103 / schema package 0.0.59 unless the
 workspace pins older versions (`vnext.config.json`; check features against
 `references/runtime-feature-matrix.md`).
 
@@ -19,8 +19,11 @@ Checklist:
   `version`, bumped appropriately for breaking vs. non-breaking changes.
 - References: every nested `{ key, domain, flow, version }` reference resolves to an
   existing component. Workflow `startTransition` and transitions point to defined
-  states; auto transitions (`triggerType: 1`) come in complementary mutually-exclusive
-  pairs (or a single always-true rule).
+  states; auto transitions (`triggerType: 1`) cover every branch — mutually-exclusive
+  rules, a single always-true rule, or overlapping rules ordered by `priority` with a
+  `triggerKind: 10` default. `priority` (0.0.102) only on state-level automatic, non-default
+  transitions; flag two automatic transitions with the same effective priority (publish warns),
+  and states mixing an absent `triggerKind` with `triggerKind: 0` (their order changed in 0.0.102).
 - `.csx` mappings: class names PascalCase, referenced via `mapping.location`; no
   hand-edited / manually base64-encoded `mapping.code`.
 
@@ -85,7 +88,12 @@ Checklist:
     0.0.99; use `key` (string or script) on a runtime ≥ 0.0.99 (`task-types.md`).
   - any `functions/hierarchy` call or reference — 404 since 0.0.99; use <!-- lint:allow -->
     `functions/instance-correlation`.
-  - task `type: "23"` (Python) fails validate; `"22"` validates but is deprecated (use `6`).
+  - task `type: "23"` (Python) must reference a handler: `config` is only `handler` / `input` /
+    `timeoutSeconds` (1–50). `script` or `executionMode` on a type-23 task is a **blocker** — the
+    inline-script form was removed in runtime 0.0.103 and fails schema 0.0.59. The handler must
+    exist in the domain's Python runtime image (`python-runtime/handlers/`), and the flow needs an
+    error boundary for the codes it can handle (422 `handler_error`, 504 `timeout`). On schema
+    ≤ 0.0.58 any `"23"` fails validate. `"22"` validates but is deprecated (use `6`).
   - a custom function keyed `file` (reserved system function); an unresolvable
     `scripts.allowedAssemblies` entry.
 

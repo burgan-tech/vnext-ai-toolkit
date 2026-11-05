@@ -1,6 +1,6 @@
 # Schema Vocabularies — Roles and `x-*` Keywords
 
-> Schema package **0.0.56** / runtime **0.0.100**. vNext extends JSON Schema with `x-*` keywords that
+> Schema package **0.0.59** / runtime **0.0.103** (role model since 0.0.56). vNext extends JSON Schema with `x-*` keywords that
 > drive forms, record exposure, queries, files and client context. Since 0.0.56 **a schema plays one
 > role** (`attributes.type`), and the role decides which `x-*` keywords it may carry.
 >
@@ -201,7 +201,8 @@ Keys (closed list): `required`, `minLength`, `maxLength`, `minItems`, `maxItems`
 
 ### `x-validation` — custom rule metadata (an **object**)
 
-`{ rule (required), parameters?, errorMessages? }`. A named rule the client delegate runs
+`{ rule (required), parameters?, errorMessages? }` — plus, for `rule: "remote"` only, `source` (required),
+`resultField`, `messageField`, `trigger`, `debounce` (schema 0.0.57). A named rule the client delegate runs
 (`onValidationRequest`); the runtime strips it before JSON-Schema validation and never executes `rule`.
 Server-side business rules belong in the transition's validation script / tasks, not here.
 
@@ -215,6 +216,29 @@ Server-side business rules belong in the transition's validation script / tasks,
   }
 }
 ```
+
+**Remote rule (schema 0.0.57+).** `rule: "remote"` makes the **client** call a backend function with the
+field value and read the verdict from its response — e.g. "is this IBAN / username already taken?":
+
+```jsonc
+"username": {
+  "type": "string",
+  "x-validation": {
+    "rule": "remote",
+    "source": "urn:vnext:fn:get:core:check-username",   // required for "remote": function URN, like x-lov.source
+    "resultField": "$.data.available",                  // truthy → valid
+    "messageField": "$.data.message",                   // shown when invalid
+    "trigger": "blur",                                  // "change" | "blur"
+    "debounce": 400,                                    // ms after the last change (integer ≥ 0)
+    "errorMessages": { "tr": "Kullanıcı adı alınmış", "en": "Username taken" }
+  }
+}
+```
+
+`source`, `resultField`, `messageField`, `trigger`, `debounce` are valid only for the remote rule; the object
+is closed (`additionalProperties: false`). The function is a normal domain Function (usually `rawResponse:
+true`, GET, scope `D`) — it is a UX aid and **not** a server-side check: re-validate in the transition. The
+remote call reaches the function through the gateway like any client call, so gate it with `authorize`.
 
 ### `x-conditional` — visibility / enablement
 
@@ -267,7 +291,8 @@ Field exposure on the read surfaces, in the fixed order `x-roles` → `x-masking
 
 ### `x-storage` — file field
 
-`{ "binding": "<dapr binding name>" }` on a `type: object` property (or one array's `items`). Placement,
+`{ "binding": "<dapr binding name>", "transport"?: "inline" | "stream" | "any" }` on a `type: object` property
+(or one array's `items`); `transport` since schema 0.0.58 / runtime 0.0.102 (streamed uploads). Placement,
 write/read shapes and settings: **`file-fields.md`**.
 
 ### `x-filterOperators` — which operators a list query may use on the field

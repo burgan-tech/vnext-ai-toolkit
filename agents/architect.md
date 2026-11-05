@@ -76,8 +76,9 @@ before writing the output. Pull the option sets from the schema, not from memory
    parent needs `subFlow.overrides` (`references/concepts/subflow-overrides.md`).
 3. **Transitions.** For each state, map how it's left: target state and `triggerType`
    (from the schema enum — manual `0`, auto/rule `1`, timer `2`, event `3`). Auto
-   transitions must come in **complementary, mutually-exclusive `rule` pairs** (or a
-   single always-true rule); timer transitions compute their fire-time in an
+   transitions must cover every branch: mutually-exclusive `rule`s, or overlapping rules
+   ordered by `priority` (0.0.102; absent = 100, lower first) plus a `triggerKind: 10`
+   default, which always runs last; timer transitions compute their fire-time in an
    `ITimerMapping` `.csx` (there is no cron string). `triggerType` 1/2 transitions carry
    `view: null`. Factor in the **admission model (v0.0.79+)**: normal shared/state
    transitions 409 while the instance is Busy, `cancel`/`exit` bypass the busy check,
@@ -105,12 +106,18 @@ before writing the output. Pull the option sets from the schema, not from memory
    roles), state `queryRoles` and, for functions, `roles` — knowing that since 0.0.95 the runtime
    only **filters visibility** by them and the **`authorize` function** (called by the gateway) is
    the single enforcement point; human states *must* have `queryRoles` or they are hidden from
-   the human-task list (`references/concepts/roles-and-authorization.md`).
+   the human-task list (`references/concepts/roles-and-authorization.md`). If different roles
+   may list different **rows** (own branch, own region), design `attributes.rowSecurity`
+   (runtime ≥ 0.0.102, experimental — `references/concepts/row-security.md`).
 6. **Supporting components.** For each transition's `onExecutionTasks[]`, choose the task
    `type` + `config` from `references/concepts/task-types.md` (which types run in-process on
-   Orchestration, which are deprecated/experimental, schema ceiling `"1"`–`"22"` since
-   0.0.55, CacheAside's 0.0.99 contract); extract reusable logic
-   into a Function. Decide which states/
+   Orchestration, which are deprecated/experimental, schema ceiling `"1"`–`"23"` since
+   0.0.59, CacheAside's 0.0.99 contract). A Python step (`23`, runtime ≥ 0.0.103) is a named
+   handler in the domain's own Python runtime image — plan the handler names, their input/output
+   and the image (`python-runtime/`) as part of the design, plus the error boundary for 422/504; extract reusable logic
+   into a Function. Plan the **release path** when the domain needs pilots or staged rollouts
+   (runtime ≥ 0.0.102): a `sys-version-registry` default-version pointer keeps newly published
+   versions pending until `set-default` (`references/concepts/runtime-operations.md` §2.1). Decide which states/
    transitions need Views, which Schemas are needed (master + per-transition payloads),
    and whether instance-read enrichment needs an Extension. Use
    `references/concepts/function-vs-extension-vs-task.md` to pick the right component.
@@ -125,8 +132,8 @@ Produce a design (markdown, no JSON authoring) that the `component-author` can i
 
 1. The full path list of component files to add/change and each one's responsibility.
 2. For workflows: the states, the `startTransition`, the transition map (with
-   `triggerType` per transition; auto transitions in complementary mutually-exclusive
-   pairs), and the `.csx` mappings/rules/timers needed under `src/`, plus a `.http`
+   `triggerType` per transition; auto transitions covering every branch —
+   exclusive rules or `priority` + a `triggerKind: 10` default), and the `.csx` mappings/rules/timers needed under `src/`, plus a `.http`
    test file.
 3. For tasks/functions/extensions: chosen `type`/`scope` and how they're referenced
    (nested `{ key, domain, flow, version }` shape).

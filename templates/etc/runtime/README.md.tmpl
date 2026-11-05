@@ -28,3 +28,28 @@ Check: `docker inspect vnext-orchestration-dapr-{{domain}} --format '{{json .Arg
 `/domain-components` and `--max-body-size`; after an upload `data/blobs/` holds a GUID-named file.
 Shared environments get the binding from the platform team (Helm `blobStorageComponents`) — never from
 this folder. Field rules and status codes: `.claude/references/file-fields.md`.
+
+## Python runtime (PythonTask, type 23)
+
+Needed only when a task has `"type": "23"`. Without it every type-23 task fails with **503** (`Python
+runtime is not enabled for this domain`) — an environment error, not a domain bug.
+
+| File | Purpose |
+|---|---|
+| `python-runtime/` (repo root) | the domain image: `Dockerfile` (`FROM ghcr.io/burgan-tech/vnext/python-runtime:<runtimeVersion>`), hash-pinned `requirements.txt`, `handlers/*.py` |
+| `docker-compose.python.override.yml` | builds and runs that image read-only with its daprd sidecar (app-id `vnext-{{domain}}-python-runtime-app`) and sets `Workflow__PythonRuntime__AppId` on `vnext-app` |
+
+```bash
+cd <vnext-runtime>/vnext/docker
+export VNEXT_DOMAIN_REPO=/absolute/path/to/this/repo
+docker compose -p vnext-{{domain}} --env-file ./domains/{{domain}}/.env \
+  -f docker-compose.yml -f "$VNEXT_DOMAIN_REPO/etc/runtime/docker-compose.python.override.yml" \
+  --profile vnext up -d --build
+```
+
+Check: `curl -sf localhost:8089/v1/manifest` lists every `@handler` name; through the sidecar,
+`curl -sf localhost:3589/v1.0/invoke/vnext-{{domain}}-python-runtime-app/method/v1/health` answers
+`{"status":"ok"}`. A handler change needs `--build` again (code lives in the image). The Testcontainers
+test run does not start this runtime — run type-23 scenarios with `/vnext-ai-toolkit:e2e` in local
+mode. Shared environments enable the Helm chart's `pythonRuntime` block; the image is pushed by the
+domain's pipeline. Contract and error codes: `.claude/references/task-types.md` §3.

@@ -9,7 +9,7 @@
 #
 # Examples:
 #   scripts/vnext-meta-live.sh known-issues | node -e 'JSON.parse(require("fs").readFileSync(0)).items.forEach(i=>console.log(i.id, i.fixedIn||"open", i.title))'
-#   scripts/vnext-meta-live.sh features --ref v0.0.100
+#   scripts/vnext-meta-live.sh features --ref v0.0.103
 #
 # Cache: ${XDG_CACHE_HOME:-$HOME/.cache}/vnext-ai-toolkit/vnext-meta/<ref>/<file>.json, 1 hour by default.
 # Exit codes: 0 = printed live or cached JSON; 3 = offline and no cache (snapshot path printed to stderr); 2 = bad usage.

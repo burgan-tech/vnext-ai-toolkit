@@ -92,12 +92,13 @@
     "references/concepts/observability.md",
     "references/concepts/schema-runtime-gaps.md",
     "references/concepts/field-protection.md",
+    "references/concepts/row-security.md",
     "references/concepts/file-fields.md"
   ],
   "vnext": {
-    "knownRuntimeVersion": "0.0.100",
-    "knownSchemaVersion": "0.0.56",
-    "metaPackageVersion": "0.0.53",
+    "knownRuntimeVersion": "0.0.103",
+    "knownSchemaVersion": "0.0.59",
+    "metaPackageVersion": "0.0.103",
     "schemaSource": "node_modules/@burgan-tech/vnext-schema/schemas/{componentType}-definition.schema.json",
     "schemaFallbackUrl": "https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}-definition.schema.json",
     "knowledgeOrder": [
@@ -137,6 +138,7 @@
       "references/concepts/runtime-operations.md",
       "references/concepts/schema-runtime-gaps.md",
       "references/concepts/field-protection.md",
+      "references/concepts/row-security.md",
       "references/concepts/file-fields.md",
       "references/concepts/integration-test-patterns.md",
       "references/runtime-feature-matrix.md"
