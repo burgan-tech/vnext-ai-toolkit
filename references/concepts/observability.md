@@ -1,7 +1,7 @@
 # Observability — Logs, Spans, Correlation, Debugging Recipes
 
 > Audience: domain authors debugging their own workflow against a local or shared runtime
-> (v0.0.103). What to search for, where, and in which order. For lock/cache/discovery behaviour see
+> (v0.0.105). What to search for, where, and in which order. For lock/cache/discovery behaviour see
 > `runtime-operations.md`; for the incident payload and `retry` rules see `incidents-and-retry.md`.
 
 ## 1. Log catalogue — `WorkflowLogs` EventIds
@@ -17,12 +17,12 @@ Every runtime log line comes from `src/BBT.Workflow.Domain/Logging/WorkflowLogs.
 
 | Range | Region (from `#region` markers) | Named examples |
 |---|---|---|
-| 10003–10161 | Transition execution, task execution, fan-out (1015x), task coordinator, post-commit (1009x), resource lock (1010x), multi-channel notification (1016x) | `StateChanged` 10003; `ScheduledTransitionsSkippedForChainedNext` 10156 |
+| 10003–10262 | Transition execution, task execution, fan-out (1015x), task coordinator, post-commit (1009x), resource lock (1010x), multi-channel notification (1016x); continuation claim 10182–10183 and hot-path calls 10240–10260 (0.0.105); transition-schema resolution 10261–10262 (0.0.105) | `StateChanged` 10003; `ScheduledTransitionsSkippedForChainedNext` 10156; `UpdateDataContinuationClaimLost` 10182 (0.0.105) |
 | 10074–… | SubFlow (interleaved with 10xxx) | |
 | 20008–20050 | Instance management, instance retry | `InstanceStarted` 20008 |
-| 20100–20460 | View resolution 201xx, extensions, incidents 202xx, long-poll termination 203xx, state-function cache 204xx, data-function cache 2041x, master/schema cache 2042x, related access 2043x, caller-role provider 2044x, human-task 2045x, instance-query filtering 2046x | `StateFunctionEtagNotModified` 20405; `EffectiveStatusDrift` 20445 (warning); human task dropped 20459 (warning) |
+| 20100–20519 | View resolution 201xx, extensions, incidents 202xx, long-poll termination 203xx, state-function cache 204xx, data-function cache 2041x, master/schema cache 2042x, related access 2043x, caller-role provider 2044x, `CallerRolesUnavailableForSelection` 20519 (0.0.105; warning, no role values logged), human-task 2045x, instance-query filtering 2046x | `StateFunctionEtagNotModified` 20405; `EffectiveStatusDrift` 20445 (warning); human task dropped 20459 (warning) |
 | 40017–40990 | Background jobs 4001x–4007x, cancellation, completion/fault cleanup 4009x, runtime, query ops, event-driven transitions 4099x | `JobFailed` 40075 (error, both overloads) |
-| 50001–50030 | Service discovery 5000x, specification validation 5001x, cache invalidation 5002x, authorization | `AuthorizeRequest` 50030 (audit line: Domain, Workflow, Instance, Target, Role, Allowed) |
+| 50001–50046 | Service discovery 5000x, specification validation 5001x, cache invalidation 5002x, authorization | `AuthorizeRequest` 50030 (audit line: Domain, Workflow, Instance, Target, Role, Allowed; a workflow-scoped start check logs Target `start:<key>` and an empty instance id, 0.0.105); `AuthorizeLeafMissingFallback` 50046 (0.0.104) |
 | 60001–60011 | Server configuration, scripting helpers / sandbox | `ScriptSandboxViolation`, `ScriptHelpersDisabled`, warm-up |
 | 70001–70021 | Component cache | `AttributeIndexCatalogFallback` 70021 (warning — `x-indexed` catalog missing, JSON query fallback) |
 | 80001–… | Function contract (verbs, schema, view slots) | |
@@ -76,6 +76,7 @@ Activity sources: `BBT.Workflow.Pipeline`, `.BackgroundJobs`, `.SubFlow`, `.Task
 | `vnext.rowsecurity.*` | Row-security decision on list/GET (0.0.102 — `row-security.md` §8) |
 | `vnext.settle.skipped=true` | An intermediate SubFlow start-chain level skipped its empty settle (0.0.103, perf only) |
 | `vnext.subflow.carried_header_count` | Headers carried from a settled child to its parent (0.0.102) |
+| `vnext.auth.fallback=leaf-missing` | On `Auth.Decide`: a `queryRoles` probe reached a SubFlow child that does not exist yet and the parent decided (0.0.104 — `roles-and-authorization.md`) |
 | `vnext.instance.id`, `vnext.root.instance.id`, `vnext.parent.instance.id`, `vnext.subflow.instance.id` | Instance tree |
 | `vnext.transition.key`, `vnext.step.order`, `vnext.step.outcome` | Pipeline position |
 | `vnext.task.key`, `vnext.task.type`, `vnext.task.trigger` (OnExecute \| OnEntry \| OnExit \| Extension) | Task identity |
@@ -163,6 +164,10 @@ Typical lookups: OpenObserve/Kibana logs `x_request_id = '<id>'`; APM transactio
 - The `functions/tasks` items also carry `hook` and `order` since 0.0.99.
 - **Instance data history** (`GET …/instances/{id}/data/history`, 0.0.100, #1079) is an **internal** tooling read (Forge Instance Monitor): paged, newest first, same field exposure as the data function. It is hidden from Swagger but not blocked — keep it off the public gateway; do not build client features on it.
 
+> **Task log lines moved to Debug (0.0.105, #1195).** "Executing task … with error-aware retry" and
+> "Task … completed successfully" are Debug now; a saved query that counted task runs at Information
+> finds nothing. Use the task spans or the metrics endpoints above.
+
 ### Metric: long-poll resumes (0.0.103, #1156)
 
 `workflow_longpoll_resume_total` (meter `BBT.Workflow.Telemetry`; tags `vnext.domain`, `vnext.flow.key`,
@@ -181,7 +186,8 @@ waits the full `fallbackTimeoutSeconds`: fix the client's ack call, or shorten t
    `POST …/longpoll/ack`)? Ack it, or wait for `fallbackTimeoutSeconds` (default 60). An `interaction`
    block without `ack` (`terminate: false`, 0.0.98+) never holds the instance — unless the state is an
    **interaction wait** (`subType: 5`), which parks Busy until `updateData` satisfies an automatic rule or
-   the state's timer fires (0.0.102, `long-poll-interaction.md` §3b).
+   the state's timer fires (0.0.102, `long-poll-interaction.md` §3b). Since 0.0.105 log 10182 marks an
+   `updateData` that lost the continuation claim to a concurrent one — expected, not a fault.
 3. Any `transitions[]` entry with `kind: "scheduled"` and a future `executeAtUtc`, or a `timeout`
    block? It is waiting by design. Remember ETag gap #864: a stale `executeAtUtc` behind a 304 is
    possible — poll once **without** `If-None-Match`.

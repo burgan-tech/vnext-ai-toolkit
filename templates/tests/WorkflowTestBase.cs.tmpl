@@ -73,8 +73,10 @@ public abstract class WorkflowTestBase : IntegrationTestBase
 
     private Dictionary<string, string> HeadersFor(Caller? caller) => Headers(caller ?? DefaultCaller);
 
+    protected static string WorkflowPath(string workflow) => $"api/v1/{AppDomain}/workflows/{workflow}";
+
     protected static string InstancePath(string workflow, string instanceId) =>
-        $"api/v1/{AppDomain}/workflows/{workflow}/instances/{instanceId}";
+        $"{WorkflowPath(workflow)}/instances/{instanceId}";
 
     // ── requests ─────────────────────────────────────────────────────────────
 
@@ -160,6 +162,25 @@ public abstract class WorkflowTestBase : IntegrationTestBase
             HttpStatusCode.OK => true,
             HttpStatusCode.Forbidden => false,
             _ => throw new Xunit.Sdk.XunitException($"authorize?{query} answered {(int)status}: {body}")
+        };
+    }
+
+    /// <summary>
+    /// Runtime 0.0.105+: <c>GET {domain}/workflows/{workflow}/functions/authorize?type=instance</c> — may
+    /// <paramref name="caller"/> START an instance (evaluates <c>startTransition.roles</c>; instance-bound grants
+    /// such as <c>$InstanceStarter</c> never match here). 200 → true, 403 → false, anything else fails
+    /// (a missing <c>type</c> is 400 <c>Authorization:110005</c>).
+    /// </summary>
+    protected async Task<bool> AuthorizeStartAsync(string workflow, Caller caller, string? version = null)
+    {
+        var path = $"{WorkflowPath(workflow)}/functions/authorize?type=instance"
+                 + (version is null ? "" : $"&version={Uri.EscapeDataString(version)}");
+        var (status, body) = await SendRawAsync(HttpMethod.Get, path, headers: Headers(caller));
+        return status switch
+        {
+            HttpStatusCode.OK => true,
+            HttpStatusCode.Forbidden => false,
+            _ => throw new Xunit.Sdk.XunitException($"authorize?type=instance answered {(int)status}: {body}")
         };
     }
 

@@ -43,7 +43,7 @@ node_modules/@burgan-tech/vnext-schema/schemas/<schema-file>.json
 If `node_modules` is absent, run `npm install` first, or read the schema via
 `npm pack @burgan-tech/vnext-schema && tar -xzf *.tgz`.
 
-This toolkit is aligned to **runtime 0.0.103 / schema 0.0.59**. When the workspace pins older
+This toolkit is aligned to **runtime 0.0.105 / schema 0.0.60**. When the workspace pins older
 `runtimeVersion` / `schemaVersion` values in `vnext.config.json`, check a feature's since-version in
 `references/runtime-feature-matrix.md` before using it.
 
@@ -136,7 +136,10 @@ Confirm the exact shape against the schema each time; this is the gist:
   `attributes.schema.schema` (a nested reference `{ key, domain, flow: "sys-schemas",
   version }`), even though the JSON schema marks it optional. `npm run validate`
   enforces this. Author the referenced schema component first, and normally point the
-  `startTransition.schema` at the same schema so the start payload is validated.
+  `startTransition.schema` at the same schema so the start payload is validated. A transition
+  whose body shape varies may instead declare rule-based `schemas` (runtime ≥ 0.0.105 / schema
+  ≥ 0.0.60: `[{ rule?, schema }]`, first match wins, rule-less fallback last, not on auto/timer;
+  no match → 400 `Transition:100025` — `references/concepts/transition-pipeline.md` §1.1).
 - **task** — required `type` (string number; schema 0.0.59 validates `"1"`–`"23"`
   (`"22"` ExternalHttp, deprecated; `"23"` Python = a `handler` reference into the domain's Python
   runtime image, runtime ≥ 0.0.103 — never `script`/`executionMode`) — e.g. `"6"`=HTTP, `"7"`=Script, `"15"`=GetInstances, `"18"`=CacheAside,
@@ -144,7 +147,10 @@ Confirm the exact shape against the schema each time; this is the gist:
   and `config`.
 - **view** — required `type` (integer) and `content`; optional `labels`, `display`.
 - **function** — required `scope` (enum `D`/`F`/`I`) and `task` (object with
-  `order`, `task`, `mapping`); optional `labels`, `roles`.
+  `order`, `task`, `mapping`); optional `labels`, `roles`. A rule-based `inputSchema` needs a
+  rule-less last entry unless unmatched bodies should get `400 Function:800006` (runtime 0.0.105,
+  breaking). Slot, view and schema rules can select by role with `await context.Caller.HasRoleAsync("x")`
+  (0.0.105, `references/concepts/csx-contracts.md` § Caller roles) — never by parsing `Headers.role`.
 - **extension** — required `type` (integer), `scope` (integer), `task`; optional `labels`.
 - **schema** — required `schema`; optional `labels`. Since schema 0.0.56 `attributes.type` is the
   schema's **role**, which selects the vocabulary it is validated against: `master` (a flow's master

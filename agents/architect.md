@@ -96,7 +96,11 @@ before writing the output. Pull the option sets from the schema, not from memory
 4. **Start transition.** `startTransition.target` must name a declared state — the Initial
    state if there is one, else the state entered from the implicit `$start` (never `$self`,
    `$start` or empty — publish rejects them since 0.0.99); confirm its `schema`
-   normally points at the master payload schema. It carries **no `view`** (`view: null`) — data is
+   normally points at the master payload schema. When one transition accepts differently shaped
+   bodies, design a rule-based `schemas` list instead (runtime ≥ 0.0.105 / schema ≥ 0.0.60,
+   rule-less fallback last — `transition-pipeline.md` §1.1). If roles are confirmed, say who may
+   **start**: `startTransition.roles` with static roles (the gateway asks
+   `authorize?type=instance`, 0.0.105; instance-bound grants never match there). It carries **no `view`** (`view: null`) — data is
    validated via `schema` only; client-facing input belongs on the first state's `view`. Note a
    scheduled start (`POST …/instances/schedule`, 0.0.100) if the flow is time-triggered.
 5. **Multi-actor access.** **Always ask the user whether the flow should configure roles at

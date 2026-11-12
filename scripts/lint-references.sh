@@ -57,6 +57,13 @@ ban '(x-roles|user_reference)[^|]*role header' 'the runtime reads only role/sub/
 ban 'VNEXT_BASE_URL=http://localhost:5000|localhost:5000/api' 'the local runtime answers on :4201 (MockLab is :3001 from the host, mocklab:5000 in-network)'
 ban 'read/write (pruning|visibility)' 'x-roles prunes reads only'
 ban 'produces \*\*no\*\* .interaction' 'terminate:false serves the interaction block (without ack) since 0.0.98'
+# runtime 0.0.104–0.0.105 / schema 0.0.60
+ban 'serves no flow-level|no flow-level `?…?/?workflows|Instance-scoped only' 'a workflow-scoped authorize exists since 0.0.105 (`…/workflows/{wf}/functions/authorize?type=instance`, the start check)'
+ban 'body validation skips|"no contract", not an error' 'a rule-based function inputSchema with no match rejects a body with 400 Function:800006 since 0.0.105'
+ban 'inner task failed with no more specific code' 'since 0.0.104 an Ignore/Log-handled FanOut item keeps the inner code; FanOut:ItemFailed is only the no-code fallback'
+ban 'Known gaps \(D1–D14\)' 'schema-runtime-gaps lists D1–D15 (D15: rule-based transition schemas)'
+ban 'no caller roles|scripts cannot (read|see) (the caller.s )?roles' 'selection rules, automatic rules, timers and SubFlow output mappings read the caller roles via context.Caller since 0.0.105'
+ban '\$(EVERYONE|everyone)\b' 'the predefined role is spelled $Everyone (ordinal; other spellings are publish errors) — quote a wrong spelling only with lint:allow'
 # domain-check must not depend on a runtime checkout (issue #27)
 hits=$(grep -rnE 'src/BBT\.|\.cs\b|RUNTIME_ROOT|common\.props|TaskScope\.cs|DataFunctionCache|vnext-onboarding|ekyc' skills/domain-check commands/domain-check.md 2>/dev/null | grep -v 'lint:allow')
 [ -z "$hits" ] || { red 'domain-check references runtime source paths or private domains (cite public docs / schema instead)'; printf '%s\n' "$hits" | sed 's/^/     /'; }

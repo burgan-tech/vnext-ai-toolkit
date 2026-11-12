@@ -1,6 +1,6 @@
 # Instance Query — list endpoint, filters, sort, `x-filterOperators`, `x-indexed`
 
-> Runtime 0.0.103 / schema 0.0.59. A flow with `attributes.rowSecurity` (0.0.102, `row-security.md`) ANDs a
+> Runtime 0.0.105 / schema 0.0.60. A flow with `attributes.rowSecurity` (0.0.102, `row-security.md`) ANDs a
 > role-keyed row filter into every list query — paging, `groupBy` and aggregates cover visible rows only —
 > and since 0.0.102 the list fails with `Instance:100051/52/53` when the flow definition cannot be loaded
 > (migration `instance-read-fails-on-flow-lookup-error`). The list endpoint fails **closed** since 0.0.84: anything the runtime cannot
@@ -131,6 +131,15 @@ Bare names, whitelisted, case-insensitive:
 
 Sort-only extras: `isTransient`, `currentStateType`, `currentStateSubType`, `createdBy`,
 `createdByBehalfOf`, `modifiedBy`, `modifiedByBehalfOf`.
+
+**`modifiedAt` = last transition or data change (0.0.104, #1183).** Every transition stamps it — a
+same-state one included, whether the instance ends Active, Busy, Completed (a cancel too) or Faulted
+(terminal outcomes share the instant with `completedAt`). An `updateData` stamps the `enteredAt` of each
+data row it writes (last row wins); one that changes no data, stage, tags or key moves nothing. Up to
+0.0.103 only the set-based status writes moved it, so a finished instance showed a time from before its
+final transition. Rows written before the upgrade keep their old values. Filters / sorts on `modifiedAt`
+and reports reading it as "last status change" now mean "last change" — re-check them (migration
+`instance-modified-at-moves-on-every-transition`).
 
 ### Instance `type` and `effectiveStatus`
 

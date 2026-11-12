@@ -1,7 +1,7 @@
 # Long-Poll Interaction — `interaction.longPoll`
 
 > A **state-level** declaration that tells the polling client "stop, render, then acknowledge".
-> Runtime 0.0.103, state-function shape v14. Transitions cannot carry `interaction`.
+> Runtime 0.0.105, state-function shape v14. Transitions cannot carry `interaction`.
 
 ## 1. When to use
 
@@ -118,7 +118,13 @@ The instance rests **Busy with no owner** there by design. Two exits:
 
 - **Data arrives** — `updateData` is never refused on Busy; when its data satisfies an automatic rule, the
   continuation takes the parked Busy over and runs the transition. An **armed** timer that is not yet due
-  is not an owner.
+  is not an owner. **Several concurrent `updateData` calls continue the chain once** (0.0.105, #1195): the
+  first claims the parked continuation (`Instances.ContinuationClaimedAt`, set-based, stale after 60 s),
+  runs the chain and clears the claim; a loser still writes its data but drops its continuation (log
+  `UpdateDataContinuationClaimLost`, 10182). Up to 0.0.104 every caller re-ran the automatic chain —
+  duplicate parent notifications / finalize calls and a stale `Status=B` written over the settled state.
+  So make the automatic rule read data any of the racing calls may have written, and do not rely on the
+  *last* caller's continuation running.
 - **Data never arrives** — the state's timer fires and takes the parked Busy over (log
   `ScheduledTransitionTookOverInteractionWait`, 10181). It is still refused while another transition's
   job owns the Busy, while a `terminate: true` ack is pending, or while an open SubFlow holds the instance.

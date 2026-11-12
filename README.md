@@ -2,7 +2,7 @@
 
 > Claude Code plugin for building [vNext](https://burgan-tech.github.io/vnext-docs/) workflow-domain components with AI assistance — analyze a request, design it, author the JSON, validate, security-review, and document it. Built for projects scaffolded from [`@burgan-tech/vnext-template`](https://github.com/burgan-tech). **Schema-first**: every component is authored against the JSON Schemas shipped in `@burgan-tech/vnext-schema` (pinned in the project's `package.json`), never from hardcoded assumptions.
 
-**Runtime coverage:** the toolkit describes vNext runtime **0.0.103** / schema **0.0.59**. `vnext-meta` is read live from vnext master (`scripts/vnext-meta-live.sh`); [`references/runtime-feature-matrix.md`](references/runtime-feature-matrix.md) is its offline snapshot (feature → since-version). See "Updating runtime knowledge" below.
+**Runtime coverage:** the toolkit describes vNext runtime **0.0.105** / schema **0.0.60** (both still unreleased on vnext / vnext-schema master when this was written; 0.0.104 is the latest released runtime). `vnext-meta` is read live from vnext master (`scripts/vnext-meta-live.sh`); [`references/runtime-feature-matrix.md`](references/runtime-feature-matrix.md) is its offline snapshot (feature → since-version). See "Updating runtime knowledge" below.
 
 **Who it is for:** product teams that build vNext domains. They work in their own domain repository and have no write access to the vNext runtime, vnext-schema, vnext-docs or vnext-example repositories — the toolkit only *reads* those, and routes runtime defects to `/vnext-ai-toolkit:report-issue`.
 
@@ -92,7 +92,7 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 - **`e2e-local`** — runs the domain's integration tests end to end: Testcontainers with the image pinned to `runtimeVersion` by default, or — after asking — against a local runtime you already run; preflight, triage of failures (environment / fixture / domain / runtime) and a result stamp.
 - **`validate-and-fix`** — runs `npm run validate`, categorizes failures, proposes schema-cited fixes before applying.
 - **`security-audit`** — runs a four-phase OWASP-style security review (recon → hunt → verify → report) for secrets, authz, injection, SSRF/path traversal, weak crypto, dependency issues, and misconfiguration. Candidates are verified for reachability and existing mitigations, scored for confidence (0–100), and written to `security-report/SECURITY-REPORT.md` with CWE/OWASP references.
-- **`domain-check`** — read-only runtime-cost and unused-capability audit of the domain package (CacheAside, GetInstances, error-boundary Retry, `P` vs `S`, same-order parallelism, function scope, `history: none`, `x-indexed`, …). A stdlib scanner reads enum labels from the pinned `@burgan-tech/vnext-schema`; every finding is verified in the file and triaged with you before a Turkish `Yapılmalı` / `Yapılsa iyi olur` report is written. Port of the runtime repo's `domain-performance-audit` (#27).
+- **`domain-check`** — read-only runtime-cost and unused-capability audit of the domain package (CacheAside, GetInstances, error-boundary Retry, `P` vs `S`, same-order parallelism, function scope, `history: none`, `x-indexed`, behaviour changes the next runtime upgrade brings, …). A stdlib scanner reads enum labels from the pinned `@burgan-tech/vnext-schema`; every finding is verified in the file and triaged with you before a Turkish `Yapılmalı` / `Yapılsa iyi olur` report is written. Port of the runtime repo's `domain-performance-audit` (#27).
 - **`report-runtime-issue`** — when a problem is the runtime's, not the domain's: triages against known gaps, live `vnext-meta` known issues and the docs, searches for duplicates, collects evidence, redacts secrets/PII/internal hosts, drafts an English issue and files it on `burgan-tech/vnext` only after your approval.
 - **Security checklist reference** — [references/concepts/security-review-checklist.md](references/concepts/security-review-checklist.md) gives the agents and skills concrete per-category hunt patterns for the vNext component model (`roles`/`queryRoles`/`x-roles`, `.csx` `ScriptContext` data flow, `allowedHosts`, `REF` sources), false-positive rules (MockLab seeds, fixtures, dev URLs), and a severity/confidence rubric with OWASP Top 10 / CWE mapping.
 
@@ -205,7 +205,10 @@ When a new vNext runtime ships:
    prefer `--npm <runtimeVersion>` once that package is published: same content, correct
    `metaPackageVersion`. Review the diff of
    `references/runtime-feature-matrix.md` — new `since` rows, deprecations, migrations and known
-   issues are the to-do list. The release posts under vnext-docs `blog/` map PRs to versions, and each
+   issues are the to-do list. To cover a milestone **before** it ships, add `--next <runtime>:<schema>`
+   (with `--github` or `--from <vnext checkout>/vnext-meta`): the fragments under `vnext-meta/unreleased/`
+   are folded in and stamped with that version, the way the release stamp does it; re-run with
+   `--npm <runtime>` once the package is published. The release posts under vnext-docs `blog/` map PRs to versions, and each
    vnext PR's `## Product impact` table says whether it hands work to the toolkit
    (`docs/integration/vnext-ai-toolkit/*.md` in the vnext repo).
 2. Update the hand-written references under `references/concepts/` for anything that changed

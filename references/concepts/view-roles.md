@@ -55,6 +55,14 @@ role and limits its `x-*` keywords (`schema-vocabularies.md`). Match the view to
 - embedded component that sends nothing itself → `component`. It does not inherit the host's role; if it
   submits, it uses the command the host passes in (`$param.submitCommand`).
 
+**Selecting a view by caller role (0.0.105, #1299).** Views carry no `roles`; a state / transition view
+rule (or a function `inputView`/`outputView` rule) picks the variant: `public async Task<bool>
+Handler(ScriptContext context) => await context.Caller.HasRoleAsync("backoffice.officer");`, then a
+rule-less fallback **last** that is the least privileged view. Do not parse `context.Headers.role`. A
+provider failure answers `503 Authorization:110006` instead of the fallback. Choosing a view is UX, not
+access control — the data the view shows is still shaped by `x-roles` / `queryRoles` (`csx-contracts.md`
+§ Caller roles).
+
 A schema used by two kinds of view is split per role (toolkit rule). A legacy `attributes.type`
 (`workflow`, `view`, `schema` …) fails `npm run validate` on 0.0.56 — map it (`schema-vocabularies.md` §2).
 

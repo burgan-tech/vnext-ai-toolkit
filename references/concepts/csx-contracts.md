@@ -92,6 +92,7 @@ The real, complete surface (from `BBT.Workflow.Domain/Scripting/Models.cs`). The
 | `OutputResponse` | `Dictionary<string, dynamic?>` | Per-task **OutputHandler results** (what each task's `IMapping.OutputHandler` returned), keyed by task key. Not merged into `Body`. |
 | `MetaData` | `Dictionary<string, dynamic>` | Execution metadata. |
 | `Mutations` | `InstanceMutations` | Controlled instance mutations (e.g. `Stage`), applied atomically after the script. |
+| `Caller` | `ICallerAccessor` | **0.0.105+** (#1299). The caller's **resolved** role set (`HasRoleAsync`, `RolesAsync`, `IsAvailable`, `ResolutionFailed`, `RolesFromHeader`) — readable only in selection rules, automatic rules / timers on caller-driven hops and SubFlow output mappings. Never null; see § Caller roles. |
 | `CancellationToken` | `CancellationToken` | **0.0.100+** (#1090). The request / transition-job / event-delivery token. Pass it to your own I/O (a plugin DB driver, `DecryptAsync`) so an abandoned operation stops the call. `CancellationToken.None` when the context was built without one. A property, not a handler parameter — interface signatures are unchanged. |
 
 ### `TaskResponse` vs `OutputResponse` vs `Body` — the exact semantics
@@ -281,6 +282,63 @@ if (iban is null) { /* not an encrypt token at that path, unknown path, or unope
 - **DynamicExpresso rules, dynamic role grants and human-task text see the token.** Move a condition on an encrypt field to a C# `IConditionMapping` that calls `DecryptAsync`.
 - Unchanged: a SubFlow `OutputHandler`'s `Body` (child data, opened by the child) and a transition task's own request `Body` are plaintext.
 
+## Caller roles — `context.Caller` (0.0.105+, #1299)
+
+The role set the runtime itself resolved for the caller — same provider, same set as `authorize` and the
+caller-scoped cache keys (`default`: token claims, else the gateway `role` header; `morph-idm`: the
+identity service, a non-blank `role` header replaces its answer). **Use it instead of parsing
+`context.Headers.role`**: under `morph-idm` the header is not the caller's role set unless the gateway put it there.
+
+| Member | Meaning |
+|---|---|
+| `await HasRoleAsync("morph-idm.approver")` | true when the caller holds the role — **ordinal** (case-sensitive) comparison, unlike grants |
+| `await RolesAsync()` | the caller's roles; empty when they hold none |
+| `IsAvailable` | false on a surface with no caller — a read then **throws** (`CallerRolesUnavailableException`); never an empty set |
+| `ResolutionFailed` | true once a read failed because the provider could not answer |
+| `RolesFromHeader` | after a read: whether the set came from the `role` header (diagnostic only) |
+
+Plain role names only — `$InstanceStarter`, `$PreviousUser`, dynamic `$user.` / `$role.` grants and
+`allOf` / `anyOf` are **not** expanded. Lazy: nothing is resolved until a script reads it, then at most once
+per request scope.
+
+| Surface | Readable? | Whose roles | Provider failure |
+|---|---|---|---|
+| Transition `schemas` rule, function `inputSchema` / `outputSchema` / `inputView` / `outputView` rule, state / transition view rule | yes | the request's caller | selection fails: **`503 Authorization:110006`** — never the fallback, whatever the rule returned or swallowed; not cached |
+| `IConditionMapping` (automatic rule) | on caller-driven hops (request, async-accept job, inline auto chain) | the caller who drove the hop | the step fails (`110006`, retryable, through the error boundary); the `triggerKind: 10` default is **not** taken |
+| `ITimerMapping` | when a caller entered the state (computed at **arming**) | the caller who entered the state | the step fails (`110006`) |
+| `ISubFlowMapping.OutputHandler` | when the child's settling request carried headers | the **child settler** (carried headers), not the parent's starter | transient: completion redelivered, the parent is **not** faulted |
+| `IMapping` (task input/output), `ITransitionMapping`, extensions, resource lock, `IEventMapping`, `ICacheKeyMapping`, function tasks | **no** | — | — |
+
+**System hops have no caller:** a fired timer, a SubFlow resume (even though carried headers apply to it), a
+continuation; a timer that re-arms after firing; a child settled by a timer. Guard every automatic rule and
+timer that may run there:
+
+```csharp
+public class IsApproverRule : ScriptBase, IConditionMapping
+{
+    public async Task<bool> Handler(ScriptContext context) =>
+        context.Caller.IsAvailable && await context.Caller.HasRoleAsync("morph-idm.approver");
+}
+
+public class ReviewWindowTimer : ScriptBase, ITimerMapping
+{
+    public async Task<TimerSchedule> Handler(ScriptContext context)
+    {
+        var vip = context.Caller.IsAvailable && await context.Caller.HasRoleAsync("vip");
+        return TimerSchedule.FromDuration(vip ? TimeSpan.FromHours(48) : TimeSpan.FromHours(24));
+    }
+}
+```
+
+A selection rule (schema / view / contract slot) runs only on a caller's request, so it needs no guard:
+`public async Task<bool> Handler(ScriptContext context) => await context.Caller.HasRoleAsync("corporate-officer");`
+
+**Selection is not authorization.** Choosing a form or payload contract by role is a UX / contract decision;
+the transition endpoint still does not enforce `transition.roles`, admission stays with the gateway's
+`authorize`. Write **positive** tests (`HasRoleAsync("x")`, never "not x"), and make the rule-less
+**fallback the least privileged** entry. Known separate gap: an automatic rule that throws for any *other*
+reason still reads as "not satisfied" (the next auto transition or the default may fire).
+
 ## `context.Related` — correlated instance access (v0.0.79+)
 
 Mapping scripts can read a **related** instance's data directly: one hop up (the parent that started this instance as a SubFlow/SubProcess) or one hop down (this instance's own correlations). Lazy + memoized per context; nothing is pre-fetched.
@@ -377,6 +435,8 @@ public class MyAutoRule : ScriptBase, IConditionMapping
     public Task<bool> Handler(ScriptContext context)
     {
         // Stateless, side-effect free. true → the auto transition fires.
+        // Role-dependent? 0.0.105+: context.Caller.IsAvailable && await context.Caller.HasRoleAsync("x")
+        // (make the Handler async; § Caller roles) — never parse context.Headers.role.
         var status = GetPropertyValue<string>(context.Instance.Data, "status", "");
         return Task.FromResult(status == "approved");
     }
@@ -392,6 +452,8 @@ public class MyTimerRule : ScriptBase, ITimerMapping
     {
         // TimerSchedule.FromDateTime(dt) / FromCronExpression("0 9 * * *") /
         // TimerSchedule.FromDuration(TimeSpan.FromMinutes(15)) / TimerSchedule.Immediate()
+        // Computed at ARMING. Role-dependent window (0.0.105+): guard context.Caller.IsAvailable —
+        // a timer re-armed by a fired timer has no caller (§ Caller roles).
         return Task.FromResult(/* schedule */);
     }
 }
@@ -414,6 +476,7 @@ public class MySubFlowMapping : ScriptBase, ISubFlowMapping
         // Since 0.0.102 context.Headers = the headers of the request that settled the child
         // (lower-cased keys; null/empty when a timer, timeout or downward cascade settled it).
         var channel = GetPropertyValue<string>(context.Headers, "x-channel", null); // null-safe
+        // 0.0.105+: context.Caller = the CHILD SETTLER's roles (guard IsAvailable: none when a timer settled it)
         return Task.FromResult(new ScriptResponse { Data = new { approvedVia = channel } });
     }
 }
@@ -714,6 +777,7 @@ If a script fails in a way these notes don't explain and the runtime is at fault
 ## Sources
 
 - Runtime source of truth: `BBT.Workflow.Domain/Scripting/Models.cs` (ScriptContext, `CancellationToken`), `Scripting/Contracts/*.cs` (interfaces, incl. `IFanOutMapping.cs`, `ICacheKeyMapping.cs`, `IMapping.cs`), `Domain/Instances/Instance.cs` (`DecryptAsync`), `BBT.Workflow.Modules.Scripting/.../ScriptBase.cs` + `ScriptFile.cs` (helpers, `GetFileAsync`), `Scripting/Related/*.cs` (Related API), `Modules.Scripting/.../Evaluators/CSharpEvaluator.cs` (using-merge), `Modules.Scripting/.../Functions/SecretCacheOptions.cs`, `Application/BackgroundJobs/Options/WorkflowExecutionOptions.cs` (`PreserveNumericPrecision`), `Execution.Abstractions/HttpTaskInvocation.cs` (outbound header fill), vnext `docs/custom-script-helpers.md` §3–§4 (sandbox, plugins)
+- `context.Caller` (0.0.105, vnext #1299): vnext `docs/runtime/script-caller-roles.md`, `src/BBT.Workflow.Domain/Scripting/Caller/*.cs`, handoff `docs/integration/vnext-ai-toolkit/script-caller-roles.md`, vnext-meta fragment `script-caller-roles`
 - Release notes: vnext-docs `blog/2026-08-20-v0-0-81-84.md` (#888), `blog/2026-08-24-v0-0-85.md` (#899, #905, #907), `blog/2026-08-31-v0-0-87.md` (#920), `blog/2026-10-05-v0-0-99.md` (#1053, #1054, #1059, #1060, #1069), `blog/2026-10-15-v0-0-100.md` (#1087, #1090, file fields); vnext-docs `docs/configuration/scripting.md`, `docs/components/tasks/cache-aside.md`; vnext-meta known issues `instance-data-numeric-precision-loss`, `script-context-incident-not-loaded`, `sandbox-baseline-missing-system-objectmodel`, `task-binding-x-request-id-dropped`, `field-encryption-plaintext-copies`, `file-in-task-record`; migrations `script-sees-encrypt-tokens`, `task-caller-credential-forwarded`, `publish-rejects-unavailable-allowed-assemblies`, `cacheaside-source-as-task-and-script-key`; feature `scriptSecretCache` (0.0.80)
 - Working examples:
   - `vnext-example/core/Workflows/payments/src/SendPaymentNotificationSmsMapping.csx` — IMapping

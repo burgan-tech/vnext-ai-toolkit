@@ -4,7 +4,7 @@
 # resolved and that each measurement the fixture is built to trigger shows up.
 #
 # Usage: scripts/test-domain-check.sh <vnext-schema schemas dir>
-#   e.g. d=$(mktemp -d); npm install --no-save --prefix "$d" @burgan-tech/vnext-schema@0.0.59
+#   e.g. d=$(mktemp -d); npm install --no-save --prefix "$d" @burgan-tech/vnext-schema@0.0.60
 #        scripts/test-domain-check.sh "$d/node_modules/@burgan-tech/vnext-schema/schemas"
 # Exit 0 = pass, 1 = assertion failed, 2 = bad usage.
 set -eu
@@ -51,6 +51,19 @@ check(o["scriptCalls"]["serializeInLog"] == 1, "serialize-in-log not counted")
 wf = {w["key"]: w for w in o["workflows"]}
 check(wf.get("apply", {}).get("decisionOnlyStates") == ["checking"], "decision-only state not reported")
 check(any("Get Instances" in c for c in o["unusedCapabilities"]), "unused GetInstances capability not reported")
+u = o["upgrade"]
+check(u["inputSchemaNoFallback"] == ["fn-rule-input"], f"rule-based inputSchema without fallback: {u['inputSchemaNoFallback']}")
+check(u["transitionSchemasNoFallback"] == ["apply::draft->submit"], f"transition schemas without fallback: {u['transitionSchemasNoFallback']}")
+check(len(u["fanOutItemFailedRefs"]) == 1, "FanOut:ItemFailed match in a script not reported")
+check(len(u["hideFromAllPair"]) == 1, "deny+allow $InstanceStarter hide pair not reported")
+check(len(u["everyoneMisplaced"]) == 1 and "x-masking" in u["everyoneMisplaced"][0], f"$Everyone in an exemption list: {u['everyoneMisplaced']}")
+check(len(u["everyoneMiscased"]) == 1, "miscased $everyone not reported")
+check(u["startRolesInstanceBoundOnly"] == ["apply"], "instance-bound-only startTransition.roles not reported")
+base = lambda xs: sorted(x.rsplit("/", 1)[-1] for x in xs)
+check(base(u["roleHeaderParsing"]) == ["ChannelRoleMapping.csx"], f"role header parsing: {u['roleHeaderParsing']}")
+check(base(u["callerWhereUnavailable"]) == ["ChannelRoleMapping.csx"], f"context.Caller in a task mapping: {u['callerWhereUnavailable']}")
+check(base(u["callerUnguarded"]) == ["IsApproverRule.csx"], f"unguarded context.Caller: {u['callerUnguarded']}")
+check(len(u["callerUses"]) == 3, f"context.Caller uses: {u['callerUses']}")
 
 if fail:
     print("FAIL domain-check smoke test:")

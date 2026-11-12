@@ -3,5 +3,8 @@
   "properties": {
     "nationalId": { "type": "string", "x-filterOperators": ["eq"] },
     "status": { "type": "string", "x-sortable": true, "x-filterOperators": ["eq"], "x-indexed": true },
-    "displayName": { "type": "string", "x-computed": { "evaluatedBy": "runtime", "fallback": "" } }
+    "displayName": { "type": "string", "x-computed": { "evaluatedBy": "runtime", "fallback": "" } },
+    "riskScore": { "type": "number", "x-roles": [ { "grant": "deny", "role": "$InstanceStarter" }, { "grant": "allow", "role": "$InstanceStarter" } ] },
+    "iban": { "type": "string", "x-masking": { "operator": "mask", "params": { "keepLast": 4 }, "roles": [ { "role": "$Everyone", "grant": "allow" } ] } },
+    "internalFlag": { "type": "boolean", "x-roles": [ { "role": "$everyone", "grant": "deny" } ] }
   } } } }
