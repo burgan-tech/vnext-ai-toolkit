@@ -133,8 +133,24 @@ For each transition capture:
 - **`triggerType`**: `0` (manual / user action), `1` (auto / condition-evaluated), `2` (timer), `3` (event)
 - **For auto transitions**: ask what happens when each condition is false. Prefer mutually exclusive `rule`s; if rules overlap on purpose ("VIP first, then amount"), set `priority` (runtime ≥ 0.0.102 / schema ≥ 0.0.58: integer ≥ 1, absent = 100, lower first) and add a `triggerKind: 10` default as the fallback — never leave a state whose rules can all be false (`references/concepts/workflow-types.md` §3).
 - **For timer**: `duration` (ISO 8601, e.g. `PT15M`)
+- **Role-dependent auto rule or timer window** ("approvers skip review", "VIP gets 48 h"): runtime ≥ 0.0.105
+  scaffolds `context.Caller.IsAvailable && await context.Caller.HasRoleAsync("x")` — the `IsAvailable` guard is
+  mandatory because a fired timer or a SubFlow resume has no caller (a read throws). Timers see the caller who
+  **entered** the state (computed at arming). A provider outage fails the step with `Authorization:110006`
+  instead of taking the default. Never put roles into task mappings — `context.Caller` is unavailable there
+  (`references/concepts/csx-contracts.md` § Caller roles).
 - **`onExecutionTasks`**: which tasks run during the transition, and which `.csx` mapping shapes each task's input/output. Entries at the same `order` run in parallel and merge by slot `variableKey ?? camelCase(task.key)`; if the **same task** is bound twice at one order (e.g. two SubProcess starts), give at least one a `"variableKey"` (0.0.99; publish rejects a slot collision — same rule for `onEntries` / `onExits`). "Do X for each item in a list" → a **FanOut task** (type 21), not an auto loop — `references/concepts/fan-out.md`.
 - **`executionType`** (optional, `"S"` / `"A"`) if this transition must not depend on the caller's `?sync`.
+- **Payload schema** (manual/event, `cancel`, `exit`, `updateData`, start): one `schema`, or — when the
+  same transition takes differently shaped bodies (retail vs corporate, per channel) — a rule-based
+  **`schemas`** list (runtime ≥ 0.0.105 / schema ≥ 0.0.60): `[{ "rule": <IConditionMapping .csx>, "schema": ref }, …, { "schema": fallbackRef }]`,
+  first match wins, rule-less fallback **last**, never on auto/timer transitions. The rule sees the
+  instance's latest data as `body`, the request headers and — for a role-specific contract — the caller's
+  resolved roles via `await context.Caller.HasRoleAsync("x")` (0.0.105, never `Headers.role`), not the
+  request payload. Role rules are positive tests and the fallback is the least privileged contract. No matching entry →
+  `400 Transition:100025`; ask the user whether unmatched callers must be refused (then omit the
+  fallback deliberately). Details: `references/concepts/transition-pipeline.md` §1.1. On an older
+  workspace keep the single `schema`.
 - **`annotations`** (optional, see above)
 
 ### 5. Identify the start transition
@@ -142,7 +158,12 @@ For each transition capture:
 Exactly one `attributes.startTransition`. Its `target` is **required** and must name a declared
 state — the Initial state if there is one, otherwise any state (the instance is born in the implicit
 `$start` and enters it). `$self`, `$start` and an empty target are rejected at publish (0.0.99,
-#1068). No `view`; an optional `schema` validates the start payload; optional `executionType`.
+#1068). No `view`; an optional `schema` (or rule-based `schemas`, 0.0.105) validates the start payload;
+optional `executionType`. If roles are confirmed, ask **who may start** an instance: since 0.0.105 the
+gateway can gate `POST …/instances/start` through `GET …/workflows/{wf}/functions/authorize?type=instance`,
+which evaluates `startTransition.roles` — static roles or `$Everyone` only (a `$InstanceStarter` /
+behalf-of / `$user.` grant never matches before the instance exists, so `allow $InstanceStarter` alone
+closes the flow). The runtime itself never checks these roles; say that the gateway rule must exist.
 If the flow should also start **on a schedule**, note that runtime 0.0.100 exposes
 `POST …/instances/schedule?scheduleId=…` for a Dapr `bindings.cron` component (seed values arrive as
 query-string **strings**) — `references/concepts/workflow-types.md` §6.

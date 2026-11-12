@@ -166,8 +166,8 @@ No filter; the full list is returned (paged).
 ## Environment
 | | |
 |---|---|
-| Runtime | `0.0.103` |
-| Schema package | `@burgan-tech/vnext-schema 0.0.59` |
+| Runtime | `0.0.105` |
+| Schema package | `@burgan-tech/vnext-schema 0.0.60` |
 | Toolkit | `vnext-ai-toolkit 0.0.7` |
 | Role provider | n/a |
 | Deployment | Testcontainers (VNext.Testing.Sdk) |

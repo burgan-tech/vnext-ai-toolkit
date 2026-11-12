@@ -80,6 +80,10 @@ role: {{role}}
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/authorize?queryRoles=true
 role: {{role}}
 
+### Authorize — may this caller START an instance? (0.0.105+: workflow-scoped, evaluates startTransition.roles; no type → 400)
+GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/functions/authorize?type=instance
+role: {{role}}
+
 ### Instance data / master schema
 GET {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/functions/data
 role: {{role}}

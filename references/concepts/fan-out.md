@@ -50,7 +50,7 @@ Not a replacement for `$self` auto-loops when each iteration must observe the pr
 | `join.minSuccess` | — | **Required ≥1 for `quorum`**; silently ignored otherwise |
 | `join.resultKey` | `fanOutResults` | Instance-data key of the default output |
 | `join.ordered` | `true` | **No-op in inline mode** — results are always index-sorted |
-| `errorBoundary` | none | A normal `onError[]` boundary applied **independently per item** (retry/fallback/ignore) |
+| `errorBoundary` | none | A normal `onError[]` boundary applied **independently per item** (retry/fallback/ignore). Since 0.0.104 an item whose failure the boundary resolves to `Ignore` (3) or `Log` keeps the inner task's error code, message and data, so `OutputHandler` can branch on the status (§6) |
 
 Default per-item binding with no mapping: `branch.SetBody(item.Value)` — the inner task's script sees the item as its body. That is enough when the inner task reads only the body. It is **not** enough when the inner task's own config must change per item (an `HttpTask` URL, a SOAP envelope, a Dapr method) — then you need an `IFanOutMapping`.
 
@@ -152,7 +152,20 @@ An overriding `OutputHandler` replaces this whole shape (a non-null response wit
 | `FanOut:BatchTimeout` | cut short by `batchTimeoutSeconds` |
 | `FanOut:ItemCancelled` | cancelled by a join policy's early stop |
 | `FanOut:ItemNotStarted` | cancelled while still queued for a slot, no deadline to blame |
-| `FanOut:ItemFailed` | inner task failed with no more specific code — the inner task's own code passes through unchanged otherwise |
+| `FanOut:ItemFailed` | fallback only: the inner task failed and produced **no** code of its own (no boundary at all also lands here, message and data kept). Otherwise the inner task's normalized code passes through — e.g. `Task:DirectTrigger:<taskKey>:409` |
+
+**Ignored items keep their error (0.0.104, vnext #1180).** An item boundary that ignores client errors
+
+```json
+"errorBoundary": { "onError": [ { "action": 3, "errorCodes": ["400", "404", "409"], "priority": 1 } ] }
+```
+
+delivers the refused item to `OutputHandler` as `IsSuccess = false`, `ErrorCode = "Task:DirectTrigger:<taskKey>:409"`,
+`ErrorMessage` = the inner task's message, `Data` = its response body. Up to 0.0.103 the same item arrived
+as `FanOut:ItemFailed` with a generic message and `Data = null`. **Migration:** an `OutputHandler` (or a
+rule reading the default summary) that matched `FanOut:ItemFailed` to detect an expected refusal must
+match the inner status suffix (`:409`, `:404`) instead. An `Abort`/`Rollback`-handled item keeps its code
+but not its data; `FanOutItemResult` itself is unchanged.
 
 Limits: `Workflow:FanOut:MaxConcurrentItems` = **64 per pod**, a global bulkhead across all batches (effective concurrency = min(`maxDegreeOfParallelism`, free global slots)). **Nested fan-out is rejected** before the first item (it would deadlock against that bulkhead). Inner 14 SubProcess / 12 DirectTrigger are fine; inner 5 Human / 9 Timer are accepted by validation and cannot work inside a bounded window.
 
@@ -190,6 +203,7 @@ Both rules must also treat "summary absent" as false so neither fires before the
 
 ## Sources
 
+- vnext PR #1180 (0.0.104): `TasksExecutionResult.HandledError`, `FanOutTaskExecutor.MapEngineOutcome` — ignored items keep the inner error
 - Runtime `vnext` @ `eca5b466`: `src/BBT.Workflow.Domain/Definitions/Tasks/FanOutTask.cs`, `src/BBT.Workflow.Domain/Scripting/Contracts/IFanOutMapping.cs`, `src/BBT.Workflow.Application/Tasks/Executors/FanOut/{FanOutTaskExecutor,FanOutJoinEvaluator,FanOutItemsResolver,FanOutOptions,FanOutErrorCodes}.cs`; `docs/domain/fan-out-task.md`
 - Fixtures `vnext-example` @ `3b5ebab`: `core/Tasks/fan-out-documents/*.json`, `core/Tasks/fan-out-config-matrix/*.json`, `core/Workflows/fan-out-documents/{fan-out-documents.json,src/FanOutDocumentsMapping.csx,src/PartialFailureRule.csx,src/AllSucceededRule.csx}`
 - vnext-docs @ `adf9bf4`: `docs/components/tasks/fan-out.md`; release notes `blog/2026-08-24-v0-0-85.md` (#905)

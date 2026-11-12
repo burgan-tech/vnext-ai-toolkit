@@ -81,6 +81,20 @@ Hunt patterns:
   at depth 1 — expect two `allOf` allows.
 - An **allow `$role.$.context…` grant expected to admit role-less callers** — it does not since 0.0.99
   (Unknown never admits). Functional finding, not an exposure.
+- **`$Everyone` (0.0.105).** `allow $Everyone` on a transition, function, `queryRoles` or `x-roles`
+  opens that surface to **every** caller, role-less included — confirm it is intended and not a
+  shortcut for "authenticated users" (write the real role). `$Everyone` in `x-masking.roles` /
+  `x-encryption.roles` or a row-security rule is a publish error (it would exempt every caller); a
+  miscased `$everyone` too. A field that must be hidden from every caller written as `[]` (= visible to <!-- lint:allow -->
+  all) or as `allow <role nobody holds>` (claimable through the `role` header under the `default`
+  provider) is a finding — expect `deny $Everyone`. `$Everyone` on a workspace whose runtime is
+  < 0.0.105 is a finding too: the old runtime reads it as a static role nobody holds, so a
+  `deny $Everyone` hides nothing from callers with roles.
+- **`startTransition.roles` (0.0.105).** Gated only by the gateway's workflow-scoped
+  `authorize?type=instance` rule on `POST …/instances/start` — the runtime never checks it. A flow that
+  restricts who may start must say so in its design and the deployment must carry that rule. Instance-bound
+  leaves (`$InstanceStarter`, behalf-of, `$PreviousUser`, `$user.` / `$userBehalfOf.` / `$role.` references)
+  never match there: `allow $InstanceStarter` alone closes the flow; a `deny` of one never fires.
 - **Start without `act_sub`** (client, gateway route, test, or a Start/SubProcess task mapping that
   blanks it): `Instance.CreatedBy` stays empty and `$InstanceStarter` / `$PreviousUser` grants never
   match — an allow silently refuses, a deny silently never fires.
@@ -197,6 +211,18 @@ Hunt patterns for schema field protection (details: [field-protection.md](field-
 - Scripts that `DecryptAsync` a value and write it to another field, a log line or a view label; PII in
   `humanTask.title` / `description` (never field-protected).
 - `x-masking` / `x-encryption` exemption `roles` broader than the audience that really needs clear text.
+- **Caller roles in scripts (0.0.105, #1299).** A rule that decides by role from `context.Headers.role`
+  instead of `context.Caller` (under `morph-idm` the header is not the role set). A role rule treated as a
+  security boundary — selecting a view/schema/contract by role protects nothing; the gateway's `authorize`
+  and `x-roles` / `queryRoles` do. A **negative** role test (`!HasRoleAsync("restricted")`) or a rule-less
+  fallback that is the *richest* contract: an unidentified or newly added role then gets the privileged
+  entry. An automatic rule / timer reading `context.Caller` without an `IsAvailable` guard where a System hop
+  can run it (fired timer, SubFlow resume) — it throws and faults the step.
+- **Rule-based payload schemas (0.0.105).** A transition `schemas` list or a function rule-based
+  `inputSchema` whose rules read **headers** a client can set picks the validation schema the client
+  wants — a rule is a routing choice, never an authorization check. A function `inputSchema` that ends
+  with a permissive rule-less fallback re-opens what the stricter entries closed; one without a fallback
+  refuses unmatched bodies (`Function:800006`, fail closed — the safe default).
 
 Not a finding: MD5/CRC used for non-security checksums or cache keys.
 
@@ -221,8 +247,9 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
 - Validate that `exports` and their `visibility` are intentionally scoped — internal
   components must not leak cross-domain.
 - Confirm the deployment's gateway attaches the `authorize` pre-flight (`?queryRoles=true` for
-  reads, `?ack=true` for `longpoll/ack`, `?transitionKey=`/`?functionKey=` for writes) on the
-  `/workflows` routes, and that the configured `CallerRoleProvider` is known — an unrecognised
+  reads, `?ack=true` for `longpoll/ack`, `?transitionKey=`/`?functionKey=` for writes, and since 0.0.105
+  the workflow-scoped `…/functions/authorize?type=instance` for `POST …/instances/start` — never for the
+  internal `sub/instances/start`) on the `/workflows` routes, and that the configured `CallerRoleProvider` is known — an unrecognised
   value silently degrades to `default` (header-trusting).
 - Confirm the gateway owns **every** credential header (`sub`, `act_sub`, `role`, `position`,
   `client_id`) — not only `role` — and that `CallerRoleProvider:MorphIdm:GetRolesPath` is set

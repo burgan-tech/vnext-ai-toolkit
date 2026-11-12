@@ -96,6 +96,7 @@ orchestrator (plugin suites → local mode).
 | `WaitForObservedStateAsync` | state function view — the deepest active SubFlow |
 | `AssertNotFaultedAsync` | after a start whose first state runs entry tasks |
 | `AuthorizeAsync(wf, id, "transitionKey=x", caller)` | 200 → true, 403 → false — the authorization verdict |
+| `AuthorizeStartAsync(wf, caller, version?)` | 0.0.105+: may this caller start an instance (`authorize?type=instance`, `startTransition.roles`) — 200 → true, 403 → false |
 | `GetOfferedTransitionsAsync` | state function `transitions[].name` for a caller |
 | `SendRawAsync` | exact headers (including none) / verbatim JSON |
 
@@ -197,6 +198,9 @@ Paths are `/api/v1/{domain}/workflows/{wf}/instances/{id}/…`; endpoints withou
 | Retry | `RetryInstanceAsync` | 200; status `F` again = still failing |
 | Long-poll ack | `POST …/longpoll/ack` | 200; instance leaves Busy |
 | Authorize | `…/functions/authorize?transitionKey=…` / `queryRoles=true` / `functionKey=…` / `ack=true` | 200 allowed / 403 denied |
+| Start authorize (0.0.105) | `AuthorizeStartAsync` → `GET …/workflows/{wf}/functions/authorize?type=instance` | 200 / 403 from `startTransition.roles`; no `type` → 400 `Authorization:110005`; instance-bound grants never match |
+| Sync response state (0.0.104) | `…/instances/start?sync=true`, `PATCH …?sync=true` | body carries `currentState` / `effectiveState` (the instance's own, no SubFlow descent); a `202` carries neither |
+| Rule-based payload schema (0.0.105) | transition with `schemas`, body that matches no entry | 400 `Transition:100025`, instance unchanged; the instance `schema` function → 404 for the same caller/headers |
 | Human-task list | `GET /api/v1/{domain}/functions/human-task` | filtered by caller roles (fail-closed) |
 | Task journal | `…/functions/tasks` | executed task keys and outcomes — **completed tasks only** since 0.0.102 (a running task is not listed; assert after the transition settles) |
 | Correlations | `…/functions/instance-correlation` | SubFlow/SubProcess tree |

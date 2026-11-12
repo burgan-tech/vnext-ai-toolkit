@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 ---
 
 You are a meticulous reviewer of vNext domain changes. Your goal is to make the
-change safe to merge. Targets: runtime 0.0.103 / schema package 0.0.59 unless the
+change safe to merge. Targets: runtime 0.0.105 / schema package 0.0.60 unless the
 workspace pins older versions (`vnext.config.json`; check features against
 `references/runtime-feature-matrix.md`).
 
@@ -67,7 +67,9 @@ Checklist:
     `availableIn`, function `roles`, long-poll `roles`, SubFlow overrides): not exactly
     one of `role`/`allOf`/`anyOf`, combinator depth > 1, children other than `{role}`,
     `grant` not lowercase, malformed `$user.`/`$userBehalfOf.`/`$role.` path; `deny` or
-    combinators in `x-masking`/`x-encryption` exemption lists.
+    combinators in `x-masking`/`x-encryption` exemption lists; `$Everyone` (0.0.105) in an
+    exemption list or a `rowSecurity` rule, or spelled in another case (`$everyone`); `$Everyone` <!-- lint:allow -->
+    on a workspace whose `runtimeVersion` is < 0.0.105.
 - Workflows (`references/concepts/workflow-types.md`, `transition-pipeline.md`):
   - `attributes.history: "none"` on a flow that is not one-shot — any manual (non
     `triggerType: 1`) state transition, `sharedTransitions`, `cancel`/`exit`/
@@ -81,6 +83,21 @@ Checklist:
     `onExecutionTasks` (or anywhere in a function's `onExecutionTasks`) — same task or
     keys that normalise alike (`user-info`/`user_info`) — without distinct
     `variableKey`s; invalid `variableKey`.
+  - rule-based `schemas` (0.0.105 / schema 0.0.60) with a rule-less entry that is not last,
+    on an automatic/scheduled transition, next to a `schema` (`schemas` wins — drop one), or on a
+    workspace below runtime 0.0.105 / schema 0.0.60 (gap D15); a function rule-based
+    `inputSchema` without a rule-less last entry when unmatched callers are not meant to get
+    `400 Function:800006` (warning — breaking since 0.0.105).
+  - `startTransition.roles` relying only on instance-bound leaves (`$InstanceStarter`, behalf-of,
+    `$PreviousUser`, `$user.`/`$userBehalfOf.`/`$role.`): they never match in the start check
+    (`authorize?type=instance`, 0.0.105), so an allow-only set closes the flow to everyone.
+  - `context.Caller` (0.0.105) in a script where it is unavailable (task `IMapping`, `ITransitionMapping`,
+    extension, event, cache-key mappings — a read throws), or in an automatic rule / timer without an
+    `IsAvailable` guard; a role rule that parses `Headers.role` instead of `context.Caller`; a role-based
+    rule list whose rule-less fallback is not the least-privileged entry; `context.Caller` on a workspace
+    below runtime 0.0.105 (CS1061 at compile time).
+  - a FanOut `OutputHandler` / rule that matches `FanOut:ItemFailed` to detect an item its boundary
+    ignored — since 0.0.104 that item carries the inner code (`Task:<type>:<key>:<status>`).
   - a state-level `subFlow.type: "P"` (use SubProcessTask 14);
     `interaction.longPoll` without exactly one of `roles`/`rule`.
 - Tasks / functions / scripts:

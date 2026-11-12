@@ -49,6 +49,7 @@ Group failures by type:
 - **Version format** — not semver
 - **Auto-transition rule** — lone conditional auto transition (must be paired or unconditional); `priority` on a non-automatic, `triggerKind: 10`, shared or start transition (schema ≥ 0.0.58 — `references/concepts/transition-pipeline.md`)
 - **Row security** — schema `rowSecurity` shape errors (`rules` empty, unknown member, a `default` key) or a publish `RS-E01…E18` code: map the code with `references/concepts/row-security.md` §4; `RS-W*` lines are log-only warnings, report them but do not block
+- **Rule-based payload schemas / `$Everyone`** — publish: a transition `schemas` rule-less entry that is not last, `schemas` on an auto/timer transition, `$Everyone` in `x-masking`/`x-encryption` roles or a `rowSecurity` rule, a miscased `$Everyone`; validate on schema ≤ 0.0.59: `schemas` rejected on start/cancel/exit/updateData (gap D15 — bump to schema 0.0.60 / runtime 0.0.105 together). Runtime `400 Transition:100025` / `Function:800006` = no rule-based entry matched (add the rule-less fallback) — `references/concepts/schema-runtime-gaps.md`
 - **Python task (23)** — `script` / `executionMode` on a type-23 task = the removed pre-0.0.103 form; rewrite as `handler` (`references/concepts/task-types.md` §3), never delete fields until it validates
 - **Other** — anything that doesn't fit above
 

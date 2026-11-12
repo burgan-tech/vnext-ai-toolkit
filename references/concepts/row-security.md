@@ -34,7 +34,8 @@ with the domain team (§6 gateway precondition, §7 what it does **not** protect
 - `roles`: **static roles** (case-insensitive) **or** the identity roles `$InstanceStarter`
   (`createdBy = caller actor`) / `$InstanceBehalfOfStarter` (`createdByBehalfOf = caller user name`) —
   never both in one rule (RS-E04, split the rule). `$PreviousUser`, dynamic grants (`$user.`, `$role.` …)
-  and other reserved roles are publish errors (RS-E01/E02/E05). `allOf` / `anyOf` objects fail schema
+  and other reserved roles — `$Everyone` included (0.0.105) — are publish errors (RS-E01/E02/E05); "every
+  caller sees these rows" is a static-role rule without `filter`, there is no wildcard. `allOf` / `anyOf` objects fail schema
   validation (and JSON binding, `400 App:900006`).
 - `filter`: the **list-engine filter JSON** (`instance-query.md` §2): `eq ne gt ge lt le between like
   match startswith endswith in nin isNull includes`, `and` / `or` / `not`, on `attributes.*` paths and
@@ -110,7 +111,7 @@ Errors block publish; warnings are **log-only** (`ComponentValidationWarning`), 
 
 | Code | Meaning | Fix |
 |---|---|---|
-| RS-E01 / E02 / E05 | `$PreviousUser…`, dynamic grant, other reserved role as a rule role | use static roles or `$InstanceStarter` / `$InstanceBehalfOfStarter` |
+| RS-E01 / E02 / E05 | `$PreviousUser…`, dynamic grant, other reserved role (`$Everyone` too, 0.0.105) as a rule role | use static roles or `$InstanceStarter` / `$InstanceBehalfOfStarter` |
 | RS-E04 | static + reserved role in one rule | split into two rules |
 | RS-E06 | starter shorthand on the wrong column | `$InstanceStarter` only on `createdBy`, `$InstanceBehalfOfStarter` only on `createdByBehalfOf` |
 | RS-E07 | malformed `$.context.` path / unknown source or `CurrentUser` field | `Headers`, `QueryParameters`, `CurrentUser.{ActorUserName,ActorUserId,UserName,Position}` |

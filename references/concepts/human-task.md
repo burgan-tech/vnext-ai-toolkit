@@ -2,7 +2,8 @@
 
 > A human task is **not** task type 5 (`Human` task is a stub that answers 202 "Pending"). It is a
 > **state** with `subType: 6` plus a domain-level function that lists such states for the caller.
-> Runtime 0.0.100 (identity-aware leaf decision and combinators since 0.0.99).
+> Runtime 0.0.105 (identity-aware leaf decision and combinators since 0.0.99; `dueBy` / `priority` on
+> each row since 0.0.104; `$Everyone` grants since 0.0.105).
 
 ## 1. Model
 
@@ -10,7 +11,7 @@
 |-------|-------|---------|
 | `"subType": 6` on a state | workflow definition | marks the state as a human task candidate |
 | `queryRoles` on that state (or workflow root) | workflow definition | **who** sees the task — fail-closed |
-| `humanTask: { title, description }` | instance data **root** | text shown in the list |
+| `humanTask: { title, description, dueBy?, priority? }` | instance data **root** | text shown in the list; `dueBy` / `priority` optional (0.0.104) |
 | `GET /api/v1/{domain}/functions/human-task` | domain function (`FunctionTypeConst.HumanTask`) | the list; morph-idm-api calls it once per registered domain and merges |
 
 The approval is a state of the **main flow**, not a separate workflow. Web and mobile poll the same
@@ -57,6 +58,8 @@ instance; channel-specific screens come from view rules, not from separate state
 dynamic humanTask = new ExpandoObject();
 humanTask.title = "50.000 TL EFT approval";
 humanTask.description = "Ahmet Yılmaz — TR33 0006 …";
+humanTask.dueBy = "2026-11-10T17:00:00+03:00"; // optional (0.0.104): ISO 8601 date or date-time
+humanTask.priority = 1;                        // optional (0.0.104): number, or "1.5" ('.' decimal)
 output.humanTask = humanTask;          // root-level key, nothing nested
 ```
 
@@ -123,7 +126,8 @@ Fixture: vnext-example `core/Workflows/human-task-chain/ht-idm-approval.json` (v
    `POST {domain}/workflows/{wf}/internal/human-task-leaf/batch`).
 3. Read leaf `queryRoles` + stamped overrides → authorize; read leaf `humanTask` text.
 4. Merge, `CreatedAt DESC`, cut at `ResultCap` 500 → header `X-VNext-HumanTask-Truncated: true`.
-5. Cache per `domain + caller scope (roles, act_sub, sub) + auth-header hash`, TTL 60 s.
+5. Cache per `domain + caller scope (roles, act_sub, sub) + auth-header hash` (since 0.0.105 the hash covers
+   every non-volatile request header, `RequestHeaderHash`), TTL 60 s.
 
 ## 5. Response
 
@@ -133,6 +137,7 @@ Bare JSON array (no envelope — morph-idm deserializes a list):
 [
   { "instanceId": "APP-2026-000123", "id": "0f3c…", "workflow": "ht-a",
     "title": "HT-A step", "description": "HT-A step description",
+    "dueBy": "2026-11-10T17:00:00+03:00", "priority": 1,
     "createdAt": "2026-09-28T09:12:00Z", "vNext": true }
 ]
 ```
@@ -143,6 +148,8 @@ Bare JSON array (no envelope — morph-idm deserializes a list):
 | `id` | the addressable instance `Id` — **always use this** to open the instance (`SubflowStarter` copies the parent key onto children, so `Key` can point at the wrong instance) |
 | `workflow` | root flow key |
 | `title`, `description` | from the leaf's `humanTask`; empty strings when the block is missing (task still listed) |
+| `dueBy` (0.0.104) | `humanTask.dueBy` of the leaf — ISO 8601 date (`2026-11-10`) or date-time with offset; served as a date-time with offset. Absent or malformed (`"next week"`, an object) → `null`, the row stays |
+| `priority` (0.0.104) | `humanTask.priority` of the leaf — JSON number or numeric string with a `.` decimal (`"1.5"`; `"1,5"` reads as absent); served as a number (decimal). Absent or malformed → `null` |
 | `vNext` | always `true` (lets the consumer mix legacy sources) |
 
 Headers: `X-VNext-HumanTask-Truncated` (response, list was capped), `X-VNext-Cache-Override: true`
@@ -167,6 +174,10 @@ Headers: `X-VNext-HumanTask-Truncated` (response, list was capped), `X-VNext-Cac
   error/finished state. Clients must tolerate "already done" on open. `X-VNext-Cache-Override`
   forces a rebuild (expensive; do not do it on every poll).
 - `humanTask` nested under another key is ignored — root only.
+- `dueBy` / `priority` are **display data only**: the list is still ordered by `createdAt` (newest
+  first), never by either field — a client that wants "most urgent first" sorts on its side. A partner
+  domain on a runtime older than 0.0.104 answers its rows without them (`null`). The response-cache key
+  generation moved `human-task:v1` → `v2` with 0.0.104, so entries written before the deploy are not served.
 - Opening by `instanceId` (Key) can land on the wrong instance for SubProcess children; use `id`.
 - Cancelled/faulted/completed instances drop automatically (`EffectiveStatus = 'A'` clamp).
 - Type-5 `Human` task in `onExecutionTasks` does **not** create a human task; it just returns 202.
@@ -188,6 +199,8 @@ Headers: `X-VNext-HumanTask-Truncated` (response, list was capped), `X-VNext-Cac
   `src/BBT.Workflow.Domain/Instances/DTOs/GetInstanceOutput.cs` (`HumanTaskItemOutput`),
   `orchestration/.../Controllers/Functions/Handlers/HumanTaskFunctionHandler.cs`, `docs/runtime/human-task-function.md`
 - Schema `vnext-schema` 0.0.56: `#/definitions/stateSubType` (6 = Human), `#/definitions/roleGrant` (combinators)
+- vnext PRs #1178 (0.0.104, `dueBy` / `priority`, cache `v2`), #1225 (0.0.105, the list cache key also hashes the
+  non-volatile request headers, `RequestHeaderHash`); vnext `docs/runtime/human-task-function.md` § Response body
 - vnext-docs @ `adf9bf4`: `how-to/human-task-approval.md`, `components/functions/built-in.md` §Human Task Fonksiyonu
 - Fixtures `vnext-example`: `core/Workflows/human-task-chain/{ht-a,ht-b,ht-c,ht-idm-approval}.json`, `tests/Core.IntegrationTests/Tests/HumanTaskChain/IdmBehalfOfGrantTests.cs`
 - vnext-docs `blog/2026-10-05-v0-0-99.md`; PRs #1016 (0.0.94), #1051 (0.0.98), #1071 (0.0.99), #1082 (history none); vnext-meta `roleGrantAuthorization.apiEndpoints`, migration `human-task-list-matches-transition-execution` (0.0.79)
