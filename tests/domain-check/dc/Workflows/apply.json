@@ -32,7 +32,13 @@
           "label": "x"
         }
       ],
-      "schema": null
+      "schema": null,
+      "roles": [
+        {
+          "role": "$InstanceStarter",
+          "grant": "allow"
+        }
+      ]
     },
     "errorBoundary": {
       "onError": [
@@ -93,7 +99,6 @@
                 "label": "x"
               }
             ],
-            "schema": null,
             "executionType": "A",
             "onExecutionTasks": [
               {
@@ -120,6 +125,20 @@
                 "mapping": {
                   "location": "./src/SubmitMapping.csx",
                   "code": ""
+                }
+              }
+            ],
+            "schemas": [
+              {
+                "rule": {
+                  "location": "./src/IsCorporateRule.csx",
+                  "code": ""
+                },
+                "schema": {
+                  "key": "apply-master",
+                  "domain": "dc",
+                  "flow": "sys-schemas",
+                  "version": "1.0.0"
                 }
               }
             ]

@@ -401,7 +401,7 @@ The declarable client contract:
 | Field | Type | Runtime behavior |
 |-------|------|------------------|
 | `verbs` | `string[]` (e.g. `["POST"]`) | Whitelist of accepted HTTP verbs. Absent/empty = every verb accepted (back-compat). A non-matching verb → **405** with an `Allow` header listing the declared verbs. No `QUERY` verb — declaring it is a validation error; model body-carrying reads as `POST`. |
-| `inputSchema` | `sys-schemas` reference or rule-based entries | Request body is **validated** before any task runs; failure → **400** with field-level errors. Not validated when absent or when the request has no body. |
+| `inputSchema` | `sys-schemas` reference or rule-based entries | Request body is **validated** before any task runs; failure → **400** with field-level errors. Not validated when absent or when the request has no body. **Since 0.0.105** a rule-based list whose entries all carry a rule and none matches **rejects** a request with a body (`400 Function:800006`) — end the list with a rule-less entry to keep accepting unmatched callers. |
 | `outputSchema` | `sys-schemas` reference or rule-based entries | **Declarative only** — the runtime never validates responses against it. Documents the response shape for clients. |
 | `inputView` | `sys-views` reference or rule-based entries | The view a client renders to **collect** this function's input (the BFF View form). |
 | `outputView` | `sys-views` reference or rule-based entries | The view a client renders to **present** this function's output. |
@@ -418,7 +418,7 @@ Each of the four contract slots accepts one of **three wire forms** that produce
 2. an **array of rule entries** `[ { rule, view|schema, loadData? }, … ]`;
 3. the **wrapped array** `{ "views": [ … ] }` / `{ "schemas": [ … ] }` — what the runtime always writes back.
 
-Same concept as state/transition views: declaration order, **first match wins**, a trailing rule-less entry is the fallback. Publish-time rules (`FunctionComponentValidator`): **at most one rule-less entry and it must be last** (anything after it is unreachable); a function **view entry may not carry `extensions`** (there is no data function to apply them to); a schema entry has no `loadData`. A rule that fails to evaluate is logged at Warning and skipped — never fatal. A slot where nothing matches is "no contract", not an error (body validation skips; `/view` and `/schema` return 404 `Function:800004`). Rules run against one lazily built `ScriptContext` shared by all four slots; on `/info`, `/view`, `/schema` there is no request body, so rules see the instance's latest data as `Body`.
+Same concept as state/transition views: declaration order, **first match wins**, a trailing rule-less entry is the fallback. Publish-time rules (`FunctionComponentValidator`): **at most one rule-less entry and it must be last** (anything after it is unreachable); a function **view entry may not carry `extensions`** (there is no data function to apply them to); a schema entry has no `loadData`. A rule that fails to evaluate is logged at Warning and skipped — never fatal. A slot where nothing matches is "no contract": `/view` and `/schema` return 404 `Function:800004`, views and `outputSchema` behave as before — but **`inputSchema` no longer fails open (0.0.105, vnext #1225, breaking)**: a request **with a body** gets `400 Function:800006`; a bodyless request is still accepted. Up to 0.0.104 the body skipped validation (deprecation `function-input-schema-no-match-accepts`). **Always end a rule-based `inputSchema` with a rule-less fallback entry** unless refusing unmatched callers is the intent. Rules run against one lazily built `ScriptContext` shared by all four slots; on `/info`, `/view`, `/schema` there is no request body, so rules see the instance's latest data as `Body`. Since **0.0.105** a slot rule can select by the caller's resolved roles — `await context.Caller.HasRoleAsync("x")` (`csx-contracts.md` § Caller roles); if it reads roles and the provider fails, the request gets `503 Authorization:110006` instead of the fallback entry. On execute, `context.Caller` is closed after input-schema selection: the function's tasks, its cache-key script and output handlers cannot read it (the response cache does not vary by role).
 
 ```jsonc
 "attributes": {
@@ -459,6 +459,7 @@ Careful: `GET {domain}/functions/{fn}` (no suffix) **invokes** the function — 
 | `Function:800003` | 405 | verb not in `verbs[]` — response carries `Allow: <declared verbs>` |
 | `Function:800004` | 404 | contract slot resolved to nothing on `/view` or `/schema` |
 | `Function:800005` | 400 | `target` is neither `input` nor `output` |
+| `Function:800006` | 400 | (0.0.105) rule-based `inputSchema` matched no entry for a request with a body — add a rule-less last entry |
 
 Verb handling: comparison is case-insensitive (`"post"` == `"POST"`); the HTTP `QUERY` method is **deliberately rejected** at definition time — model body-carrying reads as `POST`. `inputSchema` failure is **400 with field-level errors**; `outputSchema` is never enforced.
 

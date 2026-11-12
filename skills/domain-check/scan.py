@@ -383,6 +383,42 @@ def hooks_of(attrs):
             yield origin, f"transition:{t.get('key')}", t["onExecutionTasks"]
 
 
+EVERYONE = "$Everyone"
+# Reading the role header by hand; context.Caller (0.0.105) is the resolved set under both providers.
+ROLE_HEADER_RE = re.compile(r"Headers\s*(?:\.\s*role\b|\[\s*\"role\"\s*\]|,\s*\"role\")", re.I)
+CALLER_UNAVAILABLE = {"IMapping", "ITransitionMapping", "IEventMapping", "ICacheKeyMapping", "IOutputHandler"}
+CALLER_RULES = {"IConditionMapping", "ITimerMapping", "ISubFlowMapping"}
+# Instance-bound leaves: they never match in the workflow-scoped start check (authorize?type=instance).
+INSTANCE_BOUND_RE = re.compile(r"^\$(InstanceStarter|PreviousUser|InstanceBehalfOfStarter|PreviousBehalfOfUser)$"
+                               r"|^\$(user|userBehalfOf|role)\.")
+
+
+def rule_entries(slot, wrapper):
+    """Entries of a rule-based slot: a plain list or the wrapped {wrapper: [...]} form; [] otherwise."""
+    if isinstance(slot, list):
+        return [e for e in slot if isinstance(e, dict)]
+    if isinstance(slot, dict) and isinstance(slot.get(wrapper), list):
+        return [e for e in slot[wrapper] if isinstance(e, dict)]
+    return []
+
+
+def no_fallback(entries):
+    """True when a rule-based list has entries and none of them is rule-less (no catch-all)."""
+    return bool(entries) and all(e.get("rule") for e in entries)
+
+
+def grant_roles(grant):
+    """Role names a single grant names (role, or allOf/anyOf children)."""
+    if not isinstance(grant, dict):
+        return []
+    if isinstance(grant.get("role"), str):
+        return [grant["role"]]
+    out = []
+    for k in ("allOf", "anyOf"):
+        out += [c.get("role") for c in grant.get(k) or [] if isinstance(c, dict) and isinstance(c.get("role"), str)]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # the scan
 # ---------------------------------------------------------------------------
@@ -425,7 +461,8 @@ def scan(root, cfg_path, schema_dir, no_fetch):
 
     gates = {"runtime": cfg.get("runtimeVersion"),
              "ge_0_0_94": at_least(rt, "0.0.94"), "ge_0_0_99": at_least(rt, "0.0.99"),
-             "ge_0_0_100": at_least(rt, "0.0.100")}
+             "ge_0_0_100": at_least(rt, "0.0.100"), "ge_0_0_104": at_least(rt, "0.0.104"),
+             "ge_0_0_105": at_least(rt, "0.0.105")}
     out = {
         "root": root, "config": os.path.relpath(cfg_path, root),
         "domain": cfg.get("domain"),
@@ -745,6 +782,74 @@ def scan(root, cfg_path, schema_dir, no_fetch):
                     nulls += 1
     out["schemaBinding"] = {"bound": bound, "null": nulls}
 
+    # ---- check 21: behaviour changes 0.0.104 / 0.0.105 ---------------------
+    up = {"inputSchemaNoFallback": [], "transitionSchemas": [], "transitionSchemasNoFallback": [],
+          "fanOutItemFailedRefs": [], "hideFromAllPair": [], "everyoneUses": [], "everyoneMisplaced": [],
+          "everyoneMiscased": [], "startRolesInstanceBoundOnly": [], "roleHeaderParsing": [],
+          "callerWhereUnavailable": [], "callerUnguarded": [], "callerUses": []}
+    for f, d in components(croot, paths.get("functions", "Functions")):
+        if no_fallback(rule_entries(d["attributes"].get("inputSchema"), "schemas")):
+            up["inputSchemaNoFallback"].append(d["key"])
+    for w in wfs:
+        a = w["_attrs"]
+        for origin, tr in transitions_of(a):
+            ents = rule_entries(tr.get("schemas"), "schemas")
+            if ents:
+                where = f"{w['key']}::{origin}->{tr.get('key')}"
+                up["transitionSchemas"].append(where)
+                if no_fallback(ents):
+                    up["transitionSchemasNoFallback"].append(where)
+        st = a.get("startTransition") if isinstance(a.get("startTransition"), dict) else {}
+        allows = [g for g in st.get("roles") or [] if isinstance(g, dict) and g.get("grant") == "allow"]
+        if allows and all(grant_roles(g) and all(INSTANCE_BOUND_RE.search(r or "") for r in grant_roles(g))
+                          for g in allows):
+            up["startRolesInstanceBoundOnly"].append(w["key"])
+    everyone_files = set()
+    for f in files(croot, "*.json"):
+        try:
+            doc = json.loads(read_text(f))
+        except ValueError:
+            continue  # already reported by the component pass
+        rel = os.path.relpath(f, root)
+        for k, v in walk(doc):
+            if k in ("x-masking", "x-encryption") and isinstance(v, dict):
+                if any(EVERYONE in grant_roles(g) for g in v.get("roles") or []):
+                    up["everyoneMisplaced"].append(f"{rel} ({k}.roles)")
+            if k == "rowSecurity" and isinstance(v, dict):
+                for rule in v.get("rules") or []:
+                    if isinstance(rule, dict) and EVERYONE in (rule.get("roles") or []):
+                        up["everyoneMisplaced"].append(f"{rel} (rowSecurity)")
+            if k in ("x-roles", "roles", "queryRoles") and isinstance(v, list):
+                names = [r for g in v for r in grant_roles(g)]
+                if EVERYONE in names:
+                    everyone_files.add(rel)
+                if any(r.lower() == EVERYONE.lower() and r != EVERYONE for r in names):
+                    up["everyoneMiscased"].append(rel)
+                if k == "x-roles":
+                    pairs = {(g.get("grant"), g.get("role")) for g in v if isinstance(g, dict)}
+                    if ("deny", "$InstanceStarter") in pairs and ("allow", "$InstanceStarter") in pairs:
+                        up["hideFromAllPair"].append(rel)
+    up["everyoneUses"] = sorted(everyone_files)
+    for key in ("everyoneMisplaced", "everyoneMiscased", "hideFromAllPair"):
+        up[key] = sorted(set(up[key]))
+    up["fanOutItemFailedRefs"] = sorted(os.path.relpath(f, root) for f in files(croot, "*.csx")
+                                        if "FanOut:ItemFailed" in read_text(f))
+    # context.Caller (0.0.105): resolved roles in rule scripts; unavailable in task/transition/event mappings
+    for f in files(croot, "*.csx"):
+        txt, rel = read_text(f), os.path.relpath(f, root)
+        if ROLE_HEADER_RE.search(txt):
+            up["roleHeaderParsing"].append(rel)
+        if not re.search(r"\bcontext\.Caller\b", txt):
+            continue
+        up["callerUses"].append(rel)
+        ifaces = set(re.findall(r"\b(I(?:Mapping|TransitionMapping|EventMapping|CacheKeyMapping|OutputHandler|"
+                                r"ConditionMapping|TimerMapping|SubFlowMapping))\b", txt))
+        if ifaces & CALLER_UNAVAILABLE and not ifaces & CALLER_RULES:
+            up["callerWhereUnavailable"].append(rel)
+        if ifaces & {"IConditionMapping", "ITimerMapping", "ISubFlowMapping"} and not re.search(r"Caller\s*\.\s*IsAvailable\b", txt):
+            up["callerUnguarded"].append(rel)
+    out["upgrade"] = up
+
     # ---- orphans -----------------------------------------------------------
     all_json = files(croot, "*.json")
     csx_files = files(croot, "*.csx")
@@ -976,6 +1081,51 @@ def human(o):
         p(f"  x-computed alan (master): {cf['total']} {cf['bySchema']}{gate(g['ge_0_0_100'], '0.0.100')}")
     if cf["evaluatedByServer"]:
         p(f"  !! x-computed evaluatedBy 'server' (0.0.100'de reddedilir): {', '.join(cf['evaluatedByServer'])}")
+    p("")
+    p("## surum gecisi (0.0.104 / 0.0.105)")
+    u = o["upgrade"]
+    g104, g105 = g.get("ge_0_0_104"), g.get("ge_0_0_105")
+
+    def when(flag, floor):
+        return "simdi gecerli" if flag else (f"{floor}'e geciste" if flag is False else f"{floor}+ (surum bilinmiyor)")
+
+    if u["inputSchemaNoFallback"]:
+        p(f"  !! rule-based inputSchema, rule'suz son giris yok ({len(u['inputSchemaNoFallback'])}) — "
+          f"{when(g105, '0.0.105')}: eslesmeyen body 400 Function:800006: {', '.join(u['inputSchemaNoFallback'])}")
+    if u["transitionSchemas"]:
+        p(f"  transition schemas (rule-based) ({len(u['transitionSchemas'])}): {', '.join(u['transitionSchemas'][:10])}"
+          f"{gate(g105, '0.0.105')}")
+    if u["transitionSchemasNoFallback"]:
+        p(f"  !! schemas listesinde rule'suz son giris yok — eslesmeyen istek 400 Transition:100025: "
+          f"{', '.join(u['transitionSchemasNoFallback'][:10])}")
+    if u["fanOutItemFailedRefs"]:
+        p(f"  !! FanOut:ItemFailed eslesmesi ({len(u['fanOutItemFailedRefs'])}) — {when(g104, '0.0.104')} Ignore/Log "
+          f"edilen item ic task kodunu tasir (Task:<tip>:<key>:<status>): {', '.join(u['fanOutItemFailedRefs'])}")
+    if u["hideFromAllPair"]:
+        p(f"  x-roles deny+allow $InstanceStarter kalibi ({len(u['hideFromAllPair'])}) — 0.0.105+ icin "
+          f"deny $Everyone: {', '.join(u['hideFromAllPair'])}")
+    if u["everyoneUses"] and g105 is not True:
+        p(f"  !! $Everyone kullanimi ({len(u['everyoneUses'])}) — runtime {o['runtimeVersion']} bunu statik rol sayar "
+          f"(0.0.105+ gerekir): {', '.join(u['everyoneUses'])}")
+    if u["everyoneMisplaced"]:
+        p(f"  !! $Everyone x-masking/x-encryption/rowSecurity icinde (publish'te reddedilir): {', '.join(u['everyoneMisplaced'])}")
+    if u["everyoneMiscased"]:
+        p(f"  !! $Everyone yanlis yazim (publish hatasi): {', '.join(u['everyoneMiscased'])}")
+    if u["roleHeaderParsing"]:
+        p(f"  !! rol header'i elle okunuyor ({len(u['roleHeaderParsing'])}) — 0.0.105+ context.Caller.HasRoleAsync "
+          f"(morph-idm altinda header rol kumesi degildir): {', '.join(u['roleHeaderParsing'])}")
+    if u["callerUses"] and g105 is not True:
+        p(f"  !! context.Caller kullanimi ({len(u['callerUses'])}) — runtime {o['runtimeVersion']} bunu bilmez "
+          f"(0.0.105+ gerekir): {', '.join(u['callerUses'])}")
+    if u["callerWhereUnavailable"]:
+        p(f"  !! context.Caller task/transition/event mapping'inde (okuma exception firlatir): "
+          f"{', '.join(u['callerWhereUnavailable'])}")
+    if u["callerUnguarded"]:
+        p(f"  !! context.Caller IsAvailable korumasi olmadan (auto rule/timer/subflow; System hop'ta exception): "
+          f"{', '.join(u['callerUnguarded'])}")
+    if u["startRolesInstanceBoundOnly"]:
+        p(f"  !! startTransition.roles yalniz instance'a bagli allow ($InstanceStarter ...) — start kontrolunde "
+          f"(authorize?type=instance) hic eslesmez, akis herkese kapanir: {', '.join(u['startRolesInstanceBoundOnly'])}")
     p("")
     p("## en agir viewlar")
     for v in o["heaviestViews"]:

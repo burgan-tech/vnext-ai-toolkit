@@ -1,7 +1,7 @@
 # Runtime Operations — Locks, Caches, Discovery, URL Templates
 
 > Audience: domain authors running or debugging a domain against a local or shared runtime
-> (v0.0.103). This is the "why did the runtime answer 409 / 304 / stale?" reference. Helm and
+> (v0.0.105). This is the "why did the runtime answer 409 / 304 / stale?" reference. Helm and
 > operator detail is kept to what an author needs to *recognise*, not to operate. For tracing and
 > log lookup see `observability.md`; for incident/retry see `incidents-and-retry.md`.
 
@@ -35,12 +35,16 @@ outcome as `vnext.settle.cas = flipped | lost | skipped`).
 | `Instance:100032` | 503 | Subflow terminal-outcome lock not acquired — transient, inbox relay redelivers |
 | `Instance:100027` | 400 | `retry` on an instance that is not Faulted |
 | `Instance:100037` | 404 | `incidents/active` when no incident is open — normal; re-read state |
-| `Instance:100031` on an interaction-wait state (`subType: 5` + `interaction`) | 409 | expected for client transitions; data goes in through `updateData`, and the timer takes the parked Busy over (0.0.102). On ≤ 0.0.101 `updateData` continuations were dropped here — upgrade, then `cancel`/`exit` stuck instances (`long-poll-interaction.md` §3b) |
+| `Instance:100031` on an interaction-wait state (`subType: 5` + `interaction`) | 409 | expected for client transitions; data goes in through `updateData`, and the timer takes the parked Busy over (0.0.102). On ≤ 0.0.101 `updateData` continuations were dropped here — upgrade, then `cancel`/`exit` stuck instances (`long-poll-interaction.md` §3b). Since 0.0.105 concurrent `updateData` calls continue the parked chain **once** (claim on `Instances.ContinuationClaimedAt`; a loser logs 10182) — before that each one re-ran the automatic chain |
 | `Instance:100031` on a SubFlow parent | 409 | (0.0.100 proxy) the child just completed or does not exist yet behind an open correlation — retry |
 | `Instance:100045` | 409 | `retry` on a `history: "none"` instance — not supported (`workflow-types.md` §8) |
 | `Instance:100051` | 404 | (0.0.102) a floating version request (none, `latest`, `2`, `2.1`) matches only **pending** versions above the flow's default — send an explicit version or move the pointer (§2.1) |
 | `Instance:100052` | 409 | (0.0.102) the flow's default-version pointer is malformed or matches no published version — start, transition, list and GET of that flow fail closed; fix it with `set-default` (§2.1) |
 | `Instance:100053` | 503 | (0.0.102) the version registry could not be read — transient, retry; check the database |
+| `Transition:100025` | 400 | (0.0.105) the transition declares rule-based `schemas` and no entry matched — instance unchanged; add a rule-less last entry or fix the rule (`transition-pipeline.md` §1.1) |
+| `Function:800006` | 400 | (0.0.105, breaking) a rule-based function `inputSchema` matched no entry for a request with a body (`function-mapping-pattern.md` §9) |
+| `Authorization:110006` | 503 | (0.0.105, #1299) a rule read `context.Caller` and the caller-role provider could not answer — the selection / automatic rule / timer fails instead of taking the fallback; retryable (morph-idm reachability, `csx-contracts.md` § Caller roles). Never cached |
+| `Authorization:110005` | 400 | (0.0.105) workflow-scoped `authorize` without `type`, or an unknown `type` — only `type=instance` exists (`roles-and-authorization.md`) |
 | — | 413 | Async transition body over **10 MB** (Kestrel `MaxRequestBodySize`, 0.0.99 #1067; before that > ~2 MiB could strand the instance Busy) |
 
 ### SubFlow transition proxy (0.0.100, #1085)
@@ -90,8 +94,17 @@ Prefer `?sync=true` for transitions whose policy may change between accept and r
 
 ### Data function (`.../functions/data`)
 
-- `etag = h(instanceId | latest InstanceData.ETag | flowVersion | callerHash)`; `callerHash`
-  **excludes extensions**. `?version=` bypasses the cache.
+- `etag = h(generation | instanceId | latest InstanceData.ETag | effectiveState | flowVersion | callerHash)`;
+  `callerHash` **excludes extensions**. `?version=` bypasses the cache. **`effectiveState` joined the
+  material in 0.0.105 (#1188):** extension output depends on the state, so up to 0.0.104 a transition that
+  wrote no data kept the ETag and a conditional request got **304 with the previous state's extension
+  output** (a client then re-sent a stale `nextTransition` and got 403). The cache entry keeps a state-free
+  `dataEtag` for the data portion only; extension output is never cached and runs fresh on every 200.
+  Clients on older runtimes: re-read the data function **without** `If-None-Match` after a transition when
+  you depend on extension output.
+- **One-time ETag change (0.0.105, #1195):** representation ETags of bodies containing an escaped `\\`,
+  `\"` or `\/` change once (the old hasher dropped a character there) — such clients see one `200` instead of
+  a `304` after the upgrade, also between old and new pods during a rolling deploy.
 - TTL: `InstanceFunctionCache:DefaultTtlSeconds` (60) or per-workflow `functionCache.ttlSeconds`.
 
 ### Component cache (#867 / #898)
@@ -320,6 +333,22 @@ child (`csx-contracts.md` § `ISubFlowMapping`). Section `Workflow:SubFlow:Carri
 Span tag `vnext.subflow.carried_header_count`. Values reach the outbox row, the Inbox body and the
 parent's output mapping.
 
+## 5.1b Sync responses carry the instance state (0.0.104, #1185)
+
+A **sync** start or transition response (`?sync=true` or `executionType: "S"`) carries `currentState`
+and `effectiveState` next to `status` / `effectiveStatus`:
+
+```json
+{ "id": "8d83…", "status": "A", "effectiveStatus": "A", "currentState": "otp-waiting", "effectiveState": "otp-waiting" }
+```
+
+Same names and values as the instance GET's `metadata.currentState` / `metadata.effectiveState` — the
+instance's **own** persisted columns, no SubFlow descent. They are not the state function's `state`
+(that is the active leaf's). An async `202` carries neither; a pipeline answered by a `ClientResponse`
+leaves both `null`. The runtime-internal identity-only answer carries them too, which is what a sync
+SubProcess / StartTrigger task output reads (`task-types.md` § 11 / 14). In tests, assert the state on
+the sync response instead of a follow-up GET once the workspace runs ≥ 0.0.104.
+
 ## 5.2 Platform notes with no author action
 
 - **gRPC transport removed** (0.0.100, #1083): Orchestration always calls Execution over Dapr HTTP.
@@ -333,6 +362,23 @@ parent's output mapping.
   the outbox before the upgrade. Domain-authored topics: `observability.md` §7.
 - **Sandbox baseline** gained `System.ObjectModel` (0.0.99): `foreach` over an `ExpandoObject` no
   longer fails with CS0012 — no `allowedAssemblies` entry needed for it.
+- **Fewer database round trips per hop** (0.0.104, #1177; 0.0.105, #1195): no second status write or
+  admission re-read, a two-command instance load, read-only loads 3 → 2 queries, state-function cache miss
+  6+R → 4+R. Same rows, statuses and `metadata.modifiedBy`; nothing to change in a domain.
+- **Deploy order for 0.0.105:** run **DbMigrator before the hosts** — migration
+  `20261109120000_AddInstanceContinuationClaim` adds the nullable `Instances.ContinuationClaimedAt`
+  (migration `instances-continuation-claimed-at-column`). Hosts also add `Application Name`
+  (`OTEL_SERVICE_NAME`, else `DAPR_APP_ID`, else the host name) to a Postgres connection string that has
+  none, so `pg_stat_activity` / PgBouncer `SHOW CLIENTS` name the owning host.
+- **Log level (0.0.105):** the per-task "Executing task … with error-aware retry" and "Task … completed
+  successfully" lines moved from Information to **Debug** — a log query that counted task executions from
+  them finds nothing at Information; use the task metrics endpoints or spans (`observability.md`).
+- **Artifact-version references prefer package rows** (0.0.105, #1175): a reference by artifact version
+  (`"version": "1.0.0"`) resolves to the highest `1.0.0-pkg.*` row even when a legacy bare `1.0.0` row
+  exists. Before, the bare row shadowed every package build and a view (or any component) referenced that
+  way served a **stale** definition. Full-version, package-only, partial and major requests resolve as
+  before.
+- **`modifiedAt` moves with every transition** (0.0.104, #1183) — `instance-query.md` §5.
 
 ## 6. Local runtime checklist before testing a domain
 
@@ -354,6 +400,7 @@ parent's output mapping.
 
 ## Sources
 
+- Runtime `vnext` @ `40aad58a` (master, 0.0.105 unreleased): PRs #1175, #1177, #1183, #1185, #1188, #1195, #1211, #1225, #1299; `docs/runtime/{execution-type,status-locking,function-contract-resolution}.md`; vnext-meta fragments `updatedata-continuation-claim`, `data-function-etag-covers-state`, `artifact-version-prefers-pkg-row`, `hot-path-allocations`.
 - Runtime `vnext` @ `74587011` (0.0.103): `docs/runtime/flow-default-version.md` (#1130).
 - Runtime `vnext` @ `f06961ec` (0.0.100):
   `src/BBT.Workflow.Domain/Execution/Transitions/Pipeline/ITransitionAdmissionService.cs`,

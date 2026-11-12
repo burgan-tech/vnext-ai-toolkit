@@ -4,7 +4,7 @@
 
 ## 1. Catalog
 
-"Runs" is the v0.0.103 **shipped default** — where the prepared binding executes. It is host configuration, not a task field (§2).
+"Runs" is the v0.0.105 **shipped default** — where the prepared binding executes. It is host configuration, not a task field (§2).
 
 | # | Name | Wire name | Runs (default) | Status | Notes |
 |---|------|-----------|----------------|--------|-------|
@@ -105,6 +105,23 @@ Timeout layering, local path: `task timeoutSeconds (http/soap only, default 30) 
 - **Reaching `x-storage` components:** they are scoped to the orchestration app-id while type 2 runs Remote by
   default — the platform sets `Workflow:TaskInvocation:Modes:daprbinding = Local` (orchestration sidecar) or
   scopes the component to Execution too. Recipe: `file-fields.md` § Deleting, reading and listing objects.
+
+### 11 / 14 StartTrigger, SubProcess — the child's state on a sync start (0.0.104, #1185)
+
+A **sync** start (`"sync": true`, or a sync transition) answers with `currentState` and `effectiveState`
+next to `status` / `effectiveStatus` — the started instance's own persisted columns, never a SubFlow
+leaf's state. The path in the task's output mapping depends on the route:
+
+```csharp
+// IMapping.OutputHandler of a sync SubProcess / StartTrigger task
+var r = context.Body;
+string? childState = r?.data?.value?.currentState   // same domain: the local executor nests the start output under value
+                  ?? r?.data?.currentState;         // cross domain: the remote body is passed through flat
+```
+
+An async start (`sync` false — the default for 11/12/14) gets `202` and neither field: read the child
+with a `GetInstance` task or wait for its completion event instead. On runtimes before 0.0.104 the
+fields are absent — branch only after every pod runs 0.0.104+.
 
 ### 19 GetInstance
 

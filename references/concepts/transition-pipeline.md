@@ -1,7 +1,7 @@
 # Transition Pipeline — Order, Admission, `updateData`, Annotations
 
 > Author-facing view of what happens between `PATCH …/transitions/{key}` and the next state
-> function response. Runtime 0.0.100. For the state-function body itself see
+> function response. Runtime 0.0.105 (rule-based payload schemas §1.1). For the state-function body itself see
 > `state-function-response.md`; for locking error codes see `runtime-operations.md`.
 
 ## 1. Lifecycle order (`LifecycleOrder.cs`)
@@ -66,6 +66,40 @@ Spans tag `vnext.execution.requested` / `vnext.execution.effective` and `vnext.e
 when the definition changed the caller's mode. Use it when a step must never depend on the caller
 (e.g. an always-sync validation, an always-async long call). Async bodies are capped at **10 MB**
 (Kestrel `MaxRequestBodySize`, `413`) since 0.0.99.
+
+### 1.1 Payload schema — `schema` or rule-based `schemas` (0.0.105, #1225; schema 0.0.60)
+
+Every transition kind (state, shared, `startTransition`, `cancel`, `updateData`, `exit`) validates its
+request body against **`schema`** (one `sys-schemas` reference, unchanged) or **`schemas`** — a
+rule-based list mirroring `view` / rule-based views and the function `inputSchema`:
+
+```jsonc
+"schemas": [
+  { "rule": { "location": "./src/IsCorporateRule.csx", "code": "<base64>", "encoding": "B64" },
+    "schema": { "key": "corporate-payload", "domain": "core", "flow": "sys-schemas", "version": "1.0.0" } },
+  { "schema": { "key": "retail-payload", "domain": "core", "flow": "sys-schemas", "version": "1.0.0" } }
+]
+```
+
+| Rule | Detail |
+|---|---|
+| Shape | plain array (`minItems: 1`) or the wrapped `{ "schemas": [ … ] }` the runtime writes back; an entry is `{ rule?, schema }`, `additionalProperties: false` |
+| Order | declaration order, **first matching `rule` wins**; a rule-less entry always matches → it must be **last** (the fallback). A rule-less entry anywhere else is a **publish** error (`WorkflowValidator`); the schema does not catch it |
+| Precedence | `schemas` wins over `schema` when both are present — declare one |
+| Not allowed on | automatic (`triggerType: 1`) and scheduled (`2`) transitions — the schema forces `null` there |
+| Rule | an `IConditionMapping` script; context = workflow, instance, runtime, transition, `body` (the instance's **latest data**, `{}` when none — *not* the request body), the request **headers** and the caller's resolved roles through **`context.Caller`** (`await context.Caller.HasRoleAsync("x")`, #1299 — never parse `Headers.role`); no query parameters. If a rule reads roles and the provider fails → `503 Authorization:110006`, never the fallback (`csx-contracts.md` § Caller roles) |
+| Write path | nothing declared → accepted; declared, no entry matches → **`400 Transition:100025`**, instance stays in its state (not faulted, no transition row) |
+| Order vs. other checks | the schema (and its rule) is resolved **before** the state-machine / actor policy, so a wrong-state request with no matching entry gets `Transition:100025` first |
+| Read path | the instance `schema` function serves the matched entry, `404` on no match; `hasSchema` in `transitions[]` is **declared-only** (`schema` or a non-empty `schemas`), like `hasView` |
+| Cache | the schema-function cache key and ETag hash the non-volatile request headers (`RequestHeaderHash`), so a header-driven rule never serves another caller's entry or a false `304` |
+
+Design guidance: use `schemas` when **one transition** takes differently shaped bodies (retail vs
+corporate, channel-specific forms, a role-specific contract via `context.Caller`). Selecting a schema by
+role is not authorization: test positively and keep the fallback the **least privileged** contract. Keep a rule-less fallback last unless refusing every unmatched
+caller is the point; then write that intent down in the design. Needs schema ≥ 0.0.60 **and** runtime ≥
+0.0.105: on schema ≤ 0.0.59 `schemas` fails validate on `startTransition` / `cancel` / `exit` /
+`updateData` (`additionalProperties: false`) but passes **unchecked** on state and shared transitions
+(open objects — gap D15), and a runtime ≤ 0.0.104 ignores it, so the payload is not validated at all.
 
 ## 2. Admission kinds (`ITransitionAdmissionService.cs`)
 
@@ -196,6 +230,8 @@ Meta: migration `sync-response-no-longer-carries-extensions`, deprecation
 - `?sync=true` does not guarantee a `200` when the transition or flow declares `executionType: "A"`
   (and `?sync=false` may get a `200` under `"S"`).
 - `history: "none"` flows allow automatic transitions only — see `workflow-types.md` §8.
+- A `schemas` list without a rule-less last entry refuses every caller no rule matches (`400 Transition:100025`)
+  — and its rules see the instance's latest data as `body`, not the request payload.
 
 ## Sources
 
@@ -207,4 +243,5 @@ Meta: migration `sync-response-no-longer-carries-extensions`, deprecation
 - vnext-docs: `concepts/transition-pipeline.md`, `how-to/async-sync.md`, `components/workflow.md` §Annotations, §Transition Yürütme Modeli
 - Fixtures `vnext-example`: `core/Workflows/timeout-lab/timeout-lab-root.json`, `core/Workflows/schedule-after-auto/`, `core/Workflows/parallel-variable-key-lab/`
 - PRs: #877 (Busy-as-mutex), #884 (`+Self` only for updateData), #859 (well-known discovery), #917 (updateData no lock/guard), #943 (Auto 80 before Schedule 90), #984 (extensions read-only), #1037 (`executionType`), #1067 (10 MB async body), #1072 (`variableKey`), #1085 (SubFlow transition proxy)
+- vnext PR #1225 (0.0.105) / vnext-schema #169 (0.0.60): `transitions[].schemas`, `TransitionSchemaResolver`, `Transition:100025`; vnext `docs/runtime/function-contract-resolution.md` § Transitions
 - vnext-meta: `wellKnownTransitionDiscovery` 0.0.79, `selfTargetPipelineProfile` (stale order note), `stateAnnotations` 0.0.95, `executionType` 0.0.99, `taskVariableKey` 0.0.99

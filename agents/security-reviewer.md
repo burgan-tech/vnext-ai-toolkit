@@ -34,7 +34,14 @@ Scan areas:
   `anyOf` with wrong shape or depth > 1, or inside `x-masking` / `x-encryption` exemptions; an
   allow `$role.` grant expected to admit role-less callers; start requests or task mappings
   without `act_sub` (starter grants never match); `x-roles` / `user_reference` treated as role
-  headers. Identity headers are self-asserted — the gateway must own them. For
+  headers. Since 0.0.105 also flag: `allow $Everyone` where an authenticated role was meant;
+  "hidden from everyone" written as `[]` or as an allow of a role nobody holds (expect
+  `deny $Everyone`); a start restriction in `startTransition.roles` without the gateway's
+  `authorize?type=instance` rule, or one built only from instance-bound leaves (never match at
+  start); rule-based `schemas` / `inputSchema` rules that route on client-settable headers as if
+  they were an authorization check; role rules that read `Headers.role` instead of `context.Caller`, test
+  negatively (`!HasRoleAsync`) or fall back to the richest contract — selection by role is never access
+  control (`references/concepts/csx-contracts.md` § Caller roles). Identity headers are self-asserted — the gateway must own them. For
   `attributes.rowSecurity` (0.0.102) flag rules on `QueryParameters`, rule headers the gateway
   does not own, designs that rely on it for `functions/data` / transitions / SubFlow children
   (unfiltered), and task mappings that set `role` or rule headers to widen a cross-domain read

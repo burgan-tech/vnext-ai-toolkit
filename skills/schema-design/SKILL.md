@@ -112,7 +112,8 @@ On a **master** schema, `AskUserQuestion` per field (multi-select where valid):
 | Option | Writes |
 |---|---|
 | Hide from some callers | `x-roles` — ask which roles may read (`allow`) / must not (`deny`); grants are `role` / `allOf` / `anyOf`, depth 1. Read-only: it does not stop writes |
-| Show masked to most callers | `x-masking` `mask` (`keepFirst`/`keepLast`/`maskingChar`) or `replace` (`value`); `roles` = allow-only exemption list (no `deny`, no combinators) |
+| Hide from every caller (internal score, correlation key, technical flag) | `x-roles: [{ "role": "$Everyone", "grant": "deny" }]` — runtime ≥ 0.0.105 / schema ≥ 0.0.60; scripts still read it. Never `[]` (visible to all) and never an `allow` of a role nobody has (claimable through the `role` header). On an older workspace runtime say so and keep the `deny`+`allow $InstanceStarter` pair |
+| Show masked to most callers | `x-masking` `mask` (`keepFirst`/`keepLast`/`maskingChar`) or `replace` (`value`); `roles` = allow-only exemption list (no `deny`, no combinators, no `$Everyone`) |
 | Store encrypted, a few roles read plaintext | `x-encryption` `{ "type": "encrypt", "roles": [allow…] }` |
 | Store only a one-way hash (equality within one instance) | `x-encryption` `{ "type": "hash", "params": { "algorithm": "sha256" } }` — no `roles`, no `pattern`/`format`/`minLength`/`maxLength`/`enum`/`const`; warn that low-entropy values are brute-forceable |
 | No protection | only with a stated reason |

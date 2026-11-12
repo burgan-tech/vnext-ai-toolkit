@@ -51,6 +51,14 @@ sealed on the way in?* (client `x-encryption` on the transition schema).
 - Publish rejects a malformed entry (missing `grant`, both `role` and `allOf`, malformed `$user.` /
   `$userBehalfOf.` / `$role.` path — paths start with `$.context.`). Before 0.0.99 such entries were silently
   skipped, so a deny written that way never fired.
+- **Hidden from everyone (0.0.105, #1196):** `"x-roles": [ { "role": "$Everyone", "grant": "deny" } ]`. The
+  value is still stored and scripts still read it (`context.Instance.Data`) — typical for internal scores,
+  correlation keys, technical flags. It cannot be satisfied by any role claim, header or query parameter.
+  Do **not** write `[]` (empty = visible to all) or `allow nobody-has-this` (under the `default` provider a
+  caller can claim that role in the `role` header). The pre-0.0.105 trick `deny $InstanceStarter` +
+  `allow $InstanceStarter` keeps working; replace it when you touch the schema. Needs every pod on
+  0.0.105 — an older runtime reads `$Everyone` as a static role nobody holds, so the deny hides nothing
+  from callers with roles (role-less callers are still refused by rule 5).
 - Combinators are understood only by runtimes ≥ 0.0.99 (`role-grant-combinators-rollback-floor`): author
   the first `allOf`/`anyOf` only when every pod (and every domain stamping overrides onto this one) runs
   ≥ 0.0.99, and never binary-downgrade after publishing one.
@@ -79,8 +87,9 @@ sealed on the way in?* (client `x-encryption` on the transition schema).
 | `params` for `replace` | `value` (required, non-empty); no mask parameters |
 | `roles` | **allow-only exemption list**: an `allow` match sees the raw value; everyone else the masked one |
 
-- Exemption list rules: plain `{ "role", "grant": "allow" }` entries only — **no `deny`, no `allOf`/`anyOf`**
-  (publish error). An unlisted, misspelled or missing role is masked (fail closed); a role-less caller can
+- Exemption list rules: plain `{ "role", "grant": "allow" }` entries only — **no `deny`, no `allOf`/`anyOf`,
+  no `$Everyone`** (publish error; `$Everyone` would exempt every caller and is also dropped at read time,
+  0.0.105). An unlisted, misspelled or missing role is masked (fail closed); a role-less caller can
   never satisfy a role-bound grant. No `roles` ⇒ masked for everyone.
 - `mask` keeps the length: if length itself is sensitive use `replace`. If `keepFirst + keepLast` ≥ the
   value length the value is returned **unchanged**.

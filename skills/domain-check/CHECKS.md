@@ -485,6 +485,41 @@ confirmed candidates, together with their `S` children; only on a runtime that i
 
 **Docs:** [Workflow → History Modu](https://burgan-tech.github.io/vnext-docs/docs/components/workflow).
 
+## 21. Behaviour changes on the way to 0.0.104 / 0.0.105
+
+**Scanner:** the `## surum gecisi (0.0.104 / 0.0.105)` block. Each line says whether the change
+already applies to the pinned runtime (`simdi gecerli`) or arrives with the upgrade (`… geciste`).
+
+These are not costs; they are places where the same definition behaves differently after an upgrade,
+so they belong in the report next to the version pin. Report each under **Yapılmalı** when it
+already applies, **Yapılsa iyi olur** when it only matters for the upgrade.
+
+| Scanner line | What changes | Recommend |
+|---|---|---|
+| `!! rule-based inputSchema, rule'suz son giris yok` | 0.0.105 (breaking): a function request **with a body** that matches no rule-based `inputSchema` entry gets `400 Function:800006`; before, validation was skipped | end the list with a rule-less entry — unless refusing unmatched callers is the intent, then write that down |
+| `transition schemas (rule-based)` / `!! schemas listesinde rule'suz son giris yok` | rule-based transition `schemas` exist from runtime 0.0.105 / schema 0.0.60; a list without a rule-less last entry refuses every unmatched request with `400 Transition:100025`. On an older runtime the list is ignored and nothing is validated | pin both versions together; add the fallback or confirm the refusal is wanted |
+| `!! FanOut:ItemFailed eslesmesi` | 0.0.104: an item whose own `errorBoundary` Ignores / Logs the failure keeps the inner task's code (`Task:<type>:<key>:<status>`), message and data — a script that matched `FanOut:ItemFailed` to spot an expected refusal stops matching | match the inner status suffix (`:409`, `:404`); `FanOut:ItemFailed` stays only for items with no code of their own |
+| `x-roles deny+allow $InstanceStarter kalibi` | the old "hidden from everyone" trick; still works | on 0.0.105+ replace it with `deny $Everyone` (states the intent) |
+| `!! $Everyone kullanimi` (runtime < 0.0.105) | an older runtime reads `$Everyone` as a static role nobody holds — `deny $Everyone` hides nothing from callers with roles, `allow $Everyone` admits nobody with roles | upgrade first, or keep the pre-0.0.105 spelling |
+| `!! $Everyone x-masking/x-encryption/rowSecurity icinde`, `!! $Everyone yanlis yazim` | publish errors on 0.0.105 (exemption lists and row-security rules refuse it; spelling is ordinal) | remove it from exemption lists / row rules; write `$Everyone` exactly |
+| `!! rol header'i elle okunuyor` | a script decides by role from `context.Headers.role` / `"role"`; under `morph-idm` that header is not the caller's role set (the gateway may strip it) | on 0.0.105+ read `await context.Caller.HasRoleAsync("x")` in selection rules, automatic rules, timers or SubFlow output mappings; never in task mappings |
+| `!! context.Caller kullanimi` (runtime < 0.0.105) | the script does not compile on an older runtime (`ScriptContext` has no `Caller`) | upgrade first |
+| `!! context.Caller task/transition/event mapping'inde` | 0.0.105: `context.Caller` is unavailable in task / transition / event / cache-key mappings and output handlers — a read throws | move the role decision into a selection rule, an automatic rule or a timer |
+| `!! context.Caller IsAvailable korumasi olmadan` | an automatic rule, timer or SubFlow output mapping that reads roles without `context.Caller.IsAvailable`: on a System hop (fired timer, SubFlow resume, timer-settled child) the read throws | `context.Caller.IsAvailable && await context.Caller.HasRoleAsync("x")` |
+| `!! startTransition.roles yalniz instance'a bagli allow` | 0.0.105: the gateway's start check (`GET …/workflows/{wf}/functions/authorize?type=instance`) never matches instance-bound leaves (`$InstanceStarter`, behalf-of, `$PreviousUser`, `$user.` / `$userBehalfOf.` / `$role.`) — an allow-only set of them closes the flow to everyone once the gateway rule is deployed | use static roles (or `$Everyone`) on `startTransition.roles` |
+
+**Verify:** open each file — a `FanOut:ItemFailed` string may sit in a comment or a log line; a
+rule-based list may have its fallback in a wrapped `{ "schemas": [...] }` form the scanner already
+reads. Ask the user whether unmatched callers are meant to be refused before recommending a fallback.
+
+**Docs:** vnext-meta `function-input-schema-no-match-accepts` (deprecation),
+`transitionRuleBasedSchemas`, `everyonePredefinedRole`, `startTransitionAuthorize`, `scriptCallerRoles`
+(features) — `${CLAUDE_PLUGIN_ROOT}/scripts/vnext-meta-live.sh features`; toolkit references
+[csx-contracts.md](../../references/concepts/csx-contracts.md) § Caller roles,
+[transition-pipeline.md](../../references/concepts/transition-pipeline.md) §1.1,
+[roles-and-authorization.md](../../references/concepts/roles-and-authorization.md),
+[fan-out.md](../../references/concepts/fan-out.md) §6.
+
 ## Tooling (optional)
 
 If the user asks about build or validation speed, the template tooling at the domain root is

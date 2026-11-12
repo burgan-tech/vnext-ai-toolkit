@@ -2,7 +2,65 @@
 
 All notable changes to the vNext AI Toolkit will be documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Plugin uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 0.0.9
+## [Unreleased] — 0.0.10
+
+**Runtime coverage: vNext runtime 0.0.105 / schema 0.0.60** (previously 0.0.103 / 0.0.59). Milestones v0.0.104 (released 2026-11-09, schema unchanged at 0.0.59) and v0.0.105 (open; vnext-schema 0.0.60 not published yet) folded in. The 0.0.105 facts come from vnext / vnext-schema master (`08e59d61` / `ae8ab2c`) and the `vnext-meta/unreleased/` fragments. **Merge this after vnext-schema 0.0.60 is on npm:** CI installs `knownSchemaVersion`, and `/vnext-init` offers it as the bump target. Once runtime 0.0.105 ships, re-run `scripts/sync-vnext-meta.sh --npm 0.0.105`. The only vnext PR that hands work to the toolkit is #1299 (`context.Caller`); every other `## Product impact` row says `vnext-ai-toolkit: no`.
+
+### Added
+
+- **Rule-based transition payload schemas** (`schemas`, vnext #1225, schema 0.0.60). Covered in `transition-pipeline.md` §1.1:
+  - Every transition kind takes `[{ rule?, schema }]`. The first match wins, and a rule-less fallback goes last; publish rejects a fallback in any other position.
+  - Not allowed on auto or timer transitions.
+  - No match → `400 Transition:100025`.
+  - The rule's `body` is the instance's latest data. The instance `schema` function answers 404 on no match, and `hasSchema` is declared-only.
+
+  `workflow-scaffold`, the architects and `authoring-vnext-components` offer it. Schema-runtime gap **D15** records that on schema ≤ 0.0.59 `schemas` passes unchecked on state and shared transitions and is ignored by older runtimes.
+- **`$Everyone`** predefined role (vnext #1196): `deny $Everyone` hides from every caller and `allow $Everyone` admits every caller.
+  - Refused at publish in `x-masking` / `x-encryption` exemption lists and in row-security rules (RS-E05). The spelling is ordinal.
+  - `schema-design` offers "hide from every caller" as a field-protection option and replaces the `deny` + `allow $InstanceStarter` trick.
+  - Covered in `roles-and-authorization.md`, `field-protection.md` and `row-security.md`.
+- **Workflow-scoped start check** `GET …/workflows/{wf}/functions/authorize?type=instance` (vnext #1211). It evaluates `startTransition.roles` for the gateway's start rule.
+  - Instance-bound grants never match there, so `allow $InstanceStarter` alone closes the flow.
+  - A missing or unknown `type` is `400 Authorization:110005`.
+  - New `.http` request, test helper `AuthorizeStartAsync`, and a `WorkflowPath` helper in `WorkflowTestBase`.
+- **Caller roles in scripts — `context.Caller`** (vnext #1299, 0.0.105). This answers the vnext handoff `docs/integration/vnext-ai-toolkit/script-caller-roles.md`:
+  - `csx-contracts.md` § Caller roles covers `HasRoleAsync`, `RolesAsync`, `IsAvailable`, `ResolutionFailed` and `RolesFromHeader`, with the per-surface table. Roles are readable in selection rules (transition `schemas`, function slots, views), automatic rules and timers on caller-driven hops, and SubFlow output mappings. They are unavailable in task, transition and event mappings.
+  - System hops have no caller, so automatic rules and timers need an `IsAvailable` guard.
+  - Fail closed: if a rule reads roles while the provider is down, the request gets `503 Authorization:110006` (log 20519) and the fallback is not used.
+  - Selection is not authorization: use positive tests and make the fallback the least privileged entry.
+  - `workflow-scaffold`, `view-design`, `component-function`, `authoring-vnext-components`, the reviewers, the security checklist and `CLAUDE.md.tmpl` now scaffold role rules with `await context.Caller.HasRoleAsync("x")` instead of parsing `Headers.role`.
+- **domain-check check 21**: behaviour changes on the way to 0.0.104 / 0.0.105. The scanner flags:
+  - a rule-based function `inputSchema` without a rule-less fallback;
+  - transition `schemas` without a fallback;
+  - scripts matching `FanOut:ItemFailed`;
+  - the old hide-from-all `x-roles` pair;
+  - `$Everyone` on a runtime < 0.0.105, in an exemption list, row rule, or miscased;
+  - `startTransition.roles` made only of instance-bound allows;
+  - scripts that parse the `role` header by hand, `context.Caller` on a runtime < 0.0.105, `context.Caller` inside task/transition/event mappings, and automatic rules / timers / SubFlow mappings that read it without an `IsAvailable` guard.
+
+  The fixture and the smoke test cover each line.
+- `scripts/sync-vnext-meta.sh --next <runtime>:<schema>` folds the unreleased vnext-meta fragments into the matrix, stamped as the coming version. It skips back-merge leftovers recorded in `released-fragments.json`. The matrix now covers 0.0.104 plus the 9 fragments of 0.0.105; `metaPackageVersion` is 0.0.104.
+
+### Changed
+
+- **Breaking in 0.0.105:** a rule-based function `inputSchema` that matches no entry rejects a request with a body (`400 Function:800006`). Before, it skipped validation. `component-function`, `function-mapping-pattern.md` §9, the reviewer and the security checklist now ask for a rule-less last entry.
+- **FanOut** (0.0.104, #1180): an item whose boundary Ignores / Logs the failure keeps the inner code (`Task:<type>:<key>:<status>`), message and data. `FanOut:ItemFailed` is now only the no-code fallback, and `fan-out.md` has the migration note.
+- **`authorize?queryRoles`** (0.0.104, #1184): while a SubFlow child is still being created, the deepest existing instance decides. `reason: "instance-not-found"` is documented on a 403 for a missing instance, along with log 50046 and the `vnext.auth.fallback` tag.
+- **Sync start/transition responses** carry `currentState` / `effectiveState` (0.0.104, #1185). `task-types.md` shows how a sync SubProcess / StartTrigger output mapping reads the child's state: `data.value.currentState` on the same domain, `data.currentState` across domains.
+- **Human-task rows** carry optional `dueBy` / `priority` from the leaf's `humanTask` data (0.0.104, #1178). The list order is unchanged.
+- **`modifiedAt`** moves with every transition and every `updateData` data row (0.0.104, #1183) — `instance-query.md`.
+- **Operations** (`runtime-operations.md`, `observability.md`, `long-poll-interaction.md`):
+  - concurrent `updateData` calls continue a parked interaction wait once (0.0.105; `ContinuationClaimedAt`, log 10182, DbMigrator before the hosts);
+  - the data-function ETag covers the instance state, so a data-less transition no longer answers 304 with stale extension output (0.0.105, #1188);
+  - a one-time ETag change for escaped strings;
+  - artifact-version references prefer package rows (#1175);
+  - fewer DB round trips per hop (#1177, #1195);
+  - Postgres `Application Name`;
+  - task log lines moved to Debug;
+  - new error codes `Transition:100025`, `Function:800006`, `Authorization:110005`, `Authorization:110006`.
+- Current-version statements move to 0.0.105 / 0.0.60. `scripts/lint-references.sh` bans "instance-scoped only" authorize claims, the fail-open `inputSchema` wording, the old `FanOut:ItemFailed` row, `D1–D14` and miscased `$Everyone`.
+
+## [0.0.9] — 2026-11-05
 
 **Runtime coverage: vNext runtime 0.0.103 / schema 0.0.59** (previously 0.0.100 / 0.0.56). Closed milestones v0.0.101, v0.0.102 and v0.0.103 folded in. The npm package `@burgan-tech/vnext-meta` has caught up with vnext master (0.0.103), so `metaPackageVersion` follows it again (`scripts/sync-vnext-meta.sh --npm 0.0.103`; same content as master).
 

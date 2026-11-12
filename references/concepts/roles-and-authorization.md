@@ -12,7 +12,8 @@ live on transitions (`roles`), `availableIn` entries, states and the workflow ro
 custom functions (`roles`), `interaction.longPoll` (`roles`), state aliases, SubFlow overrides and
 master-schema properties (`x-roles`). One evaluator (`RoleGrantEvaluator` / `RoleGrantMatcher`)
 serves every surface, so the rules below hold everywhere. `grant` values are **lowercase**.
-Runtime 0.0.100, schema 0.0.56.
+Runtime 0.0.105, schema 0.0.60 (`$Everyone` and the workflow-scoped start `authorize` since 0.0.105;
+the leaf-missing `queryRoles` fallback since 0.0.104).
 
 ## The decision model since 0.0.95
 
@@ -37,6 +38,7 @@ front of the runtime, which identifies the caller, calls
 | `state`, `data`, `view`, `schema`, `master` | filters `transitions[]`, state aliases, `x-roles` fields; `CallerScopeHash` in ETag/cache key; no 403 | Gateway → `authorize?queryRoles=true` |
 | `tasks`, `actions`, `incidents`, `incidents/active`, `data/history` (0.0.100) | serves the payload (`data/history` with the same field pass as `data`); no 403 | Gateway → `authorize?queryRoles=true` |
 | `POST …/longpoll/ack` | resumes the pause; no 403 | Gateway → `authorize?ack=true` |
+| `POST …/instances/start` | never checks `startTransition.roles` | Gateway → workflow-scoped `authorize?type=instance` (0.0.105; before that nothing could gate a start by role) |
 | `PATCH …/transitions/{key}` | `availableIn` state gate (`Transition:100021`); never a role check | Gateway → `authorize?transitionKey=` |
 | custom function call | scope check only (`FunctionScopeNotSatisfied`) | Gateway → `authorize?functionKey=` |
 | `functions/file` (0.0.100) | **enforces in process**: `queryRoles` → `403`, then `x-roles` of the field path → `404` (`file-fields.md`) | runtime |
@@ -97,6 +99,7 @@ Use these anywhere a `role` is expected, including combinator children.
 | `$user.$.context.<path>` | `act_sub` | value(s) at the path (`[*]` allowed) | identity |
 | `$userBehalfOf.$.context.<path>` | `sub` | value(s) at the path | identity |
 | `$role.$.context.<path>` | caller's role set | value(s) at the path | **role** |
+| `$Everyone` (0.0.105) | nothing — matches **every** caller, with or without roles, with or without an instance | — | identity (always Yes) |
 
 - **Context namespaces** (`$.context.…`): `Instance` (`Id`, `Key`, `Flow`, `Status`, `CurrentState`,
   `CreatedBy`, `CreatedByBehalfOf`, `ModifiedBy`, `ModifiedByBehalfOf`, `Data.…`), `Transition`
@@ -108,6 +111,14 @@ Use these anywhere a `role` is expected, including combinator children.
   (PR #859; since 0.0.99 also for schema `x-roles` and function `roles`).
 - **`CreatedBy` is an instance property, not data:** `$user.$.context.Instance.CreatedBy` is right;
   `$user.$.context.Instance.Data.CreatedBy` resolves to nothing and never matches.
+- **`$Everyone` (0.0.105, #1196).** `deny $Everyone` refuses everybody (hide a field, close a transition);
+  `allow $Everyone` admits everybody, a role-less caller included. Accepted on every role-grant surface and
+  as a combinator child. **Refused at publish** in `x-masking.roles` / `x-encryption.roles` (it would exempt
+  every caller; also dropped at read time, fail closed) and in `rowSecurity.rules[].roles` (RS-E05).
+  Spelling is **ordinal**: `$everyone` / `$EVERYONE` is a publish error ("predefined roles are <!-- lint:allow -->
+  case-sensitive, write '$Everyone'"). A static role literally named `$Everyone` now means every caller.
+  Needs runtime ≥ 0.0.105 on every pod: an older runtime treats it as a static role nobody holds, so
+  `deny $Everyone` would hide nothing from callers with roles.
 - **Predefined roles resolve against the grant's own instance.** In a parent-stamped SubFlow override,
   `$InstanceStarter` is the **child's** starter.
 - `authorize` forwards headers, query string and route values, so `$.context.Headers.*` grants work
@@ -146,6 +157,7 @@ empty grant set → allowed
 |---|---|---|
 | static role / `$role.…` | Yes if matched, else No | **Unknown** |
 | the four predefined roles, `$user.…`, `$userBehalfOf.…` | Yes / No | Yes / No (No when there is no instance) |
+| `$Everyone` (0.0.105) | **Yes** | **Yes** (also with no instance) |
 
 | `allOf` children | Result | `anyOf` children | Result |
 |---|---|---|---|
@@ -189,6 +201,8 @@ Static role names match **case-insensitively** (`Teller` = `teller`); grant *val
 | Starter or the person they act for | `allow anyOf[$InstanceStarter, $InstanceBehalfOfStarter]` |
 | Four eyes: a maker acts, but not twice in a row | `allow maker`, `deny allOf[maker, $PreviousUser]` |
 | Block a role only for its own starter | `deny allOf[blocked, $InstanceStarter]` |
+| Hide from everyone (0.0.105) | `deny $Everyone` — replaces the `deny $InstanceStarter` + `allow $InstanceStarter` trick, which still works but hides its intent |
+| Open to everyone, explicitly (0.0.105) | `allow $Everyone` — unlike an empty set it reads as a decision, and it admits role-less callers |
 
 The four-eyes deny does not fire for a caller without `maker` (`Unknown ∧ No = No` for a role-less
 caller, `No ∧ …` for others); they are refused by the allow side only.
@@ -236,6 +250,16 @@ deciding instance, highest precedence first, always on its own `CurrentState` (n
 An **empty** set at the resolved level allows — except the **human-task list, which is fail-closed**
 (a leaf with no `queryRoles` at state or root is dropped, log 20459; `human-task.md`).
 
+**The leaf is the deepest instance that exists (0.0.104, #1184).** A parent commits its SubFlow
+correlation before the child's row exists (the child is created by a post-commit job). A
+`queryRoles` probe landing in that window now lets the **parent** decide with its own resolution
+(stamped override → state → root) — the same view the `state` function serves then — instead of
+answering `false` (up to 0.0.103 the gateway turned that into a `403` on the client's state poll). The
+fallback is logged as `AuthorizeLeafMissingFallback` (50046) and tagged `vnext.auth.fallback=leaf-missing`.
+During it the parent's `subFlow.overrides.states.<state>.queryRoles` for the child is **not** applied (the
+child's state is unknown), so the parent's own gate governs that short interval. Only `queryRoles` falls
+back — a `transitionKey` / `functionKey` forwarded to a missing child stays refused.
+
 **Leaf-only since 0.0.99 (PR #1071) — this LOOSENED access.** While an instance is inside an active
 SubFlow, `authorize?queryRoles=true` is decided by the **deepest active leaf alone**; the levels above
 are no longer AND-ed (the 0.0.95 every-hop AND is gone). A root that declares `queryRoles` while
@@ -249,9 +273,9 @@ parent (migration `query-roles-decided-at-subflow-leaf`). Fixture: `authorizatio
 GET /api/v1/{domain}/workflows/{workflow}/instances/{instanceId}/functions/authorize
 ```
 
-Instance-scoped only — the runtime serves no flow-level `…/workflows/{wf}/functions/authorize` (the
-vnext-docs "Flow Authorize" section is stale). **Exactly one** of the four selectors must be present;
-zero or two is a request error (`AuthorizeRequiresExactlyOneTarget`), not a default.
+On the instance route **exactly one** of the four selectors must be present; zero or two is a request
+error (`AuthorizeRequiresExactlyOneTarget`), not a default. The only workflow-scoped question is the
+start check below (0.0.105).
 
 | Selector | Evaluates | Descends into the active SubFlow? |
 |---|---|---|
@@ -265,7 +289,10 @@ Optional: `role=<single role>` (composition depends on the provider — table be
 forwarded into `$.context.Headers` / `$.context.QueryParameters` / `$.context.RouteValues`.
 
 Response: `200 {"allowed": true}` / `403 {"allowed": false}` — **read the body on both statuses**; a
-4xx/5xx error envelope means the question could not be answered, not a denial. Every decision logs
+4xx/5xx error envelope means the question could not be answered, not a denial. Since 0.0.104 a `403`
+on an addressed instance that does not exist carries `"reason": "instance-not-found"` (no grant was
+evaluated — the instance does not exist *yet*, the caller is not short of a role); an ordinary decision
+has no `reason`. Every decision logs
 `WorkflowLogs.AuthorizeRequest` (EventId **50030**: domain, workflow, instance, target, resolved
 roles, verdict) and is spanned as `Auth.Decide` (source `BBT.Workflow.Authorization`).
 
@@ -278,6 +305,58 @@ curl -s $H -H 'role: morph-idm.maker'    "$B?functionKey=customer-lookup"  # cus
 curl -s $H -H 'role: morph-idm.maker'    "$B?ack=true"                     # may POST …/longpoll/ack be called?
 curl -s $H "$B?transitionKey=approve&role=morph-idm.approver"             # probe one role (provider table)
 ```
+
+### May this caller start an instance? — `authorize?type=instance` (0.0.105, #1211)
+
+```text
+GET /api/v1/{domain}/workflows/{workflow}/functions/authorize?type=instance[&version=x][&role=r]
+```
+
+Workflow-scoped, before any instance exists: evaluates the flow's own **`startTransition.roles`** (the
+route resolves the start transition — the gateway never needs its key). Until 0.0.105
+`startTransition.roles` was applied nowhere.
+
+- `type` is **required** and ordinal; `instance` is the only value. Missing / unknown → `400
+  Authorization:110005` (`AuthorizeUnsupportedType`). `version` pins the definition — the gateway should
+  forward the start request's own `version`. Unknown flow / version → `404`.
+- Caller roles resolve exactly as on the instance route (provider, `role` parameter).
+- Static roles and `$Everyone` compare as usual. **Instance-bound leaves never match** at start
+  (`$InstanceStarter`, `$PreviousUser`, `$InstanceBehalfOfStarter`, `$PreviousBehalfOfUser`, `$user.` /
+  `$userBehalfOf.` / `$role.` context references): they neither admit nor refuse. So
+  `startTransition.roles: [allow $InstanceStarter]` alone **closes the flow to everyone**. No grants →
+  allowed. `availableIn` and the state gate do not apply.
+- The runtime still does **not** check `startTransition.roles` at `POST …/instances/start` — the gateway
+  needs a second check-authorize rule for that route (environment-specific host; keep the internal
+  `sub/instances/start` route out of it):
+
+```text
+Utils.CallApiGet("http://<orchestrator-host>/api/v1/"+path.var1+"/workflows/"+path.var2+"/functions/authorize?type=instance", header, allHeader).IsSuccessStatusCode == true
+```
+
+Audit: `AuthorizeRequest` (50030) with Target `start:<key>` and an empty instance id; span `Auth.Decide`.
+
+```bash
+S=http://localhost:4201/api/v1/core/workflows/role-matrix-lab/functions/authorize
+curl -s -H act_sub:u-ali -H sub:u-ali -H 'role: morph-idm.maker' "$S?type=instance"   # may this caller start?
+```
+
+## Roles inside scripts — `context.Caller` (0.0.105, #1299)
+
+Scripts can read the caller's role set **as the provider resolved it** (below) — the same set `authorize`
+evaluates: `await context.Caller.HasRoleAsync("morph-idm.approver")`. Readable in selection rules
+(transition `schemas`, function contract slots, state/transition views), automatic rules and timers on
+caller-driven hops, and SubFlow output mappings (the child settler); unavailable (a read throws) in task
+mappings, transition mappings, extensions, event mappings and on System hops. Full surface table, guards and
+examples: `csx-contracts.md` § Caller roles.
+
+- **Prefer it over `context.Headers.role`** — under `morph-idm` the header is not the caller's role set.
+- **Fail closed:** a rule that read roles while the provider failed makes the selection fail with
+  `503 Authorization:110006` (log 20519) instead of serving the fallback; an automatic rule / timer fails the
+  step and the `triggerKind: 10` default is not taken.
+- **Not authorization.** It picks a form or a contract; admission stays with the gateway's `authorize`.
+  Positive tests only, least-privileged fallback. Plain role names — `$` roles and combinators are not
+  expanded, and `HasRoleAsync` compares **ordinally** (grants compare role names case-insensitively).
+- The gateway must still own the `role` header — under both providers a client-supplied one is believed.
 
 ## Caller-role providers — `default` vs `morph-idm`
 
@@ -365,6 +444,7 @@ it on every inbound request, or a client asserts its own roles.
 | Place | Field | Effect |
 |---|---|---|
 | Transition | `roles` | filters `transitions[]` in the state body; `authorize?transitionKey=`; never enforced at execution |
+| `startTransition` | `roles` | workflow-scoped `authorize?type=instance` (0.0.105) — the gateway's start gate; static roles / `$Everyone` only (instance-bound leaves never match); never enforced at `POST …/instances/start` |
 | Transition `availableIn[]` entry | `roles` | per-state narrowing, AND-ed with transition `roles` |
 | Workflow root / state | `queryRoles` | read visibility; `authorize?queryRoles=true` (leaf-only); human-task list (fail-closed); `file` function (403) |
 | Custom function | `roles` | `authorize?functionKey=`; discovery (`/info`, `catalog`); not a call gate since 0.0.88 |
@@ -373,8 +453,8 @@ it on every inbound request, or a client asserts its own roles.
 | SubFlow `overrides` | `transitions.<t>.roles`, `states.<s>.queryRoles`, `…longPoll.roles` | replace the child's grants for one hop (`subflow-overrides.md`) |
 | Master schema property | `x-roles` | field-level **read** pruning (`schema-vocabularies.md`, `field-protection.md`) |
 | Workflow `attributes.rowSecurity.rules[]` | `roles` (static or `$InstanceStarter` / `$InstanceBehalfOfStarter`) | **row**-level filter on the instance list, single GET and `GetInstance(s)` tasks; deny by default once declared (0.0.102, experimental — `row-security.md`). Not a boundary for a known instance id |
-| `x-masking.roles`, `x-encryption.roles` | allow-only exemption list | who sees the clear value; no combinators, no deny |
-| View | — | views carry no roles; select per role through state/transition view rules (`view-roles.md`) |
+| `x-masking.roles`, `x-encryption.roles` | allow-only exemption list | who sees the clear value; no combinators, no deny, no `$Everyone` |
+| View | — | views carry no roles; select per role through state/transition view rules — since 0.0.105 a rule reads `context.Caller` (`view-roles.md`, `csx-contracts.md` § Caller roles) |
 
 ## Authorization integration tests
 
@@ -389,6 +469,8 @@ execution. Send `sub` **and** `act_sub` on every request.
 | Behalf-of | start with `act_sub: u-agent`, `sub: c-acme` (→ `CreatedBy=u-agent`, `CreatedByBehalfOf=c-acme`); approver sends `sub: c-acme` + role | `$InstanceBehalfOfStarter` matches |
 | Role-less | `act_sub: u-x`, `sub: u-x`, no role | allow-lists refuse; role-bound denies refuse (deny-only `x-roles` fields disappear); identity grants match |
 | Four-eyes | `[allow maker, deny allOf[maker, $PreviousUser]]` | AYŞE (`maker`, `act_sub: u-ayse`) submits → `authorize?transitionKey=approve` 403 for AYŞE, 200 for BOB (`maker`, `act_sub: u-bob`) |
+| Start gate (0.0.105) | `startTransition.roles: [allow maker]` | `GET …/workflows/{wf}/functions/authorize?type=instance` 200 for `maker`, 403 for a role-less caller; no `type` → 400 `Authorization:110005` |
+| Hidden from everyone (0.0.105) | `x-roles: [deny $Everyone]` | the field is absent from the data function for every caller — starter, roles, role-less, `role` header |
 
 - The data function needs no cache bypass between callers (its cache keys on roles, actor and `sub`).
   `X-VNext-Cache-Override: true` exists for the **human-task list** only (while
@@ -426,10 +508,17 @@ execution. Send `sub` **and** `act_sub` on every request.
 5. **Use `availableIn: {state, roles}`** rather than one shared transition per state; never list a
    state twice. Human states need `queryRoles` (state or root) or they vanish from the human-task list.
 6. **Clients and gateways must send `act_sub` on start** or the starter roles never match.
-7. **Test with `authorize`, not with 200s** (table above; `integration-test-patterns.md`).
-8. **Remember the gateway.** Production admission is only as good as the gateway's `authorize`
+7. **`startTransition.roles` is a real gate since 0.0.105** — through the gateway's
+   `authorize?type=instance` rule. Use static roles (or `$Everyone`) there; a starter / behalf-of /
+   `$user.` grant never matches before the instance exists. Confirm with the platform team that the
+   start rule is deployed before relying on it.
+8. **"Nobody may see / do this" is `deny $Everyone`** (0.0.105), never `allow nobody-has-this` (the
+   `default` provider lets a caller claim any role through the `role` header) and never `[]` (empty =
+   visible to all).
+9. **Test with `authorize`, not with 200s** (table above; `integration-test-patterns.md`).
+10. **Remember the gateway.** Production admission is only as good as the gateway's `authorize`
    pre-flight on the `/workflows` routes; it must own every credential header.
-9. **SubFlow overrides replace.** `overrides.states.<s>.queryRoles` / `overrides.transitions.<t>.roles`
+11. **SubFlow overrides replace.** `overrides.states.<s>.queryRoles` / `overrides.transitions.<t>.roles`
    swap the child's grant set for one hop only (`subflow-overrides.md`).
 
 ## Sources
@@ -438,7 +527,8 @@ execution. Send `sub` **and** `act_sub` on every request.
 - Runtime docs: `docs/domain/role-grant-authorization.md` (surface table row "behind the in-process enforcement switch" is stale), `docs/domain/authorize-function.md`, `docs/domain/field-masking.md`, `docs/runtime/correlation-and-tracing.md`, `docs/runtime/file-storage.md`
 - Aether: `BBT.Aether.Core/.../Users/AetherClaimTypes.cs`, `HeaderCurrentUserResolver`
 - vnext-docs: `blog/2026-10-05-v0-0-99.md`, `blog-breaking-changes/2026-10-05-v0-0-99.md`, `blog/2026-10-15-v0-0-100.md`, `docs/concepts/authorization.md`
-- PRs: #859, #860, #870, #927, #1016, #1027, #1032, #1034, #1054 (credential forwarding, `SystemRead` removed), #1071 (combinators, leaf-only `queryRoles`)
+- PRs: #1299 (0.0.105, `context.Caller`); #859, #860, #870, #927, #1016, #1027, #1032, #1034, #1054 (credential forwarding, `SystemRead` removed), #1071 (combinators, leaf-only `queryRoles`), #1184 (0.0.104, leaf-missing `queryRoles` fallback, `reason`), #1196 (0.0.105, `$Everyone`), #1211 (0.0.105, `authorize?type=instance`)
+- Runtime `vnext` @ `40aad58a` (master): `docs/domain/{authorize-function,role-grant-authorization}.md`; vnext-meta fragments `everyone-predefined-role`, `start-transition-authorize`; vnext-schema #167 (`$Everyone` in the role vocabularies, 0.0.60)
 - vnext-meta: migration `query-roles-decided-at-subflow-leaf`; known issues `role-grant-combinators-rollback-floor`, `list-filter-probes-guarded-fields`
 - Fixtures `vnext-example`: `core/Workflows/authorization-chain-lab/`, `core/Workflows/role-matrix-lab/`, `core/Workflows/human-task-chain/ht-idm-approval.json`, `etc/docker/config/seed/morph-idm-roles-collection.json`, `tests/Core.IntegrationTests/Tests/{AuthorizationChainLab,HumanTaskChain}/`
 - Related: `human-task.md`, `long-poll-interaction.md`, `subflow-overrides.md`, `state-function-response.md`, `schema-vocabularies.md`, `field-protection.md`, `file-fields.md`, `view-roles.md`, `workflow-types.md`, `integration-test-patterns.md`, `security-review-checklist.md`
