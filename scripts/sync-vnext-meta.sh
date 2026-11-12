@@ -7,6 +7,9 @@
 #   scripts/sync-vnext-meta.sh --from <vnext-meta dir>      (a local vnext checkout, e.g. ../vnext/vnext-meta)
 #   scripts/sync-vnext-meta.sh --npm [<version>]            (npm pack @burgan-tech/vnext-meta into a temp dir)
 #   scripts/sync-vnext-meta.sh --check                      (exit 1 if the matrix would change; for CI)
+#   ... --next <runtime>:<schema>                            (also fold vnext-meta/unreleased/*.json in, stamped
+#                                                             as <runtime>/<schema> — before that release ships;
+#                                                             works with --github and --from, not with --npm)
 #
 # vnext master is the source of truth for vnext-meta; the npm package can lag behind it.
 # Needs: node >= 18 and curl (for --github). No jq. Idempotent: running twice produces no diff.
@@ -16,6 +19,7 @@ here=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 src=""
 ref=master
 mode=write
+next=""
 META_FILES="package.json features.json version-manifest.json deprecations.json migrations.json known-issues.json security-policy.json performance-profiles.json component-registry.json"
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -29,7 +33,8 @@ while [ $# -gt 0 ]; do
       ( cd "$tmp" && npm pack "@burgan-tech/vnext-meta${ver:+@$ver}" >/dev/null && tar xzf ./*.tgz )
       src="$tmp/package"; shift ;;
     --check) mode=check; shift ;;
-    -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+    --next) next="$2"; shift 2 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
@@ -42,13 +47,26 @@ if [ -z "$src" ]; then
     curl -fsSL --max-time 20 "$base/$f" -o "$src/$f" || { echo "could not download $base/$f" >&2; exit 1; }
   done
   source_label="burgan-tech/vnext@$ref"
+  if [ -n "$next" ]; then
+    # fragments are not published to npm and have no fixed names: list them through the contents API
+    mkdir -p "$src/unreleased"
+    curl -fsSL --max-time 20 "$base/released-fragments.json" -o "$src/released-fragments.json" || true
+    curl -fsSL --max-time 20 "https://api.github.com/repos/burgan-tech/vnext/contents/vnext-meta/unreleased?ref=$ref" \
+      | node -e 'let b="";process.stdin.on("data",d=>b+=d).on("end",()=>{for(const f of JSON.parse(b))if(/\.json$/.test(f.name))console.log(f.name)})' \
+      | while read -r f; do
+          curl -fsSL --max-time 20 "$base/unreleased/$f" -o "$src/unreleased/$f" || { echo "could not download unreleased/$f" >&2; exit 1; }
+        done
+  fi
+fi
+if [ -n "$next" ] && [ ! -d "$src/unreleased" ]; then
+  echo "--next needs vnext-meta/unreleased (use --github or --from <vnext checkout>/vnext-meta; npm has no fragments)" >&2; exit 2
 fi
 
 [ -f "$src/features.json" ] || { echo "vnext-meta not found at $src (use --github, --from or --npm)" >&2; exit 1; }
 
 out="$here/references/runtime-feature-matrix.md"
 tmpout=$(mktemp)
-META_DIR="$src" META_SOURCE="$source_label" OUT="$tmpout" PLUGIN_JSON="$here/.claude-plugin/plugin.json" MODE="$mode" node - <<'NODE'
+META_DIR="$src" META_SOURCE="$source_label" META_NEXT="$next" OUT="$tmpout" PLUGIN_JSON="$here/.claude-plugin/plugin.json" MODE="$mode" node - <<'NODE'
 const fs = require('fs'), path = require('path');
 const dir = process.env.META_DIR;
 const load = f => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
@@ -57,6 +75,39 @@ const deprecations = load('deprecations.json').items, migrations = load('migrati
 const knownIssues = load('known-issues.json').items, security = load('security-policy.json');
 const perf = load('performance-profiles.json').profiles, registry = load('component-registry.json');
 
+// --next: fold the unreleased fragments in, stamped with the coming version (what the release stamp does)
+let nextNote = '', basePkg = pkg.version;
+if (process.env.META_NEXT) {
+  const [nr, ns] = process.env.META_NEXT.split(':');
+  if (!nr || !ns) { console.error('--next expects <runtime>:<schema>, e.g. 0.0.105:0.0.60'); process.exit(2); }
+  const crypto = require('crypto');
+  basePkg = features.runtimeVersion; // the stamped files equal the npm package of the last release
+  let released = {};
+  try { released = load('released-fragments.json'); } catch (e) {}
+  const releasedHash = new Map();
+  for (const v of Object.values(released)) for (const [slug, h] of Object.entries(v)) releasedHash.set(slug, h);
+  const udir = path.join(dir, 'unreleased');
+  const stamp = o => JSON.parse(JSON.stringify(o, (k, v) => {
+    if (v === 'next' && ['since', 'deprecatedSince', 'enforcedSince', 'fixedIn', 'removedAt'].includes(k)) return nr;
+    if (k === 'affectedVersions' && typeof v === 'string') return v.replace(/\bnext\b/g, nr);
+    return v; }));
+  const used = [];
+  for (const f of fs.readdirSync(udir).filter(f => f.endsWith('.json')).sort()) {
+    const bytes = fs.readFileSync(path.join(udir, f)), slug = f.replace(/\.json$/, '');
+    if (releasedHash.get(slug) === crypto.createHash('sha256').update(bytes).digest('hex')) continue; // back-merge leftover
+    const fr = stamp(JSON.parse(bytes.toString('utf8')));
+    for (const [grp, items] of Object.entries(fr.features || {})) Object.assign(features[grp] = features[grp] || {}, items);
+    deprecations.push(...(fr.deprecations || []));
+    migrations.push(...(fr.migrations || []));
+    knownIssues.push(...(fr.knownIssues || []));
+    for (const id of (fr.fixes || {}).knownIssues || []) { const k = knownIssues.find(x => x.id === id); if (k) k.fixedIn = nr; }
+    for (const id of (fr.fixes || {}).deprecationsRemoved || []) { const d = deprecations.find(x => x.id === id); if (d) d.removedAt = nr; }
+    used.push(slug);
+  }
+  features.runtimeVersion = nr;
+  manifest.versions[nr] = { schemaVersion: ns, releasedAt: 'unreleased', releaseNotes: '' };
+  nextNote = ` + ${used.length} unreleased fragment(s) stamped as ${nr}`;
+}
 const runtime = features.runtimeVersion;
 const schema = (manifest.versions[runtime] || {}).schemaVersion || '';
 const semver = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number);
@@ -67,10 +118,10 @@ const code = s => s ? '`' + esc(s) + '`' : '';
 const list = a => Array.isArray(a) ? a.map(code).join(', ') : code(a);
 
 const L = [];
-L.push(`<!-- GENERATED by scripts/sync-vnext-meta.sh from @burgan-tech/vnext-meta ${pkg.version} — runtime ${runtime}, schema ${schema}. Do not edit by hand; re-run the script. -->`);
+L.push(`<!-- GENERATED by scripts/sync-vnext-meta.sh from @burgan-tech/vnext-meta ${basePkg}${nextNote} — runtime ${runtime}, schema ${schema}. Do not edit by hand; re-run the script. -->`);
 L.push(`# vNext runtime feature matrix`);
 L.push('');
-L.push(`Snapshot of the machine-readable runtime metadata (\`@burgan-tech/vnext-meta\` **${pkg.version}**). Known runtime version: **${runtime}**, matching schema version: **${schema}**.`);
+L.push(`Snapshot of the machine-readable runtime metadata (\`@burgan-tech/vnext-meta\` **${basePkg}**${nextNote ? `, plus the unreleased fragments on vnext master stamped as **${runtime}** — rows with that version are not released yet; re-run with \`--npm ${runtime}\` once it ships` : ''}). Known runtime version: **${runtime}**, matching schema version: **${schema}**.`);
 L.push('');
 L.push('How to read it: a workspace whose `vnext.config.json` `runtimeVersion` is **older** than a row\'s `since` does not have that feature. Anything the toolkit references (skills, references) that is newer than the workspace runtime must be treated as unavailable there. The hand-written references under `references/concepts/` explain *how* to use each feature; this file only answers *since when* and *is it still there*.');
 L.push('');
@@ -158,7 +209,7 @@ for (const p of perf || []) {
 L.push('');
 L.push('## Sources');
 L.push('');
-L.push(`- \`@burgan-tech/vnext-meta\` ${pkg.version} (repo dir \`vnext/vnext-meta\`): features.json, version-manifest.json, deprecations.json, migrations.json, known-issues.json, security-policy.json, performance-profiles.json, component-registry.json`);
+L.push(`- \`@burgan-tech/vnext-meta\` ${basePkg}${nextNote} (repo dir \`vnext/vnext-meta\`): features.json, version-manifest.json, deprecations.json, migrations.json, known-issues.json, security-policy.json, performance-profiles.json, component-registry.json`);
 L.push('- Regenerate: `scripts/sync-vnext-meta.sh` (reads vnext master; `--from <dir>` or `--npm` also work).');
 L.push('- This file is an offline snapshot. Skills read the live copy from vnext master through `scripts/vnext-meta-live.sh`.');
 L.push('');
@@ -167,7 +218,7 @@ fs.writeFileSync(process.env.OUT, L.join('\n'));
 // plugin.json stamps (string replace to keep formatting stable)
 if (process.env.MODE === 'write') {
   const pj = process.env.PLUGIN_JSON; let txt = fs.readFileSync(pj, 'utf8');
-  const stamps = { knownRuntimeVersion: runtime, knownSchemaVersion: schema, metaPackageVersion: pkg.version };
+  const stamps = { knownRuntimeVersion: runtime, knownSchemaVersion: schema, metaPackageVersion: basePkg };
   for (const [k, v] of Object.entries(stamps)) {
     const re = new RegExp(`("${k}"\\s*:\\s*")[^"]*(")`);
     if (re.test(txt)) txt = txt.replace(re, `$1${v}$2`);
@@ -175,7 +226,7 @@ if (process.env.MODE === 'write') {
   }
   fs.writeFileSync(pj, txt);
 }
-console.log(`vnext-meta ${pkg.version} [${process.env.META_SOURCE}]: runtime ${runtime}, schema ${schema}`);
+console.log(`vnext-meta ${basePkg}${nextNote} [${process.env.META_SOURCE}]: runtime ${runtime}, schema ${schema}`);
 NODE
 
 if [ "$mode" = check ]; then
