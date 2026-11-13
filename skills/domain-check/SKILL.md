@@ -13,7 +13,8 @@ of scope — that is `/vnext-ai-toolkit:review-components`. Schema validity is `
 and authorization are `/vnext-ai-toolkit:security-audit`. Stay on runtime cost and runtime
 capability: CacheAside, GetInstances, error-boundary Retry, `P` vs `S` subflows, same-`order`
 parallelism, function `scope` and instance-address lookups, `history: none`, attribute indexes,
-behaviour changes a runtime upgrade brings to this package (check 21), and the rest of
+behaviour changes a runtime upgrade brings to this package (checks 21–22, incl. resource-lock
+rules and floating version references), and the rest of
 [CHECKS.md](CHECKS.md).
 
 Product teams run this without a vNext runtime checkout and without write access to the vNext

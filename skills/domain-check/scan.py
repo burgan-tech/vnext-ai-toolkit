@@ -55,6 +55,9 @@ OUTBOUND_TASKS = {"daprhttpendpoint", "daprbinding", "daprservice", "daprpubsub"
 # Runtime capabilities a domain package should be reaching for; reported when absent.
 CAPABILITY_TASKS = ["getinstances", "statestore", "cacheaside", "fanout"]
 TOKEN_TASK_RE = re.compile(r"token|oauth|login|auth", re.I)
+LOCK_CONFLICT, LOCK_REJECTED = "Execution:200010", "Execution:200014"
+LOCK_CODES = {LOCK_CONFLICT, LOCK_REJECTED}
+FULL_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-")
 
 
 # ---------------------------------------------------------------------------
@@ -462,7 +465,8 @@ def scan(root, cfg_path, schema_dir, no_fetch):
     gates = {"runtime": cfg.get("runtimeVersion"),
              "ge_0_0_94": at_least(rt, "0.0.94"), "ge_0_0_99": at_least(rt, "0.0.99"),
              "ge_0_0_100": at_least(rt, "0.0.100"), "ge_0_0_104": at_least(rt, "0.0.104"),
-             "ge_0_0_105": at_least(rt, "0.0.105")}
+             "ge_0_0_105": at_least(rt, "0.0.105"), "ge_0_0_106": at_least(rt, "0.0.106"),
+             "schema_ge_0_0_61": at_least(ver(cfg.get("schemaVersion")), "0.0.61")}
     out = {
         "root": root, "config": os.path.relpath(cfg_path, root),
         "domain": cfg.get("domain"),
@@ -850,6 +854,74 @@ def scan(root, cfg_path, schema_dir, no_fetch):
             up["callerUnguarded"].append(rel)
     out["upgrade"] = up
 
+    # ---- check 22: resource lock / floating versions (0.0.106) -------------
+    lk = {"lockTransitions": [], "lockTtlNonPositive": [], "lockRejectUses": [], "lockExtendUses": [],
+          "lockRetryRules": [], "lockStateBoundaryUnavailable": [], "lockBoundaryTargetHasLock": [],
+          "lockBoundaryReroutes": [], "floatingRefs": 0, "floatingRefFiles": []}
+
+    def names_lock_code(rule):
+        return any(str(c) in LOCK_CODES for c in rule.get("errorCodes") or [])
+
+    def avail_from(a, tkey, skey):
+        for s_ in a.get("states") or []:
+            if isinstance(s_, dict) and s_.get("key") == skey and \
+                    any(isinstance(t, dict) and t.get("key") == tkey for t in s_.get("transitions") or []):
+                return True
+        for t in a.get("sharedTransitions") or []:
+            if isinstance(t, dict) and t.get("key") == tkey:
+                ai = t.get("availableIn") or []
+                return not ai or any((x.get("state") if isinstance(x, dict) else x) == skey for x in ai)
+        return any(isinstance(a.get(n), dict) and a[n].get("key") == tkey for n in ("cancel", "exit", "updateData"))
+
+    for w in wfs:
+        a = w["_attrs"]
+        locked = {}
+        for origin, tr in transitions_of(a):
+            rl = tr.get("resourceLock")
+            if not isinstance(rl, dict):
+                continue
+            where = f"{w['key']}::{origin}->{tr.get('key')}"
+            locked[tr.get("key")] = where
+            lk["lockTransitions"].append(where)
+            action, ttl = rl.get("action"), rl.get("ttlSeconds", 300)
+            if action != "Release" and isinstance(ttl, (int, float)) and ttl <= 0:
+                lk["lockTtlNonPositive"].append(where)
+            if rl.get("onConflict") == "Reject":
+                lk["lockRejectUses"].append(where)
+            if action == "Extend":
+                lk["lockExtendUses"].append(where)
+        boundaries = [(None, a.get("errorBoundary"))] + \
+            [(s_.get("key"), s_.get("errorBoundary")) for s_ in a.get("states") or [] if isinstance(s_, dict)]
+        for skey, b in boundaries:
+            if not isinstance(b, dict):
+                continue
+            for i, rule in enumerate(b.get("onError") or []):
+                if not isinstance(rule, dict):
+                    continue
+                where = f"{w['key']}::{skey or 'workflow'}.onError[{i}]"
+                lockrule, target = names_lock_code(rule), rule.get("transition")
+                if lockrule and str(rule.get("action")) in RETRY:
+                    lk["lockRetryRules"].append(where)
+                if not target:
+                    continue
+                if lockrule and LOCK_CONFLICT in [str(c) for c in rule.get("errorCodes") or []]:
+                    lk["lockBoundaryReroutes"].append(f"{where} -> {target}")
+                if lockrule and skey and not avail_from(a, target, skey):
+                    lk["lockStateBoundaryUnavailable"].append(f"{where} -> {target}")
+                if target in locked:
+                    lk["lockBoundaryTargetHasLock"].append(f"{where} -> {target}")
+    # floating component references (known issue floating-version-resolution-loads-every-version, fixed 0.0.106)
+    for f in files(croot, "*.json"):
+        try:
+            doc = json.loads(read_text(f))
+        except ValueError:
+            continue
+        n = sum(1 for node in ref_nodes(doc, top=True) if not FULL_VERSION_RE.match(str(node.get("version") or "")))
+        if n:
+            lk["floatingRefs"] += n
+            lk["floatingRefFiles"].append(os.path.relpath(f, root))
+    out["resourceLock"] = lk
+
     # ---- orphans -----------------------------------------------------------
     all_json = files(croot, "*.json")
     csx_files = files(croot, "*.csx")
@@ -909,6 +981,18 @@ def scan(root, cfg_path, schema_dir, no_fetch):
     out["schemaWarnings"] = SCHEMA_WARNINGS
     out["parseErrors"] = PARSE_ERRORS
     return out
+
+
+def ref_nodes(o, top=False):
+    """Component references ({key, flow, version}) below the envelope."""
+    if isinstance(o, dict):
+        if not top and isinstance(o.get("key"), str) and "flow" in o and "version" in o:
+            yield o
+        for v in o.values():
+            yield from ref_nodes(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from ref_nodes(v)
 
 
 def schema_props(schema, prefix=""):
@@ -1126,6 +1210,38 @@ def human(o):
     if u["startRolesInstanceBoundOnly"]:
         p(f"  !! startTransition.roles yalniz instance'a bagli allow ($InstanceStarter ...) — start kontrolunde "
           f"(authorize?type=instance) hic eslesmez, akis herkese kapanir: {', '.join(u['startRolesInstanceBoundOnly'])}")
+    p("")
+    p("## surum gecisi (0.0.106)")
+    k = o["resourceLock"]
+    g106, s61 = g.get("ge_0_0_106"), g.get("schema_ge_0_0_61")
+    if k["lockTransitions"]:
+        p(f"  resourceLock'lu transition ({len(k['lockTransitions'])}): {', '.join(k['lockTransitions'][:10])}")
+    if k["lockTtlNonPositive"]:
+        p(f"  !! resourceLock ttlSeconds <= 0 (Acquire/Extend) — {when(g106, '0.0.106')} publish hatasi; "
+          f"oncesinde kilit hic korumaz (anahtar aninda dolar): {', '.join(k['lockTtlNonPositive'])}")
+    if k["lockRejectUses"] and (g106 is not True or s61 is not True):
+        p(f"  !! onConflict Reject ({len(k['lockRejectUses'])}) — runtime {o['runtimeVersion']} / schema "
+          f"{o['schemaVersion']}: runtime 0.0.106 + schema 0.0.61 gerekir: {', '.join(k['lockRejectUses'])}")
+    if k["lockRetryRules"]:
+        p(f"  !! kilit kodunda Retry kurali (200010/200014) — {when(g106, '0.0.106')} publish hatasi; kilit hala "
+          f"baskasinda, her deneme ayni dusar: {', '.join(k['lockRetryRules'])}")
+    if k["lockBoundaryReroutes"] and g106 is not True:
+        p(f"  !! errorBoundary Execution:200010 yonlendirmesi — runtime {o['runtimeVersion']} bunu hic calistirmaz "
+          f"(0.0.106+), instance fault olur: {', '.join(k['lockBoundaryReroutes'])}")
+    if k["lockStateBoundaryUnavailable"]:
+        p(f"  !! state boundary kilit kodunu o state'ten alinamayan transition'a yonlendiriyor — "
+          f"{when(g106, '0.0.106')} publish hatasi: {', '.join(k['lockStateBoundaryUnavailable'])}")
+    if k["lockBoundaryTargetHasLock"]:
+        p(f"  !! boundary hedefi resourceLock tasiyor — ErrorBoundary profili kilit adimini atlar, kilit hic "
+          f"calismaz: {', '.join(k['lockBoundaryTargetHasLock'])}")
+    if k["lockExtendUses"]:
+        p(f"  resourceLock Extend ({len(k['lockExtendUses'])}) — Dapr provider'da kilit tutulurken basarisiz olur "
+          f"(Execution:200010); ResourceLock:Provider=postgres (0.0.106) gerekir: {', '.join(k['lockExtendUses'])}")
+    rtv = ver(o["runtimeVersion"])
+    if k["floatingRefs"] and rtv is not None and ver("0.0.45") <= rtv < ver("0.0.106"):
+        p(f"  floating surum referansi ({k['floatingRefs']}, {len(k['floatingRefFiles'])} dosya) — runtime "
+          f"{o['runtimeVersion']}: bilinen sorun floating-version-resolution-loads-every-version; uzun publish "
+          f"gecmisli component'te OOM / sessizce eski surum. 0.0.106'ya gecin ya da o referanslari tam surume cekin")
     p("")
     p("## en agir viewlar")
     for v in o["heaviestViews"]:

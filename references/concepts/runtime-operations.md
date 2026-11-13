@@ -13,6 +13,10 @@ checks**. The only distributed lock left is a short status lock `vnext:{domain}:
 around that flip (a Postgres compare-and-set since #975; the `Transition.Settle` span tags the
 outcome as `vnext.settle.cas = flipped | lost | skipped`).
 
+A transition-level `resourceLock` is a different thing: a lock on a **business resource** shared by
+many instances, keyed by a script. Conflict policy, error-boundary rerouting, release timing and the
+provider choice are in `resource-lock.md`.
+
 ### Admission table (`ITransitionAdmissionService`)
 
 | Request kind | While instance is Busy | Otherwise |
@@ -29,7 +33,8 @@ outcome as `vnext.settle.cas = flipped | lost | skipped`).
 |---|---|---|
 | `Instance:100031` | 409 | "Instance is busy; transition '{key}' cannot be accepted while another transition is queued or executing" — poll state until `metadata.effectiveStatus` leaves `Busy`, then retry |
 | `Transition:100009` | 409 | The same async transition is already queued for this instance |
-| `Execution:200010` | 409 | `resourceLock` conflict — another instance holds the resource key; the losing instance is marked Faulted (`F`) but the caller gets a clean 409 |
+| `Execution:200010` | 409 | `resourceLock` conflict under `onConflict: Abort` (default), or a failed `Extend` — another instance holds the resource key; the losing instance is **Faulted** (`F`). Start a new instance. Since 0.0.106 an `errorBoundary` rule for this code can reroute the instance instead (no 409 then) — `resource-lock.md` §2 |
+| `Execution:200014` | 409 | (0.0.106) `resourceLock` conflict under `onConflict: Reject` — the instance is **untouched** (same state, Active, no incident); repeat the same call once the lock frees (`resource-lock.md` §2) |
 | `Instance:100035` | 409 | Instance-data `FOR UPDATE` lock wait exceeded — retry |
 | `Instance:100036` | 503 | Instance-data write statement timeout — transient, relays redeliver |
 | `Instance:100032` | 503 | Subflow terminal-outcome lock not acquired — transient, inbox relay redelivers |
@@ -122,6 +127,20 @@ Prefer `?sync=true` for transitions whose policy may change between accept and r
   Consequence: pods other than the publisher may serve the **old** generation for ≤ 5 s after a
   publish, rollback or deactivation. **Wait N + 1–2 s after the last publish before smoke tests.**
 - Manual flush: `POST /api/v1/utilities/invalidate`.
+- **Floating references on long publish histories** (known issue
+  `floating-version-resolution-loads-every-version`, `>=0.0.45`, fixed in **0.0.106**, #1303 / #1304):
+  resolving a floating version (`"1.0.0"` artifact, `"1.0"`, `"1"`, `"latest"`, none) — and every
+  publish — loaded the stored body of **every** published version. A component with hundreds of large
+  versions ran the orchestration pods out of memory, and the swallowed `OutOfMemoryException` dropped the
+  newest rows, so an **older version won silently** and stayed cached under the `res` key for up to an
+  hour on every pod (restarting pods does not help — the answer lives in Redis). On 0.0.103–0.0.105 with
+  such a component: reference the **full** version (`1.0.0-pkg.1.0.123+core`) from consuming flows and
+  raise the orchestration memory limit, then upgrade. Since 0.0.106 the choice is made from version
+  strings and one body is loaded; an unreadable winning row **fails the request** instead of answering an
+  older version. The cache shape moved to `s3` (keys `…:s3:full:…`, `…:s3:res:{gen}:…`): after the
+  upgrade each component resolves once per pod from the database. A partial request (`1.0`, `1`,
+  `latest`) can still resolve to a pre-release (`1.0.2-beta.1` beats `1.0.1` by SemVer) — open product
+  decision; do not publish pre-release builds into a line that floating callers follow.
 
 ### 2.1 Flow default version — publish ≠ activate (0.0.102, #1130)
 
@@ -378,6 +397,10 @@ the sync response instead of a follow-up GET once the workspace runs ≥ 0.0.104
   exists. Before, the bare row shadowed every package build and a view (or any component) referenced that
   way served a **stale** definition. Full-version, package-only, partial and major requests resolve as
   before.
+- **Resource-lock provider (0.0.106, #1143):** `ResourceLock:Provider` = `dapr` (default) or `postgres`
+  (leases in `sys_queues."DistributedLocks"`, real `Extend`, needs `ConnectionStrings:Default`); any other
+  non-empty value fails host startup. Terminal-state lock release now runs right after the commit
+  instead of waiting for the cleanup event (`resource-lock.md` §3–4).
 - **`modifiedAt` moves with every transition** (0.0.104, #1183) — `instance-query.md` §5.
 
 ## 6. Local runtime checklist before testing a domain
@@ -415,9 +438,9 @@ the sync response instead of a follow-up GET once the workspace runs ≥ 0.0.104
   `docs/runtime/{remote-app-service-architecture,dapr-invocation-transport,discovery-endpoint-cache,publish-completed-hook,component-cache-generation-memo,state-function-cache-and-etag,dapr-component-footprint,instance-correlation-tree,transition-and-state-metrics,function-execution-metrics}.md`,
   `docs/architecture/{subflow-execution,subflow-transition-proxy}.md`, `docs/domain/scheduled-workflow-start.md`, `etc/{orchestration,execution}/dapr/config.yaml`.
 - PRs: #864 (ETag gap decision), #867/#898 (component cache), #871 (BasePath), #964, #975,
-  #976, #982, #997, #1022, #1026, #1030, #1067, #1076, #1079, #1083, #1085, #1088/#1089, #1095.
+  #976, #982, #997, #1022, #1026, #1030, #1067, #1076, #1079, #1083, #1085, #1088/#1089, #1095, #1143 (resource lock v3, 0.0.106), #1303 / #1304 (floating version resolution, 0.0.106).
 - vnext-docs: `configuration/{service-discovery,caching,url-templates,telemetry}.md`,
-  `how-to/{resource-lock,async-sync}.md`, `concepts/transition-pipeline.md`, release notes v0.0.99 / v0.0.100.
+  `how-to/{resource-lock,async-sync}.md` (resource-lock describes pre-0.0.106 behaviour), `concepts/transition-pipeline.md`, release notes v0.0.99 / v0.0.100.
 - vnext-meta (master): features `discoveryDomainListWarmup` (0.0.94), `discoveryEventDrivenInvalidation`,
   `publishCompletedHook` (0.0.95), `instanceEffectiveStatus`, `instanceCorrelationTree` (0.0.99),
   `instanceDataHistory`, `scheduledWorkflowStart`, `multiDomainHosting` (0.0.100); deprecations `monitor-api-host`,

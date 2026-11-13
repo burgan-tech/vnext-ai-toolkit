@@ -1,0 +1,190 @@
+{
+  "key": "limit-reserve",
+  "version": "1.0.0",
+  "domain": "dc",
+  "flow": "sys-flows",
+  "flowVersion": "1.0.0",
+  "tags": [
+    "fixture"
+  ],
+  "attributes": {
+    "type": "F",
+    "labels": [
+      {
+        "language": "en-US",
+        "label": "x"
+      }
+    ],
+    "startTransition": {
+      "key": "start",
+      "target": "idle",
+      "versionStrategy": "Minor",
+      "triggerType": 0,
+      "labels": [
+        {
+          "language": "en-US",
+          "label": "x"
+        }
+      ]
+    },
+    "errorBoundary": {
+      "onError": [
+        {
+          "errorCodes": [
+            "Execution:200010"
+          ],
+          "action": 4,
+          "transition": "retry-reserve",
+          "priority": 10
+        }
+      ]
+    },
+    "sharedTransitions": [
+      {
+        "key": "extend-hold",
+        "target": "$self",
+        "versionStrategy": "Minor",
+        "triggerType": 0,
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "availableIn": [
+          "reserved"
+        ],
+        "resourceLock": {
+          "keyExpression": {
+            "location": "./src/SubmitMapping.csx",
+            "code": ""
+          },
+          "action": "Extend",
+          "ttlSeconds": 60
+        }
+      }
+    ],
+    "states": [
+      {
+        "key": "idle",
+        "stateType": 1,
+        "subType": 0,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "errorBoundary": {
+          "onError": [
+            {
+              "errorCodes": [
+                "Execution:200010"
+              ],
+              "action": 1,
+              "priority": 10
+            },
+            {
+              "errorCodes": [
+                "Execution:200010"
+              ],
+              "action": 2,
+              "transition": "release",
+              "priority": 20
+            }
+          ]
+        },
+        "transitions": [
+          {
+            "key": "reserve",
+            "target": "reserved",
+            "versionStrategy": "Minor",
+            "triggerType": 0,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ],
+            "resourceLock": {
+              "keyExpression": {
+                "location": "./src/SubmitMapping.csx",
+                "code": ""
+              },
+              "action": "Acquire",
+              "ttlSeconds": 0,
+              "onConflict": "Reject"
+            }
+          },
+          {
+            "key": "retry-reserve",
+            "target": "reserved",
+            "versionStrategy": "Minor",
+            "triggerType": 0,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ],
+            "resourceLock": {
+              "keyExpression": {
+                "location": "./src/SubmitMapping.csx",
+                "code": ""
+              },
+              "action": "Acquire",
+              "ttlSeconds": 120
+            }
+          }
+        ]
+      },
+      {
+        "key": "reserved",
+        "stateType": 2,
+        "subType": 0,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "transitions": [
+          {
+            "key": "release",
+            "target": "done",
+            "versionStrategy": "Minor",
+            "triggerType": 0,
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "x"
+              }
+            ],
+            "resourceLock": {
+              "keyExpression": {
+                "location": "./src/SubmitMapping.csx",
+                "code": ""
+              },
+              "action": "Release"
+            }
+          }
+        ]
+      },
+      {
+        "key": "done",
+        "stateType": 3,
+        "subType": 1,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "x"
+          }
+        ],
+        "transitions": []
+      }
+    ]
+  }
+}

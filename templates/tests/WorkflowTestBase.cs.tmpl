@@ -133,6 +133,17 @@ public abstract class WorkflowTestBase : IntegrationTestBase
         Assert.True((int)status < 400, $"'{transitionKey}' on {workflow}/{instanceId} was refused with {(int)status}");
     }
 
+    /// <summary>
+    /// A transition whose refusal the test asserts: one attempt, <c>?sync=true</c>, status and body returned
+    /// (no lock-contention retry). Use it for resource-lock outcomes (runtime 0.0.106+): 409
+    /// <c>Execution:200014</c> under <c>onConflict: Reject</c> leaves the instance untouched — retry the same
+    /// call; 409 <c>Execution:200010</c> under <c>Abort</c> faults it (<c>.claude/references/resource-lock.md</c>).
+    /// </summary>
+    protected Task<(HttpStatusCode Status, string Body)> TryTransitionAsync(
+        string workflow, string instanceId, string transitionKey, object? body = null, Caller? caller = null) =>
+        SendRawAsync(HttpMethod.Patch, $"{InstancePath(workflow, instanceId)}/transitions/{transitionKey}?sync=true",
+            body ?? new { }, HeadersFor(caller));
+
     /// <summary>A request with exactly the headers given (none = a caller with no credentials at all).</summary>
     protected async Task<(HttpStatusCode Status, string Body)> SendRawAsync(
         HttpMethod method, string url, object? body = null, IDictionary<string, string>? headers = null)

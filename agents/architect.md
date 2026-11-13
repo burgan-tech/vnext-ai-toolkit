@@ -92,6 +92,13 @@ before writing the output. Pull the option sets from the schema, not from memory
    The same task twice at one `order` needs a `variableKey` on one binding (0.0.99). On a
    parent with an active SubFlow, transitions are proxied to the leaf (0.0.100) — leaf
    400/403/409 are synchronous.
+   A transition that changes a resource other instances also change (a limit, an account) gets a
+   `resourceLock` keyed by resource kind + business id — and a decided conflict policy: `Abort`
+   (instance faults, `409 Execution:200010`), `Reject` (0.0.106 / schema 0.0.61: instance untouched,
+   `409 Execution:200014`, the client retries the same call) or Abort + a state/global `errorBoundary`
+   rule for `Execution:200010` that reroutes to a parking state with a timer and a give-up exit
+   (0.0.106). Never Retry on lock codes; the reroute target carries no lock of its own; rely on
+   `Extend` only with the Postgres provider (`references/concepts/resource-lock.md`).
    Details: `references/concepts/transition-pipeline.md`.
 4. **Start transition.** `startTransition.target` must name a declared state — the Initial
    state if there is one, else the state entered from the implicit `$start` (never `$self`,
@@ -163,6 +170,7 @@ Propose the **simplest correct design**. Avoid unnecessary components.
 - `references/concepts/view-roles.md` — state vs. transition views, pseudo-UI binding
 - `references/concepts/function-vs-extension-vs-task.md` — picking the right component
 - `references/concepts/mapping-types.md` — when to write which `.csx` interface
+- `references/concepts/resource-lock.md` — cross-instance `resourceLock`, conflict policy, boundary reroute
 - `references/concepts/csx-contracts.md` — `.csx` type signatures and standard `using`s
 - `references/concepts/schema-vocabularies.md` — `x-*` keywords for views
 - `references/concepts/component-schemas.md` — the common envelope and per-type attributes

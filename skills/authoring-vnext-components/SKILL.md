@@ -43,7 +43,7 @@ node_modules/@burgan-tech/vnext-schema/schemas/<schema-file>.json
 If `node_modules` is absent, run `npm install` first, or read the schema via
 `npm pack @burgan-tech/vnext-schema && tar -xzf *.tgz`.
 
-This toolkit is aligned to **runtime 0.0.105 / schema 0.0.60**. When the workspace pins older
+This toolkit is aligned to **runtime 0.0.106 / schema 0.0.61**. When the workspace pins older
 `runtimeVersion` / `schemaVersion` values in `vnext.config.json`, check a feature's since-version in
 `references/runtime-feature-matrix.md` before using it.
 
@@ -140,6 +140,13 @@ Confirm the exact shape against the schema each time; this is the gist:
   whose body shape varies may instead declare rule-based `schemas` (runtime ≥ 0.0.105 / schema
   ≥ 0.0.60: `[{ rule?, schema }]`, first match wins, rule-less fallback last, not on auto/timer;
   no match → 400 `Transition:100025` — `references/concepts/transition-pipeline.md` §1.1).
+  A transition that touches a resource shared by other instances may carry `resourceLock`
+  (`keyExpression` = `ITransitionMapping` returning the key, `action`, `ttlSeconds` > 0,
+  `onConflict`): ask what losing the race means — `Abort` (instance faults, `409 Execution:200010`),
+  `Reject` (runtime ≥ 0.0.106 / schema ≥ 0.0.61: instance untouched, `409 Execution:200014`, client
+  repeats the call) or Abort + an `errorBoundary` rule for `Execution:200010` with a `transition`
+  (0.0.106: reroute to a parking state). Never `Retry` on the lock codes (publish error) —
+  `references/concepts/resource-lock.md`.
 - **task** — required `type` (string number; schema 0.0.59 validates `"1"`–`"23"`
   (`"22"` ExternalHttp, deprecated; `"23"` Python = a `handler` reference into the domain's Python
   runtime image, runtime ≥ 0.0.103 — never `script`/`executionMode`) — e.g. `"6"`=HTTP, `"7"`=Script, `"15"`=GetInstances, `"18"`=CacheAside,

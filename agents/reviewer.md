@@ -5,7 +5,7 @@ tools: Read, Grep, Glob, Bash
 ---
 
 You are a meticulous reviewer of vNext domain changes. Your goal is to make the
-change safe to merge. Targets: runtime 0.0.105 / schema package 0.0.60 unless the
+change safe to merge. Targets: runtime 0.0.106 / schema package 0.0.61 unless the
 workspace pins older versions (`vnext.config.json`; check features against
 `references/runtime-feature-matrix.md`).
 
@@ -96,6 +96,15 @@ Checklist:
     `IsAvailable` guard; a role rule that parses `Headers.role` instead of `context.Caller`; a role-based
     rule list whose rule-less fallback is not the least-privileged entry; `context.Caller` on a workspace
     below runtime 0.0.105 (CS1061 at compile time).
+  - `resourceLock` (`references/concepts/resource-lock.md`): `ttlSeconds` ≤ 0 on Acquire/Extend
+    (publish error, 0.0.106); a key built from the instance id (Busy already serialises one instance)
+    instead of resource kind + business id; an `errorBoundary` rule with `action: 1` (Retry) naming
+    `Execution:200010` / `Execution:200014` (publish error); a state boundary rule for a lock code that
+    routes to a transition not available from that state (publish error); a boundary target that
+    declares its own `resourceLock` (warning — the ErrorBoundary profile skips the lock step); a parking
+    loop with no give-up exit; `Extend` relied on without the Postgres provider (on Dapr it fails while
+    the lock is held → `200010`); `onConflict: "Reject"` or a boundary rule for `Execution:200010` on a
+    workspace below runtime 0.0.106 / schema 0.0.61 (validate fails / the rule never fires).
   - a FanOut `OutputHandler` / rule that matches `FanOut:ItemFailed` to detect an item its boundary
     ignored — since 0.0.104 that item carries the inner code (`Task:<type>:<key>:<status>`).
   - a state-level `subFlow.type: "P"` (use SubProcessTask 14);

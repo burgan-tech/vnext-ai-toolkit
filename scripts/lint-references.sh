@@ -64,6 +64,10 @@ ban 'inner task failed with no more specific code' 'since 0.0.104 an Ignore/Log-
 ban 'Known gaps \(D1–D14\)' 'schema-runtime-gaps lists D1–D15 (D15: rule-based transition schemas)'
 ban 'no caller roles|scripts cannot (read|see) (the caller.s )?roles' 'selection rules, automatic rules, timers and SubFlow output mappings read the caller roles via context.Caller since 0.0.105'
 ban '\$(EVERYONE|everyone)\b' 'the predefined role is spelled $Everyone (ordinal; other spellings are publish errors) — quote a wrong spelling only with lint:allow'
+# runtime 0.0.106 / schema 0.0.61
+ban '[Oo]nly `?Abort`? is supported|`?Abort`? is the only (conflict )?policy|onConflict[^|]*\bonly\b[^|]*Abort|yaln(ı|i)zca `?Abort`? desteklenir' 'resourceLock.onConflict is Abort | Reject since schema 0.0.61 / runtime 0.0.106 — quote the old docs only with lint:allow'
+ban 'caller gets a clean 409|lock conflicts? (always )?faults? the instance' 'since 0.0.106 a lock conflict faults only under Abort without a matching errorBoundary rule (Reject: 409 Execution:200014, instance untouched)'
+ban '(Retry|retry)( rules?)? (will |can |does )?(resolves?|handles?|recovers?) (a |the )?(resource-)?lock conflict' 'Retry cannot resolve a resource-lock conflict (publish error since 0.0.106) — reroute or use onConflict Reject'
 # domain-check must not depend on a runtime checkout (issue #27)
 hits=$(grep -rnE 'src/BBT\.|\.cs\b|RUNTIME_ROOT|common\.props|TaskScope\.cs|DataFunctionCache|vnext-onboarding|ekyc' skills/domain-check commands/domain-check.md 2>/dev/null | grep -v 'lint:allow')
 [ -z "$hits" ] || { red 'domain-check references runtime source paths or private domains (cite public docs / schema instead)'; printf '%s\n' "$hits" | sed 's/^/     /'; }

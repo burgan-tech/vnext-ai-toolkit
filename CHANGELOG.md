@@ -2,7 +2,45 @@
 
 All notable changes to the vNext AI Toolkit will be documented in this file. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Plugin uses [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — 0.0.10
+## [Unreleased] — 0.0.11
+
+**Runtime coverage: vNext runtime 0.0.106 / schema 0.0.61** (previously 0.0.105 / 0.0.60). Milestone v0.0.106 is folded in. It was released 2026-11-13 with vnext PRs #1143, #1303 and #1304. `@burgan-tech/vnext-meta` 0.0.106 is on npm, so the matrix comes from `scripts/sync-vnext-meta.sh --npm 0.0.106` and `metaPackageVersion` is 0.0.106. No vnext PR in this milestone hands work to the toolkit (#1143's `## Product impact` table is empty, and #1303 / #1304 say `no`). The resource-lock changes are author-facing, so they are covered here.
+
+### Added
+
+- **`references/concepts/resource-lock.md`** (new, copied into workspaces). It covers the `resourceLock` contract and the three answers to losing the race:
+  - `Abort` (default): the instance is Faulted and the caller gets `409 Execution:200010`.
+  - `Reject` (vnext #1143, runtime 0.0.106, schema 0.0.61): the instance is untouched and the caller gets `409 Execution:200014`, so it can repeat the same call.
+  - Abort plus an `errorBoundary` rule for `Execution:200010` that names a `transition`: the instance is rerouted from the state it never left, and an incident with `errorLayer: Pipeline` is written.
+
+  It also covers the parking-state pattern, Release / terminal cleanup after commit, Extend and the Dapr `SET NX` caveat, the `ResourceLock:Provider` choice (`dapr` | `postgres`), the publish rules, the `workflow_resource_lock_hold_duration_ms` histogram, logs 10263 / 10264 and a design checklist.
+- **domain-check check 22** (`## surum gecisi (0.0.106)`, `resourceLock` in `--json`). The scanner flags:
+  - `ttlSeconds` ≤ 0;
+  - `onConflict: "Reject"` below runtime 0.0.106 / schema 0.0.61;
+  - Retry rules on the lock codes;
+  - `Execution:200010` boundary reroutes on an older runtime;
+  - a state boundary that routes a lock code to a transition that state cannot take;
+  - a boundary target that carries its own lock;
+  - `Extend` (provider caveat);
+  - floating component references on runtimes 0.0.45–0.0.105 (known issue `floating-version-resolution-loads-every-version`).
+
+  A fixture workflow `limit-reserve` and smoke-test assertions cover each line. `scripts/test-domain-check.sh` now documents schema 0.0.61.
+- **Tests:** `WorkflowTestBase.TryTransitionAsync` makes one `?sync=true` attempt and returns status and body, so a test can assert lock outcomes. `integration-test-patterns.md` § Resource-lock conflicts has a Reject example. `TEST-SCENARIOS.md` and the `.http` template explain the difference between 200010 and 200014.
+
+### Changed
+
+- **Resource-lock design questions** are now asked by `workflow-scaffold`, `architect`, `vnext-architect` and `authoring-vnext-components`. The reviewer, `component-author`, `validate-and-fix` and `CLAUDE.md.tmpl` (reference index and mental model step 4a) follow the same rules: key = resource kind + business id, a decided conflict policy, never Retry on lock codes, and the reroute target carries no lock.
+- **References:**
+  - `runtime-operations.md`: `Execution:200010` no longer says "Faulted but a clean 409"; `Execution:200014` is added; there are new notes on the provider and commit-time release.
+  - `transition-pipeline.md`: step 25 and the ErrorBoundary profile skipping the lock step.
+  - `incidents-and-retry.md`: pipeline failures routed by a boundary.
+  - `observability.md`: hold-duration metric, logs 10263 / 10264.
+  - `schema-runtime-gaps.md`: resource-lock publish rules, the `Reject` validate error on schema ≤ 0.0.60, and the stale vnext-docs `how-to/resource-lock` statement "only Abort".
+- **Floating version resolution** (vnext #1303 / #1304, fixed in 0.0.106). `runtime-operations.md` § Component cache explains the known issue: hundreds of large versions led to OOM and an older version being started silently, and the cached answer survives pod restarts. It gives the 0.0.103–0.0.105 workaround (pin the full version, raise memory), the `s3` cache shape (one cold resolution per pod after the upgrade), and the open pre-release caveat for partial requests.
+- Current-version statements move to 0.0.106 / 0.0.61. `scripts/lint-references.sh` bans three phrasings: "only `Abort` is supported", "the caller gets a clean 409", and Retry "resolving" a lock conflict.
+
+## [0.0.10] — 2026-11-12
+
 
 **Runtime coverage: vNext runtime 0.0.105 / schema 0.0.60** (previously 0.0.103 / 0.0.59). Milestones v0.0.104 (released 2026-11-09, schema unchanged at 0.0.59) and v0.0.105 (open; vnext-schema 0.0.60 not published yet) folded in. The 0.0.105 facts come from vnext / vnext-schema master (`08e59d61` / `ae8ab2c`) and the `vnext-meta/unreleased/` fragments. **Merge this after vnext-schema 0.0.60 is on npm:** CI installs `knownSchemaVersion`, and `/vnext-init` offers it as the bump target. Once runtime 0.0.105 ships, re-run `scripts/sync-vnext-meta.sh --npm 0.0.105`. The only vnext PR that hands work to the toolkit is #1299 (`context.Caller`); every other `## Product impact` row says `vnext-ai-toolkit: no`.
 
