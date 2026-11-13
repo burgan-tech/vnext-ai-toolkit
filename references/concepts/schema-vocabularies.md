@@ -1,6 +1,6 @@
 # Schema Vocabularies — Roles and `x-*` Keywords
 
-> Schema package **0.0.60** / runtime **0.0.105** (role model since 0.0.56). vNext extends JSON Schema with `x-*` keywords that
+> Schema package **0.0.61** / runtime **0.0.106** (role model since 0.0.56). vNext extends JSON Schema with `x-*` keywords that
 > drive forms, record exposure, queries, files and client context. Since 0.0.56 **a schema plays one
 > role** (`attributes.type`), and the role decides which `x-*` keywords it may carry.
 >

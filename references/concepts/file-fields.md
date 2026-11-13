@@ -1,6 +1,6 @@
 # File Fields — `x-storage` (blob storage)
 
-> Runtime **0.0.105**, schema package **0.0.60** (`x-storage` since 0.0.100; streamed uploads, read integrity and
+> Runtime **0.0.106**, schema package **0.0.61** (`x-storage` since 0.0.100; streamed uploads, read integrity and
 > script file processing since **0.0.102**, #1144). A master-schema field marked `x-storage` keeps its file
 > **bytes in a Dapr output binding** (local disk, S3, MinIO …) instead of the instance data. The client
 > sends the bytes once (base64 inside the request body, or as a separate streamed upload — §2a); from then on every record and every read

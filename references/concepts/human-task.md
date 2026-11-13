@@ -2,7 +2,7 @@
 
 > A human task is **not** task type 5 (`Human` task is a stub that answers 202 "Pending"). It is a
 > **state** with `subType: 6` plus a domain-level function that lists such states for the caller.
-> Runtime 0.0.105 (identity-aware leaf decision and combinators since 0.0.99; `dueBy` / `priority` on
+> Runtime 0.0.106 (identity-aware leaf decision and combinators since 0.0.99; `dueBy` / `priority` on
 > each row since 0.0.104; `$Everyone` grants since 0.0.105).
 
 ## 1. Model

@@ -66,6 +66,15 @@ Each boundary verdict (Task → State → Global, by `priority`) that ends in `A
 `boundaryAction: null`. `Ignore` and `Log` write **nothing**. Before 0.0.92 an abort produced two
 rows (verdict + a `Pipeline`/`ErrorBoundaryAbort` duplicate that hid the real one) — gone.
 
+**Pipeline failures routed by a boundary (0.0.106, #1143).** Until 0.0.105 only task failures and
+SubFlow faults reached the boundary engine; a pipeline-step failure always faulted the instance. Since
+0.0.106 a resource-lock conflict (`Execution:200010`) is matched against the **state** and **global**
+boundaries (no task level). A matching rule that names a `transition` reroutes the instance from the
+state it never left and writes one incident with `errorLayer: Pipeline`, `task: null`,
+`boundaryAction` / `boundaryLevel` (log 10264); the incident is resolved when the reroute lands. A
+`Reject` loser (`Execution:200014`) writes **no** incident — the instance did not change
+(`resource-lock.md` §2). Publish refuses `Retry` for the lock codes.
+
 On `rollback`/`notify` a brief `hasActiveIncident: true` window is visible while the instance is
 `Busy`, until `FinalizeTransitionStep` closes the row. Accepted side effect.
 

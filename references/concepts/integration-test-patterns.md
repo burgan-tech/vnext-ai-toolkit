@@ -201,11 +201,42 @@ Paths are `/api/v1/{domain}/workflows/{wf}/instances/{id}/…`; endpoints withou
 | Start authorize (0.0.105) | `AuthorizeStartAsync` → `GET …/workflows/{wf}/functions/authorize?type=instance` | 200 / 403 from `startTransition.roles`; no `type` → 400 `Authorization:110005`; instance-bound grants never match |
 | Sync response state (0.0.104) | `…/instances/start?sync=true`, `PATCH …?sync=true` | body carries `currentState` / `effectiveState` (the instance's own, no SubFlow descent); a `202` carries neither |
 | Rule-based payload schema (0.0.105) | transition with `schemas`, body that matches no entry | 400 `Transition:100025`, instance unchanged; the instance `schema` function → 404 for the same caller/headers |
+| Resource-lock conflict (0.0.106) | instance A holds the key, instance B runs the locked transition with `TryTransitionAsync` | `Abort`: 409 `Execution:200010`, B Faulted with an incident; `Reject`: 409 `Execution:200014`, B in the same state, Active, no incident — release A, repeat the **same** call, 200; boundary reroute: B lands in the parking state, incident `errorLayer: Pipeline` |
 | Human-task list | `GET /api/v1/{domain}/functions/human-task` | filtered by caller roles (fail-closed) |
 | Task journal | `…/functions/tasks` | executed task keys and outcomes — **completed tasks only** since 0.0.102 (a running task is not listed; assert after the transition settles) |
 | Correlations | `…/functions/instance-correlation` | SubFlow/SubProcess tree |
 | File | `…/functions/file?file=<guid>` | bytes + headers; state `queryRoles` deny → 403 (enforced here); `x-roles`-hidden or foreign handle → 404 |
 | Filter + sort | `…/instances?filter={json}&sort={json}` | `x-filterOperators` declaration names; filtered fields `x-indexed` |
+
+### Resource-lock conflicts
+
+`resource-lock.md` §2. Two instances keyed to the same resource; the first takes the lock and stays in the
+protected section:
+
+```csharp
+[Fact]
+public async Task Second_Reservation_Is_Rejected_Then_Succeeds_After_Release()
+{
+    var a = await StartAsync(Workflow, new { customerNo = "C1" });
+    var b = await StartAsync(Workflow, new { customerNo = "C1" });
+    await RunAcceptedAsync(Workflow, a, "reserve");
+
+    var (status, body) = await TryTransitionAsync(Workflow, b, "reserve");
+    Assert.Equal(HttpStatusCode.Conflict, status);
+    Assert.Contains("Execution:200014", body);                 // Reject: B untouched
+    Assert.Equal(("idle", "A"), await GetInstanceStateAsync(Workflow, b));
+
+    await RunAcceptedAsync(Workflow, a, "release");
+    await RunAcceptedAsync(Workflow, b, "reserve");             // the same call now passes
+}
+```
+
+- `RunAsync` does not retry these 409s (it only retries the status-lock "Failed to acquire lock").
+- Locks live in the runtime's provider (Dapr lock store or Postgres), not in the test's database: give
+  each test its own business key, or a test that faults while holding a lock blocks the next run until
+  `ttlSeconds` expires.
+- On a runtime below 0.0.106 only the `Abort` row applies; a boundary rule for `Execution:200010` never
+  fires there.
 
 ## Gates G1–G4 (warn-only)
 

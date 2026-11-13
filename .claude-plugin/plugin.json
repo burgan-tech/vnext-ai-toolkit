@@ -93,12 +93,13 @@
     "references/concepts/schema-runtime-gaps.md",
     "references/concepts/field-protection.md",
     "references/concepts/row-security.md",
+    "references/concepts/resource-lock.md",
     "references/concepts/file-fields.md"
   ],
   "vnext": {
-    "knownRuntimeVersion": "0.0.105",
-    "knownSchemaVersion": "0.0.60",
-    "metaPackageVersion": "0.0.104",
+    "knownRuntimeVersion": "0.0.106",
+    "knownSchemaVersion": "0.0.61",
+    "metaPackageVersion": "0.0.106",
     "schemaSource": "node_modules/@burgan-tech/vnext-schema/schemas/{componentType}-definition.schema.json",
     "schemaFallbackUrl": "https://raw.githubusercontent.com/burgan-tech/vnext-schema/v{schemaVersion}/schemas/{componentType}-definition.schema.json",
     "knowledgeOrder": [
@@ -139,6 +140,7 @@
       "references/concepts/schema-runtime-gaps.md",
       "references/concepts/field-protection.md",
       "references/concepts/row-security.md",
+      "references/concepts/resource-lock.md",
       "references/concepts/file-fields.md",
       "references/concepts/integration-test-patterns.md",
       "references/runtime-feature-matrix.md"
