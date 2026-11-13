@@ -65,7 +65,7 @@ ban 'Known gaps \(D1–D14\)' 'schema-runtime-gaps lists D1–D15 (D15: rule-bas
 ban 'no caller roles|scripts cannot (read|see) (the caller.s )?roles' 'selection rules, automatic rules, timers and SubFlow output mappings read the caller roles via context.Caller since 0.0.105'
 ban '\$(EVERYONE|everyone)\b' 'the predefined role is spelled $Everyone (ordinal; other spellings are publish errors) — quote a wrong spelling only with lint:allow'
 # runtime 0.0.106 / schema 0.0.61
-ban '[Oo]nly `?Abort`? is supported|`?Abort`? is the only (conflict )?policy|onConflict[^|]*\bonly\b[^|]*Abort|yaln[ıi]zca `?Abort`? desteklenir' 'resourceLock.onConflict is Abort | Reject since schema 0.0.61 / runtime 0.0.106 — quote the old docs only with lint:allow'
+ban '[Oo]nly `?Abort`? is supported|`?Abort`? is the only (conflict )?policy|onConflict[^|]*\bonly\b[^|]*Abort|yaln(ı|i)zca `?Abort`? desteklenir' 'resourceLock.onConflict is Abort | Reject since schema 0.0.61 / runtime 0.0.106 — quote the old docs only with lint:allow'
 ban 'caller gets a clean 409|lock conflicts? (always )?faults? the instance' 'since 0.0.106 a lock conflict faults only under Abort without a matching errorBoundary rule (Reject: 409 Execution:200014, instance untouched)'
 ban '(Retry|retry)( rules?)? (will |can |does )?(resolves?|handles?|recovers?) (a |the )?(resource-)?lock conflict' 'Retry cannot resolve a resource-lock conflict (publish error since 0.0.106) — reroute or use onConflict Reject'
 # domain-check must not depend on a runtime checkout (issue #27)

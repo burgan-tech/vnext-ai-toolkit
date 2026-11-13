@@ -124,7 +124,7 @@ Statements in vnext-meta, PR titles or vnext-docs that no longer match the runti
 | State `"views": [ { "rule", "view" } ]` | vnext-docs `how-to/view-selection` | Schema `definitions.viewDefinition`: `"view": { "rules": […], "default": {…} }` (D6). |
 | `"grant": "ALLOW"` / `"DENY"` | vnext-docs `how-to/subflow-overrides` examples | Schema enum is lower-case `allow` / `deny` (D4). |
 | `subFlow.viewOverrides` / `overrides.views.<viewKey>` | schema (still present, marked deprecated), older docs | Deprecated since 0.0.95; use `subFlow.overrides.states.<state>.views` / `overrides.transitions.<key>.views` (`subflow-view-overrides-legacy`, `subflow-overrides-views-by-view-key`). See `subflow-overrides.md`. <!-- lint:allow --> |
-| `onConflict` "Şu an yalnızca `Abort` desteklenir" | vnext-docs `how-to/resource-lock.md` (pre-0.0.106) | Schema 0.0.61 / runtime 0.0.106: `Abort` \| `Reject`, and `Execution:200010` is boundary-routable (`resource-lock.md`). |
+| `onConflict` "Şu an yalnızca `Abort` desteklenir" | vnext-docs `how-to/resource-lock.md` (pre-0.0.106) | Schema 0.0.61 / runtime 0.0.106: `Abort` \| `Reject`, and `Execution:200010` is boundary-routable (`resource-lock.md`). | <!-- lint:allow -->
 | "HumanTask is task type 5" | older toolkit references | `TaskEnums.cs` keeps `Human = 5`, but `HumanTaskExecutor` is a placeholder ("task execution waits for human interaction"); a human approval step is a **state** with `subType: 6` plus `queryRoles` and the built-in `human-task` function. See `human-task.md`. <!-- lint:allow --> |
 
 ## Sources
