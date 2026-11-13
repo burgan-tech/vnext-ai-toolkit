@@ -520,6 +520,37 @@ reads. Ask the user whether unmatched callers are meant to be refused before rec
 [roles-and-authorization.md](../../references/concepts/roles-and-authorization.md),
 [fan-out.md](../../references/concepts/fan-out.md) §6.
 
+## 22. Resource lock and floating versions (0.0.106)
+
+**Scanner:** the `## surum gecisi (0.0.106)` block, plus `resourceLock` in `--json`.
+
+Runtime 0.0.106 gave `resourceLock` a conflict policy (`onConflict: "Reject"`, schema 0.0.61), made
+`Execution:200010` routable through `errorBoundary`, and added publish rules for both. It also fixed
+the floating-version resolution that loaded every published body. Each line is either a publish error
+on 0.0.106 (**Yapılmalı** — it blocks the upgrade) or a design risk (**Yapılsa iyi olur**).
+
+| Scanner line | What it means | Recommend |
+|---|---|---|
+| `resourceLock'lu transition` | inventory only | check each key is resource kind + business id, not the instance id |
+| `!! resourceLock ttlSeconds <= 0` | publish error on 0.0.106; before that the lock expires at once and protects nothing | a TTL covering the whole protected section |
+| `!! onConflict Reject` (runtime < 0.0.106 or schema < 0.0.61) | validate fails on schema ≤ 0.0.60; an older runtime does not know the policy | bump both versions first, or keep `Abort` |
+| `!! kilit kodunda Retry kurali` | publish error on 0.0.106; the step re-runs while the lock is still held | reroute to a parking state, or `onConflict: "Reject"` — ask the user which |
+| `!! errorBoundary Execution:200010 yonlendirmesi` (runtime < 0.0.106) | the rule never fires: an older runtime faults every instance that loses the race | upgrade, or treat the instance as lost (`Abort` semantics) |
+| `!! state boundary … alinamayan transition'a` | publish error on 0.0.106 for lock-code rules (warning for other codes): the instance never left the state, so it can only take that state's transitions | declare the target on the state, or add the state to the shared transition's `availableIn` |
+| `!! boundary hedefi resourceLock tasiyor` | warning: the ErrorBoundary profile skips step 25, so the target's lock never runs | move the (re-)acquire to the transition that leaves the parking state |
+| `resourceLock Extend` | on the default Dapr provider Extend fails while the lock is held (`Execution:200010`) | size `ttlSeconds` for the whole section, or require `ResourceLock:Provider=postgres` in the README |
+| `floating surum referansi` (runtime 0.0.45–0.0.105) | known issue `floating-version-resolution-loads-every-version`: a component with a long publish history can run the pods out of memory and start an **older version silently** | upgrade to 0.0.106; until then pin references to heavily published components by full version (`1.0.0-pkg.1.0.N+domain`) |
+
+**Verify:** open the workflow — the scanner reads `errorBoundary` on the workflow and each state and
+compares `errorCodes` literally (a `*` wildcard rule is not counted as naming a lock code). For the
+floating line, ask how many versions the referenced components have; a short history is harmless.
+
+**Docs:** vnext-meta features `resourceLockConflictPolicy`, `pipelineErrorBoundaryRouting`,
+`resourceLockPostgresProvider`, known issue `floating-version-resolution-loads-every-version` —
+`${CLAUDE_PLUGIN_ROOT}/scripts/vnext-meta-live.sh features`; toolkit references
+[resource-lock.md](../../references/concepts/resource-lock.md),
+[runtime-operations.md](../../references/concepts/runtime-operations.md) § Component cache.
+
 ## Tooling (optional)
 
 If the user asks about build or validation speed, the template tooling at the domain root is
