@@ -43,7 +43,9 @@ dependency is missing must **skip**, not fail; a known trap must not be read as 
   keeps the instance Busy by design. Wait for the **state**, not the status, and drive the
   `updateData` / transition that opens the gate.
 - **409 `Failed to acquire lock` is retried by the client** (`WorkflowTestBase.RunAsync`, 5 × 200 ms).
-  Any other 409 — e.g. `Instance:100031` Busy — is real.
+  Any other 409 — e.g. `Instance:100031` Busy — is real. A `resourceLock` conflict is real too:
+  `Execution:200010` (Abort — the instance is Faulted) or `Execution:200014` (Reject, 0.0.106 — the instance
+  is untouched; send the same call again). Assert those with `TryTransitionAsync`.
 - **Never discard `RunAsync`'s status.** A swallowed refusal turns into a 45 s "never reached state X".
   Use `RunAcceptedAsync`, or `SubmitAsync` for a parent that stays Busy while its SubFlow runs.
 - **Reads do not enforce `queryRoles`.** `state`, `data`, `view`, `schema`, `incidents` answer every

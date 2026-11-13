@@ -4,7 +4,7 @@
 # resolved and that each measurement the fixture is built to trigger shows up.
 #
 # Usage: scripts/test-domain-check.sh <vnext-schema schemas dir>
-#   e.g. d=$(mktemp -d); npm install --no-save --prefix "$d" @burgan-tech/vnext-schema@0.0.60
+#   e.g. d=$(mktemp -d); npm install --no-save --prefix "$d" @burgan-tech/vnext-schema@0.0.61
 #        scripts/test-domain-check.sh "$d/node_modules/@burgan-tech/vnext-schema/schemas"
 # Exit 0 = pass, 1 = assertion failed, 2 = bad usage.
 set -eu
@@ -64,6 +64,16 @@ check(base(u["roleHeaderParsing"]) == ["ChannelRoleMapping.csx"], f"role header 
 check(base(u["callerWhereUnavailable"]) == ["ChannelRoleMapping.csx"], f"context.Caller in a task mapping: {u['callerWhereUnavailable']}")
 check(base(u["callerUnguarded"]) == ["IsApproverRule.csx"], f"unguarded context.Caller: {u['callerUnguarded']}")
 check(len(u["callerUses"]) == 3, f"context.Caller uses: {u['callerUses']}")
+k = o["resourceLock"]
+check(len(k["lockTransitions"]) == 4, f"resourceLock transitions: {k['lockTransitions']}")
+check(k["lockTtlNonPositive"] == ["limit-reserve::idle->reserve"], f"ttlSeconds <= 0: {k['lockTtlNonPositive']}")
+check(k["lockRejectUses"] == ["limit-reserve::idle->reserve"], f"onConflict Reject: {k['lockRejectUses']}")
+check(k["lockExtendUses"] == ["limit-reserve::shared->extend-hold"], f"Extend: {k['lockExtendUses']}")
+check(k["lockRetryRules"] == ["limit-reserve::idle.onError[0]"], f"Retry on lock code: {k['lockRetryRules']}")
+check(k["lockStateBoundaryUnavailable"] == ["limit-reserve::idle.onError[1] -> release"], f"state boundary target: {k['lockStateBoundaryUnavailable']}")
+check(len(k["lockBoundaryTargetHasLock"]) == 2, f"boundary target with lock: {k['lockBoundaryTargetHasLock']}")
+check(len(k["lockBoundaryReroutes"]) == 2, f"200010 reroutes: {k['lockBoundaryReroutes']}")
+check(k["floatingRefs"] > 0, "floating component references not counted")
 
 if fail:
     print("FAIL domain-check smoke test:")

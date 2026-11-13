@@ -17,7 +17,7 @@ Every runtime log line comes from `src/BBT.Workflow.Domain/Logging/WorkflowLogs.
 
 | Range | Region (from `#region` markers) | Named examples |
 |---|---|---|
-| 10003–10262 | Transition execution, task execution, fan-out (1015x), task coordinator, post-commit (1009x), resource lock (1010x), multi-channel notification (1016x); continuation claim 10182–10183 and hot-path calls 10240–10260 (0.0.105); transition-schema resolution 10261–10262 (0.0.105) | `StateChanged` 10003; `ScheduledTransitionsSkippedForChainedNext` 10156; `UpdateDataContinuationClaimLost` 10182 (0.0.105) |
+| 10003–10264 | Transition execution, task execution, fan-out (1015x), task coordinator, post-commit (1009x), resource lock (1010x), multi-channel notification (1016x); continuation claim 10182–10183 and hot-path calls 10240–10260 (0.0.105); transition-schema resolution 10261–10262 (0.0.105); resource-lock conflict `TransitionRejectedWithoutFaulting` 10263 and `TransitionReroutedByErrorBoundary` 10264 (0.0.106) | `StateChanged` 10003; `ScheduledTransitionsSkippedForChainedNext` 10156; `UpdateDataContinuationClaimLost` 10182 (0.0.105) |
 | 10074–… | SubFlow (interleaved with 10xxx) | |
 | 20008–20050 | Instance management, instance retry | `InstanceStarted` 20008 |
 | 20100–20519 | View resolution 201xx, extensions, incidents 202xx, long-poll termination 203xx, state-function cache 204xx, data-function cache 2041x, master/schema cache 2042x, related access 2043x, caller-role provider 2044x, `CallerRolesUnavailableForSelection` 20519 (0.0.105; warning, no role values logged), human-task 2045x, instance-query filtering 2046x | `StateFunctionEtagNotModified` 20405; `EffectiveStatusDrift` 20445 (warning); human task dropped 20459 (warning) |
@@ -176,6 +176,14 @@ a `terminate: true` pause. A fallback resume logs **20308 `LongPollFallbackResum
 **If a flow's `ack-timeout` count tracks its total resumes, the client never acknowledges** and every instance
 waits the full `fallbackTimeoutSeconds`: fix the client's ack call, or shorten the window / drop `terminate: true`
 (`long-poll-interaction.md` §3).
+
+### Metric: resource-lock hold duration (0.0.106, #1143)
+
+`workflow_resource_lock_hold_duration_ms` (histogram, tags `vnext.domain`, `vnext.flow.key`) — acquire to
+release of a transition-level `resourceLock`. **Alert on the upper percentiles approaching the lock's
+`ttlSeconds`:** that is a release that only happened when the TTL expired, so every instance queued on the
+key burned its retries against a holder that had already finished. Instances started before 0.0.106 carry
+no acquisition time and are not measured (`resource-lock.md` §6).
 
 ## 6. Recipe — instance looks stuck (Busy)
 

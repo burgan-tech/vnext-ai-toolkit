@@ -45,6 +45,8 @@ If-None-Match: {{state.response.headers.ETag}}
 ### Execute a manual transition (PATCH; 409 Instance:100031 while the instance is Busy)
 # executionType on the transition/flow overrides ?sync. On a parent with an active SubFlow the call is
 # proxied to the leaf (0.0.100): leaf 400/403/409 come back synchronously; a just-completed child → 409, retry.
+# A transition with resourceLock: 409 Execution:200010 = lock lost under Abort (instance Faulted, start over);
+# 409 Execution:200014 = lock lost under Reject (0.0.106; instance untouched — send this same request again).
 PATCH {{baseUrl}}/api/v{{apiVersion}}/{{domain}}/workflows/{{workflowKey}}/instances/{{instanceId}}/transitions/{transition-key}?sync=true
 Content-Type: application/json
 role: {{role}}

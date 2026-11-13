@@ -151,6 +151,17 @@ For each transition capture:
   `400 Transition:100025`; ask the user whether unmatched callers must be refused (then omit the
   fallback deliberately). Details: `references/concepts/transition-pipeline.md` §1.1. On an older
   workspace keep the single `schema`.
+- **Shared resource?** If the transition touches something other instances also change (a limit, an
+  account, a slot), offer a `resourceLock`: key = resource kind + business id (an `ITransitionMapping`
+  `.csx` returning the string, never the instance id), `ttlSeconds` covering the whole protected section,
+  a `Release` transition (or rely on terminal cleanup). Then ask **what losing the race means**:
+  `Abort` (default — instance faults, `409 Execution:200010`), `Reject` (runtime ≥ 0.0.106 / schema
+  ≥ 0.0.61 — instance untouched, `409 Execution:200014`, the client repeats the same call) or **wait in
+  the process** (0.0.106 — keep `Abort` and add a state/global `errorBoundary` rule
+  `{ "errorCodes": ["Execution:200010"], "action": 2, "transition": "<park>" }` to a parking state whose
+  timer re-acquires; add a give-up exit). Never a Retry rule on the lock codes; the parking transition
+  itself carries no `resourceLock`. Details and the provider caveat for `Extend`:
+  `references/concepts/resource-lock.md`.
 - **`annotations`** (optional, see above)
 
 ### 5. Identify the start transition

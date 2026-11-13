@@ -43,7 +43,7 @@ Rules:
   stops a task — validate before it or `throw`. `encrypt` fields reach scripts as
   tokens (`context.Instance.DecryptAsync`); `GetFileAsync` has no authorization check.
 
-Awareness (runtime 0.0.105 / schema 0.0.60) — follow the reference, don't restate it:
+Awareness (runtime 0.0.106 / schema 0.0.61) — follow the reference, don't restate it:
 - **Schema roles:** a schema's `attributes.type` is its role (`master` / `transition` /
   `function` / `component`, or absent); legacy values fail validation. One schema per
   role. → `references/concepts/schema-vocabularies.md`
@@ -56,6 +56,9 @@ Awareness (runtime 0.0.105 / schema 0.0.60) — follow the reference, don't rest
   reserved), and the **start transition target** → `references/concepts/workflow-types.md`
 - **`variableKey`:** the same task twice at one `order` needs a distinct `variableKey`;
   slot collisions fail publish. → `references/concepts/task-types.md`
+- **`resourceLock`:** key = resource kind + business id, `ttlSeconds` > 0, and the conflict policy
+  the design chose (`Abort` / `Reject` / Abort + `errorBoundary` reroute for `Execution:200010`);
+  never a Retry rule on the lock codes. → `references/concepts/resource-lock.md`
 - A runtime defect (not a component error) → draft it with `/vnext-ai-toolkit:report-issue`.
 
 When done, run `npm run validate` and fix reported errors until it passes. Writing

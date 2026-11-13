@@ -110,6 +110,7 @@ Goal: lay out the state machine.
    - Same task twice in parallel (same `order`) → note a `variableKey` for one binding (0.0.99).
    - Pinned mode? → `executionType` `S`/`A` on this transition (not on `cancel`/`exit`/`updateData`).
    - Manual/event transition with a body: one payload `schema`, or — if the body's shape depends on the caller/instance (retail vs corporate, channel) — a rule-based `schemas` list (runtime ≥ 0.0.105 / schema ≥ 0.0.60; first match wins, rule-less fallback last, no match → 400 `Transition:100025`; `references/concepts/transition-pipeline.md` §1.1).
+   - Shared business resource (limit, account, slot) changed by other instances too? → `resourceLock` (key = resource kind + business id, `ttlSeconds` for the whole section, a `Release` or terminal cleanup). Then ask with `AskUserQuestion` what losing the race means: "Fail this instance — Abort (default, `409 Execution:200010`)"; "Leave it untouched, caller retries — Reject (runtime ≥ 0.0.106 / schema ≥ 0.0.61, `409 Execution:200014`)"; "Wait in the process — Abort + `errorBoundary` reroute for `Execution:200010` to a parking state with a timer and a give-up exit (0.0.106)". Never Retry on lock codes (`references/concepts/resource-lock.md`).
 
 9. **What's the start transition?** Its `target` must name a declared state: the Initial state if one exists, otherwise the state the instance should enter from the implicit `$start` (0.0.99, #1068). Never `$self`, `$start` or empty; `$start` is a reserved key. Ask whether the flow must also start **on a schedule** (0.0.100: `POST …/instances/schedule` driven by a Dapr `bindings.cron` component; seed values are query-string strings). Confirm.
 
@@ -204,6 +205,7 @@ If the conversation is interrupted mid-flow and resumed later:
 - `references/concepts/roles-and-authorization.md` — system role tokens, token claims, JSONPath grants
 - `references/concepts/function-vs-extension-vs-task.md` — picking the right component
 - `references/concepts/mapping-types.md` — when to write which `.csx` interface
+- `references/concepts/resource-lock.md` — cross-instance `resourceLock`, conflict policy, boundary reroute
 - `references/concepts/csx-contracts.md` — `.csx` type signatures and standard `using`s
 - `references/concepts/schema-vocabularies.md` — `x-*` keywords for views
 - `references/concepts/mocklab-spec.md` — mock layer seed format

@@ -1,7 +1,7 @@
 # Transition Pipeline — Order, Admission, `updateData`, Annotations
 
 > Author-facing view of what happens between `PATCH …/transitions/{key}` and the next state
-> function response. Runtime 0.0.105 (rule-based payload schemas §1.1). For the state-function body itself see
+> function response. Runtime 0.0.106 (rule-based payload schemas §1.1; resource-lock conflict policy and boundary rerouting — `resource-lock.md`). For the state-function body itself see
 > `state-function-response.md`; for locking error codes see `runtime-operations.md`.
 
 ## 1. Lifecycle order (`LifecycleOrder.cs`)
@@ -13,7 +13,7 @@
 | 19 | SetBusy | Instance → Busy for the rest of the chain (Normal kind only) |
 | 20 | CreateTransition | Transition record; duplicate-job guard |
 | 21 | UpdateDataDataOnly | `updateData` on a parent with an open SubFlow correlation: write data, jump to Finalize |
-| 25 | ResourceLock | Business resource lock acquire/release/extend |
+| 25 | ResourceLock | Business resource lock acquire/release/extend (`resource-lock.md`). Runs before anything changes: a lost `Acquire` faults (`Abort`, `Execution:200010`), leaves the instance untouched (`Reject`, `Execution:200014`, 0.0.106), or — since 0.0.106 — is rerouted by a state/global `errorBoundary` rule for `Execution:200010` that names a transition |
 | 30 | OnExecute | `transition.onExecutionTasks` |
 | 38 | ApplyTimeoutState | Workflow `timeout` fired: set target before exit hooks |
 | 39 | CancelScheduledJobs | Tear down the abandoned state's timer jobs |
@@ -43,6 +43,10 @@
 Profiles remove irrelevant steps per trigger type (AutoChain drops 5/10/19/38, Scheduled/Event drop
 5/10, ErrorBoundary drops 5/10/25 and never pauses at 75). The profile is chosen from the
 **inbound** trigger type, not the transition definition.
+
+Because the ErrorBoundary profile drops step 25, a `resourceLock` on a transition reached **through an
+error boundary** never runs (publish warning since 0.0.106). Pipeline-step failures other than
+`Execution:200010` are not boundary-routable — they fault the instance as before (`resource-lock.md` §2.1).
 
 ### Sync or async — `executionType` (0.0.99, #1037)
 
@@ -243,5 +247,6 @@ Meta: migration `sync-response-no-longer-carries-extensions`, deprecation
 - vnext-docs: `concepts/transition-pipeline.md`, `how-to/async-sync.md`, `components/workflow.md` §Annotations, §Transition Yürütme Modeli
 - Fixtures `vnext-example`: `core/Workflows/timeout-lab/timeout-lab-root.json`, `core/Workflows/schedule-after-auto/`, `core/Workflows/parallel-variable-key-lab/`
 - PRs: #877 (Busy-as-mutex), #884 (`+Self` only for updateData), #859 (well-known discovery), #917 (updateData no lock/guard), #943 (Auto 80 before Schedule 90), #984 (extensions read-only), #1037 (`executionType`), #1067 (10 MB async body), #1072 (`variableKey`), #1085 (SubFlow transition proxy)
+- vnext PR #1143 (0.0.106): `TransitionPipeline.TryRouteByErrorBoundary`, `BoundaryRoutableErrorCodes`, `NonFaultingErrorCodes`
 - vnext PR #1225 (0.0.105) / vnext-schema #169 (0.0.60): `transitions[].schemas`, `TransitionSchemaResolver`, `Transition:100025`; vnext `docs/runtime/function-contract-resolution.md` § Transitions
 - vnext-meta: `wellKnownTransitionDiscovery` 0.0.79, `selfTargetPipelineProfile` (stale order note), `stateAnnotations` 0.0.95, `executionType` 0.0.99, `taskVariableKey` 0.0.99

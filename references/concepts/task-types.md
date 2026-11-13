@@ -4,7 +4,7 @@
 
 ## 1. Catalog
 
-"Runs" is the v0.0.105 **shipped default** — where the prepared binding executes. It is host configuration, not a task field (§2).
+"Runs" is the v0.0.106 **shipped default** — where the prepared binding executes. It is host configuration, not a task field (§2).
 
 | # | Name | Wire name | Runs (default) | Status | Notes |
 |---|------|-----------|----------------|--------|-------|

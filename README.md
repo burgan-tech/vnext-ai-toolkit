@@ -2,7 +2,7 @@
 
 > Claude Code plugin for building [vNext](https://burgan-tech.github.io/vnext-docs/) workflow-domain components with AI assistance — analyze a request, design it, author the JSON, validate, security-review, and document it. Built for projects scaffolded from [`@burgan-tech/vnext-template`](https://github.com/burgan-tech). **Schema-first**: every component is authored against the JSON Schemas shipped in `@burgan-tech/vnext-schema` (pinned in the project's `package.json`), never from hardcoded assumptions.
 
-**Runtime coverage:** the toolkit describes vNext runtime **0.0.105** / schema **0.0.60** (both still unreleased on vnext / vnext-schema master when this was written; 0.0.104 is the latest released runtime). `vnext-meta` is read live from vnext master (`scripts/vnext-meta-live.sh`); [`references/runtime-feature-matrix.md`](references/runtime-feature-matrix.md) is its offline snapshot (feature → since-version). See "Updating runtime knowledge" below.
+**Runtime coverage:** the toolkit describes vNext runtime **0.0.106** / schema **0.0.61** (both released 2026-11-13). `vnext-meta` is read live from vnext master (`scripts/vnext-meta-live.sh`); [`references/runtime-feature-matrix.md`](references/runtime-feature-matrix.md) is its offline snapshot (feature → since-version). See "Updating runtime knowledge" below.
 
 **Who it is for:** product teams that build vNext domains. They work in their own domain repository and have no write access to the vNext runtime, vnext-schema, vnext-docs or vnext-example repositories — the toolkit only *reads* those, and routes runtime defects to `/vnext-ai-toolkit:report-issue`.
 
@@ -175,7 +175,7 @@ vnext-ai-toolkit/
 │   │                                 #   subflow-overrides, roles-and-authorization, instance-query,
 │   │                                 #   incidents-and-retry, runtime-operations, observability,
 │   │                                 #   schema-runtime-gaps, csx-contracts, field-protection,
-│   │                                 #   file-fields, row-security, schema-vocabularies, ...
+│   │                                 #   file-fields, row-security, resource-lock, schema-vocabularies, ...
 │   ├── runtime-feature-matrix.md     # GENERATED offline snapshot of vnext-meta (scripts/sync-vnext-meta.sh)
 │   ├── decision-tree.md  external-sources.md
 │   └── view-author-guide.md  function-mapping-pattern.md  mocklab-seed-format.md
