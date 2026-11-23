@@ -19,6 +19,10 @@ npm run validate
 ```
 
 Fix failures with the `validate-and-fix` skill first. A file the validator refuses is never sent.
+Warnings about the package itself (a missing file in its `files` list) do not block a publish.
+
+The domain's namespace is `<env>-vnext-<domain>` — environment `dev` and domain `orders` give
+`dev-vnext-orders`. Use that name in every command below.
 
 ## 2. Prove where the writes will go, and that you may
 
@@ -37,13 +41,17 @@ oc -n <env>-vnext-<domain> get svc
 
 ## 3. Forward, and check what answers
 
+The forward blocks its shell, so run it in the background and keep its pid:
+
 ```bash
-oc -n <env>-vnext-<domain> port-forward svc/<orchestrator service> <local port>:<service port>
+nohup oc -n <env>-vnext-<domain> port-forward svc/<orchestrator service> <local port>:<service port> > /tmp/vnext-forward.log 2>&1 &
+echo $! > /tmp/vnext-forward.pid
 curl -s -o /dev/null -w '%{http_code}\n' http://localhost:<local port>/health
-oc -n <env>-vnext-<domain> get deploy <orchestrator deployment> -o jsonpath='{..image}'
+oc -n <env>-vnext-<domain> get deploy <orchestrator service> -o jsonpath='{..image}'
 ```
 
-Pick a local port nothing else uses (4201 is the local runtime's). The image tag is the runtime version the
+The Deployment carries the Service's name. Pick a local port nothing else uses — 4201 is the local
+runtime's; something in the 4300s is a safe habit. `200` from `/health` is the forward working. The image tag is the runtime version the
 domain actually runs — compare it with the workspace's `runtimeVersion` and say so when they differ.
 
 ## 4. List, ask, publish
@@ -80,7 +88,14 @@ PATCH <origin>/api/v1/<domain>/workflows/<flow>/instances/<key>/transitions/<tra
 
 The answer carries `flowVersion` — the version that actually ran. On a 500, read the orchestrator's log
 (`oc -n <namespace> logs deploy/<orchestrator deployment>`); the fix is a new version, because a published
-one cannot be replaced. Then stop the forward.
+one cannot be replaced.
+
+Then stop the forward and see that it is gone — a forward left open is a path to a shared runtime:
+
+```bash
+kill "$(cat /tmp/vnext-forward.pid)"; rm -f /tmp/vnext-forward.pid
+curl -s -o /dev/null -m 3 -w '%{http_code}\n' http://localhost:<local port>/health    # 000 = closed
+```
 
 In the back-office client, the domain's Flows list shows each published flow by key.
 
