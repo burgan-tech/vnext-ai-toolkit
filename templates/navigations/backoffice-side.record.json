@@ -1,0 +1,55 @@
+{
+  "key": "backoffice-side",
+  "tags": [
+    "{{domain}}",
+    "navigation"
+  ],
+  "attributes": {
+    "items": [
+      {
+        "type": "dynamicView",
+        "version": "v1",
+        "key": "{{domain}}-{{workflowKey}}",
+        "title": [
+          {
+            "language": "tr-TR",
+            "label": "{{titleTr}}"
+          },
+          {
+            "language": "en-US",
+            "label": "{{titleEn}}"
+          }
+        ],
+        "icon": "list_alt",
+        "config": {
+          "view": "urn:client:view:open:{{shellDomain}}:instance-list",
+          "tabTone": "list",
+          "inputs": [
+            {
+              "name": "q",
+              "inQuery": true,
+              "description": "The list's page, sort and filters as one opaque token."
+            }
+          ],
+          "payload": {
+            "domain": "{{domain}}",
+            "workflow": "{{workflowKey}}",
+            "title": "{{titleEn}}",
+            "create": {
+              "label": [
+                {
+                  "language": "tr-TR",
+                  "label": "{{createTr}}"
+                },
+                {
+                  "language": "en-US",
+                  "label": "{{createEn}}"
+                }
+              ]
+            }
+          }
+        }
+      }
+    ]
+  }
+}

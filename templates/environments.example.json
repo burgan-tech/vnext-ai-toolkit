@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to .vnext/environments.local.json (git-ignored). One entry per environment; every value is yours — the toolkit ships none.",
+  "environments": {
+    "<env>": {
+      "clientUrl": "https://<env>-vnext-client-<tech>-<name>.<apps domain>",
+      "clusterApi": "https://api.<cluster>:6443",
+      "namespaceTemplate": "<env>-vnext-{domain}",
+      "shellDomain": "staff"
+    }
+  }
+}
