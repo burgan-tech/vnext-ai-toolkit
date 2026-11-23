@@ -6,15 +6,16 @@ description: Use when a domain's flows should appear in the back-office client's
 # backoffice-menu — give the domain its group in the left menu
 
 A domain with flows published shows nothing in the back-office client's menu until it answers the client's
-discovery. The contract — the two questions, the three pieces, the shape of an item — is
-`references/concepts/backoffice-navigation.md`. Read it first; this skill is the order of work.
+discovery. The contract — the two questions, the three pieces, the shape of an item — is the plugin's
+`${CLAUDE_PLUGIN_ROOT}/references/concepts/backoffice-navigation.md`. Read it first; this skill is the order of work.
 
 Adding the flow and its schema is authoring components: where a plan gate is in force, it applies here.
 Changing an existing menu is only data and needs none.
 
 ## 1. See what the domain already has
 
-Through a port-forward (the `cluster-publish` skill, steps 2–3):
+Through a port-forward — open it as the `cluster-publish` skill's steps 2–3 describe, and CLOSE it as its
+step 5 does when this skill is done, whether or not anything was published. URL-encode the `filter` value:
 
 ```
 GET <origin>/api/v1/<domain>/workflows/sys-flows/instances?filter={"key":{"eq":"navigations"}}&pageSize=1
@@ -58,7 +59,9 @@ A label, an added flow, a removed entry — all are this one move. Nothing is pu
 
 ## 5. Prove it in the client
 
-Reload the client. The group is named after the domain; the item opens the list; **Flow analysis** is on
+Reload the client — its address is found as `${CLAUDE_PLUGIN_ROOT}/references/concepts/domain-on-cluster.md` § Finding the addresses describes.
+Without a browser tool, ask the person to reload and say what they see; a read of the record is not this
+proof. The group is named after the domain; the item opens the list; **Flow analysis** is on
 it; **New** is there when the entry carries `create`; a row opens the record with the flow's moves in its
 Transitions menu. Report what the screen showed, not what the calls answered.
 

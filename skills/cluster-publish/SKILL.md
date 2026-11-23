@@ -6,9 +6,9 @@ description: Use when the user wants this workspace's components loaded into a d
 # cluster-publish — load the workspace into a domain on a cluster
 
 There is no upload in the back-office client, and definition publish is not behind the gateway. The way in
-is a port-forward to the domain's own orchestrator and a plain HTTP publish, named out loud. Background:
-`references/concepts/domain-on-cluster.md`; what publish does and the cache event it needs:
-`references/concepts/runtime-operations.md`.
+is a port-forward to the domain's own orchestrator and a plain HTTP publish, named out loud. Background, both in the plugin rather than the workspace:
+`${CLAUDE_PLUGIN_ROOT}/references/concepts/domain-on-cluster.md`; what publish does and the cache event it needs:
+`${CLAUDE_PLUGIN_ROOT}/references/concepts/runtime-operations.md`.
 
 Needs: `oc` signed in, Node 18+, and a workspace that validates.
 

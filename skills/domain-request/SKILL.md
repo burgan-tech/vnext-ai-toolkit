@@ -7,7 +7,8 @@ description: Use when the user wants a NEW vNext domain opened on a platform-man
 
 A domain on a platform-managed cluster is requested through the back-office client, approved by a person and
 built by the environment's agent. This skill is the order of work; the stages, the names and how addresses
-are found are in `references/concepts/domain-on-cluster.md` — read it first.
+are found are in the plugin's `${CLAUDE_PLUGIN_ROOT}/references/concepts/domain-on-cluster.md` — read it first (it is in the plugin, not in
+the workspace).
 
 It applies where the platform's management domain and back-office client are deployed. Without them there
 is nothing to request: say so and stop.
@@ -29,8 +30,8 @@ Ask for what is missing; never invent a name or a directory user.
 |---|---|
 | Environment | one the client offers in its picker |
 | Domain name | `^[a-z][a-z0-9-]{0,28}[a-z0-9]$`, not already listed among the client's domains |
-| Description, owner team | read by the approver; owner team is required |
-| Access | 1–10 directory user names. **Include whoever will publish** — only these can reach the namespace |
+| Description, owner team | read by the approver; owner team is required, the description is optional |
+| Access | 1–10 directory user names. **Include whoever will publish** — only these can reach the namespace. Do not assume the requester is added: name them |
 | Capacity | one of the environment's profiles; the default is prefilled |
 | Dependencies | postgres · redis · kafka — only what the environment allows; defaults are prefilled |
 | Packages | the mandatory ones are prefilled. An application package only when the domain will carry a client's configuration |
@@ -39,6 +40,14 @@ Ask for what is missing; never invent a name or a directory user.
 
 Resolve the back-office client's address as `domain-on-cluster.md` § Finding the addresses describes: the
 workspace's local file, else composed from `oc` and proved by opening it, else asked. Say which it was.
+
+- The proof is the client's own first screen: it asks the person to **choose an environment**. A page that
+  merely answers 200 is not it. A cluster's routes often carry an internal certificate — a browser shows a
+  warning the person accepts, and `curl` needs `-k` to read the page.
+- Outside a vNext workspace (no `vnext.config.json`) there is no local file to write: report the address
+  and go on.
+- Whether the name is free and which environments exist are read on the client's own screens (its Domains
+  list, the wizard's Environment picker) once the person has signed in — there is no other way to ask.
 
 ## 3. Walk the wizard
 
@@ -49,8 +58,8 @@ values and confirm from the screen they describe.
 2. `2 · Access` — the directory users → **Continue**. A person who prefers to type their own user name does so
    in the open form; then continue.
 3. `3 · Capacity` — leave the defaults unless asked → **Continue**.
-4. `Packages` → **Continue**.
-5. `4 · Summary`.
+4. `Packages` → **Continue**. This form carries no number.
+5. `4 · Summary` — the fifth screen, numbered four.
 
 The next form appearing is the proof the last one was accepted; allow it up to 90 seconds. A refusal returns
 to the SAME step with its reason — read it, it names the cause.
