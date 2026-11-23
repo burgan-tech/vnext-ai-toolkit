@@ -15,8 +15,9 @@ Changing an existing menu is only data and needs none.
 ## 1. See what the domain already has
 
 Through a port-forward — load the `cluster-publish` skill (do not read its file by path) and open the
-forward as its steps 2–3 describe; CLOSE it as its step 5 does when this skill is done, whether or not
-anything was published. URL-encode the `filter` value:
+forward as its steps 2–3 describe. When this skill is done, CLOSE it with the last commands of that
+skill's step 5 (the kill and the two checks) — the record-starting part of that step is for a publish
+and does not apply to a menu change. URL-encode the `filter` value:
 
 ```
 GET <origin>/api/v1/<domain>/workflows/sys-flows/instances?filter={"key":{"eq":"navigations"}}&pageSize=1
@@ -47,7 +48,8 @@ PATCH <origin>/api/v1/<domain>/workflows/navigations/instances/backoffice-side/t
 ```
 
 Per item, settle with the person: which flow, the title in each language, and whether people may create
-records from the list. **No `payload.create`, no New button.**
+records from the list. The New button is drawn only for an entry that carries `payload.create`: keep it
+to offer the button, leave it out to offer none.
 
 ## 4. Change an existing menu
 
@@ -58,13 +60,14 @@ record in step 1 and save its `key`, `tags` and `attributes` there first) and se
 PATCH <origin>/api/v1/<domain>/workflows/navigations/instances/backoffice-side/transitions/update?sync=true   { "attributes": { "items": [ … ] } }
 ```
 
-A label, an added flow, a removed entry — all are this one move. Nothing is published.
+A label, an added flow, a removed entry — all are this one move. Nothing is published. The body carries
+`attributes` only; the record's `key` and `tags` are not sent and do not change.
 
 ## 5. Prove it in the client
 
 Reload the client — its address is found as `${CLAUDE_PLUGIN_ROOT}/references/concepts/domain-on-cluster.md` § Finding the addresses describes.
 Without a browser tool, ask the person to reload and say what they see; a read of the record is not this
-proof. The group is named after the domain; the item opens the list; **Flow analysis** is on
+proof — when nobody can look, report the screen as NOT verified rather than as done. The group is named after the domain; the item opens the list; **Flow analysis** is on
 it; **New** is there when the entry carries `create`; a row opens the record with the flow's moves in its
 Transitions menu. Report what the screen showed, not what the calls answered.
 

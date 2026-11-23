@@ -51,7 +51,7 @@ oc -n <env>-vnext-<domain> get deploy <orchestrator service> -o jsonpath='{..ima
 ```
 
 The Deployment carries the Service's name. Pick a local port nothing else uses — 4201 is the local
-runtime's; something in the 4300s is a safe habit. `200` from `/health` is the forward working; it can take a few seconds to answer, so retry before
+runtime's; something in the 4300s is a safe habit (`lsof -i :<local port>` printing nothing means it is free). `200` from `/health` is the forward working; it can take a few seconds to answer, so retry before
 concluding anything. The image tag is the runtime version the
 domain actually runs — compare it with the workspace's `runtimeVersion` and say so when they differ.
 
@@ -71,7 +71,7 @@ Read the lines, not the exit code:
 | Mark | Meaning |
 |---|---|
 | `✓ [200]` | landed |
-| `= [409]` | this key and version is already there. Right for an unchanged file; a CHANGED file needs a new version. **A 409 does not say the content matches** — the script compares nothing. A file edited since its last publish and not re-versioned is silently NOT loaded; check the workspace's own diff before trusting a run that sent nothing |
+| `= [409]` | this key and version is already there. Right for an unchanged file; a CHANGED file needs a new version. **A 409 does not say the content matches** — the script compares nothing. A file edited since its last publish and not re-versioned is silently NOT loaded; before trusting a run that sent nothing, check what changed since the last publish (the repository's diff; without one, ask the person what they edited) |
 | `✗ [400]` | refused and not landed — fix and publish again |
 
 **Never `wf update` or `wf reset` against a forwarded runtime.** They delete the existing key and version row
@@ -88,7 +88,9 @@ POST  <origin>/api/v1/<domain>/workflows/<flow>/instances/start?sync=true     { 
 PATCH <origin>/api/v1/<domain>/workflows/<flow>/instances/<key>/transitions/<transition>?sync=true   { "attributes": { … } }
 ```
 
-`attributes` follows the flow's start schema (`attributes.startTransition.schema` in the workflow file).
+`attributes` follows the schema the move names — `attributes.startTransition.schema` for the start,
+`states[].transitions[].schema` for a transition. Each is a reference; the fields are in that schema's own
+file under the Schemas folder.
 The answer carries `flowVersion` — the version that actually ran. On a 500, read the orchestrator's log
 (`oc -n <namespace> logs deploy/<orchestrator deployment>`); the fix is a new version, because a published
 one cannot be replaced.
@@ -98,6 +100,7 @@ Then stop the forward and see that it is gone — a forward left open is a path 
 ```bash
 kill "$(cat /tmp/vnext-forward.pid)"; rm -f /tmp/vnext-forward.pid
 curl -s -o /dev/null -m 3 -w '%{http_code}\n' http://localhost:<local port>/health    # 000 = closed
+pgrep -fl 'port-forward svc/<orchestrator service>' || echo 'no forward process'
 ```
 
 In the back-office client, the domain's Flows list shows each published flow by key.

@@ -52,14 +52,18 @@ workspace's local file, else composed from `oc` and proved by opening it, else a
 
 ## 3. Walk the wizard
 
-Domains › All › **New domain**. With a browser tool, drive it; without one, give the person each step's
+Domains › All › **New domain** — `Domains` is a collapsed group low in the left menu; expand it to reach
+`All` and `Requests`. A dialog that is not part of the wizard (a prompt to update a profile detail, a
+notice) is dismissed with its "later" button, never filled in. With a browser tool, drive it; without one, give the person each step's
 values and confirm from the screen they describe.
 
 1. `1 · Environment and name` — Environment (a picker), Domain name, Description, Owner team → **Continue**.
 2. `2 · Access` — one text box, `Sicils with access` (a sicil is a directory user name) → **Continue**. A
    person who prefers to type their own does so in the open form; then continue.
-3. `3 · Capacity` — `Capacity profile` (prefilled), a `Customise the values` switch, and the three dependency
-   pickers (Postgres · Redis · Kafka, prefilled). Leave all of it unless asked → **Continue**.
+3. `3 · Capacity` — `Capacity profile` (a text box, prefilled with the default profile's name), a
+   `Customise the values` switch, and the three dependency pickers (Postgres · Redis · Kafka, prefilled; an
+   option reads "The environment's shared one" or "The domain's own", which the summary words as `shared`
+   and `dedicated`). Leave all of it unless asked → **Continue**.
 4. `Packages` — `vNext packages`, a multi-select of chips → **Continue**. This form carries no number.
 5. `4 · Summary` — the fifth screen, numbered four. Its sections are headed `1 · Environment and name`,
    `2 · Access`, `3 · Capacity and dependencies`, `4 · vNext packages`.
@@ -81,13 +85,18 @@ was chosen: reopen the step from the summary (its edit buttons are `Environment 
 
 ## 4. Stop at the summary
 
+The summary's moves are a row at the very BOTTOM of the page — scroll to it: **Send for approval** first,
+the edit buttons, **Abandon** last.
+
 Read back the environment, the name, the namespace it will get, the access list, the capacity and the
 packages. Say which values you supplied rather than the person. **Send for approval** only on their yes.
 
 A walk that must build nothing ends with **Abandon** — offered on the summary and while awaiting approval.
 It is two clicks: Abandon opens a dialog titled `Abandon` with an optional `Reason`, and that dialog's
 **Submit** is what abandons (it sends nothing for approval). The record's tab then closes back to the
-Domains list; **Domains › Requests** shows the request as `Abandoned`.
+Domains list; **Domains › Requests** shows the request as `Abandoned`. That list names no domain — find
+the row by its Created time and open it (inside the client) to read the Domain before saying which
+request was abandoned.
 
 ## 5. Approval and the build
 
