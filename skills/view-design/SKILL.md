@@ -170,6 +170,22 @@ If the user wants the view bound now, edit the target workflow JSON's state to a
 
 Then re-run `npm run validate`.
 
+A view binds in one of three places, and each is the same reference object:
+
+| Screen | Bound at | Display |
+|---|---|---|
+| what a state shows | `states[].view` | full page; reads the record through `$instance` |
+| the form of a move | `states[].transitions[].view` | a popup over the state; its inputs `bind` the transition schema's fields and its action submits `urn:vnext:flow:transition:{domain}:{flow}:{transition}` |
+| what a finished record shows | the final state's `view` | full page |
+
+- **Binding a view is an edit to the FLOW.** The workflow gets a new version and is published again; a
+  published version cannot be replaced. A transition schema that gains a field for the form is bumped with it.
+- **A flow with no views still opens**: the client says the stage has no view, lists the record's fields and
+  generates a form per move from its schema. Usable for a first load, bare for people — give a flow its
+  state screens and its move forms before calling it done.
+- Take `display` values from the canonical schema (step "Canonical schema-first"): a value a client draws
+  is not always one the published schema accepts.
+
 ## Notes
 
 - Never hardcode `core/Views/...` — always resolve from `vnext.config.json`.

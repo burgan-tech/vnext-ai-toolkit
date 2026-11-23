@@ -58,7 +58,10 @@
     "./skills/security-audit",
     "./skills/e2e-local",
     "./skills/domain-check",
-    "./skills/report-runtime-issue"
+    "./skills/report-runtime-issue",
+    "./skills/domain-request",
+    "./skills/cluster-publish",
+    "./skills/backoffice-menu"
   ],
   "references": [
     "references/decision-tree.md",
@@ -94,7 +97,9 @@
     "references/concepts/field-protection.md",
     "references/concepts/row-security.md",
     "references/concepts/resource-lock.md",
-    "references/concepts/file-fields.md"
+    "references/concepts/file-fields.md",
+    "references/concepts/domain-on-cluster.md",
+    "references/concepts/backoffice-navigation.md"
   ],
   "vnext": {
     "knownRuntimeVersion": "0.0.106",
