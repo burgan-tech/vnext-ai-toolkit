@@ -53,12 +53,103 @@ claude /vnext-ai-toolkit:new-component workflow account-opening "Open a new curr
 # 2b. ...or design a whole workflow end-to-end with the architect orchestrator
 claude /vnext-ai-toolkit:vnext-design-process "Account opening"
 
+# 2c. ...or build a WHOLE process from its written description (docs/process/ by default):
+#     decomposes into flows, stops for your approval of the process map, authors every component,
+#     then asks whether to run the tests and whether to publish
+claude /vnext-ai-toolkit:process-build
+
 # 3. Validate everything (and offer to fix failures)
 claude /vnext-ai-toolkit:validate
 
 # 4. Build the domain package
 claude /vnext-ai-toolkit:build
 ```
+
+## From a process description to a running domain
+
+The skills below are started by a sentence, in English or Turkish, or by name with `/vnext-ai-toolkit:<skill>`.
+Every value in these examples is a placeholder — the toolkit ships no address, user or domain name.
+
+| Placeholder | What it stands for |
+|---|---|
+| `dev` | an environment |
+| `orders` | a domain name (its namespace becomes `dev-vnext-orders` and cannot change later) |
+| `<USER>` | a directory user name that gets access to the domain's namespace |
+| `orders-team` | the owning team |
+| `order-request` | the key of a flow in that domain |
+
+### 1. Describe the process, then build it
+
+Put the description under `docs/process/` — `templates/process/PROCESS.md.tmpl` is the outline an analyst
+fills in — and run:
+
+```text
+/vnext-ai-toolkit:process-build
+```
+
+```text
+/vnext-ai-toolkit:process-build docs/process/order-request.md
+```
+
+To see only how it would be split, without writing a component:
+
+```text
+How would you split the process under docs/process/ into vNext flows? Write the map, build nothing.
+```
+
+`process-build` stops at three points and goes by your answers:
+
+1. **The process map** — the flows, the reason for each split, the assumptions. Nothing is authored before your yes.
+2. **"Run the tests in Testcontainers now?"** — after everything is written and validated.
+3. **"Publish to the cluster?"** — asked separately; a yes to the tests is not a yes to this.
+
+Its report starts with how far it got: *written and validated*, *ran locally*, or *ran on the cluster*.
+
+### 2. Open the domain on the cluster
+
+```text
+Open a domain on the cluster: environment dev, name "orders", access <USER>, owner team orders-team. Stop at the summary.
+```
+
+A rehearsal that builds nothing:
+
+```text
+Walk the domain request wizard for "orders-rehearsal" to the summary, then abandon it.
+```
+
+You sign in and you click **Approve and build**; the skill never types a password and never approves.
+
+### 3. Load the workspace into it
+
+```text
+The orders domain is open on dev. Load this workspace's definitions. Show me what would be sent first.
+```
+
+It proves the target and your rights, lists the files (`DRY`), publishes on your yes and starts a record to
+prove the load runs. You need an `oc` session and to be one of the domain's access users.
+
+### 4. Put it in the back-office menu
+
+```text
+Add the orders domain to the left menu: the order-request flow's list under the title "Orders", with a "New order" button.
+```
+
+```text
+Change the new-record button's label in the orders menu to "New order".
+```
+
+### All of it in one request
+
+```text
+Open the "orders" domain on dev (access <USER>, owner team orders-team), build the process under docs/process/,
+load it and add it to the left menu.
+```
+
+One request still stops for you at the sign-in, the request summary, the approval click, the process map,
+the two closing questions and the publish list.
+
+Turkish works the same: "dev ortamında orders domainini aç", "tanımları cluster'a yükle", "sol menüye ekle",
+"docs/process altındaki süreci vNext'e çevir".
 
 ## The agent pipeline
 
