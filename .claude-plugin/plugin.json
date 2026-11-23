@@ -42,7 +42,8 @@
     "./commands/security-audit.md",
     "./commands/e2e.md",
     "./commands/domain-check.md",
-    "./commands/report-issue.md"
+    "./commands/report-issue.md",
+    "./commands/process-build.md"
   ],
   "skills": [
     "./skills/authoring-vnext-components",
@@ -61,7 +62,8 @@
     "./skills/report-runtime-issue",
     "./skills/domain-request",
     "./skills/cluster-publish",
-    "./skills/backoffice-menu"
+    "./skills/backoffice-menu",
+    "./skills/process-decompose"
   ],
   "references": [
     "references/decision-tree.md",
@@ -99,7 +101,8 @@
     "references/concepts/resource-lock.md",
     "references/concepts/file-fields.md",
     "references/concepts/domain-on-cluster.md",
-    "references/concepts/backoffice-navigation.md"
+    "references/concepts/backoffice-navigation.md",
+    "references/concepts/process-decomposition.md"
   ],
   "vnext": {
     "knownRuntimeVersion": "0.0.106",
