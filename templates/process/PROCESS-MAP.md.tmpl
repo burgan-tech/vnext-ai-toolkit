@@ -1,0 +1,46 @@
+# Process map — {{processName}}
+
+Source: {{sourcePaths}}
+Decided by `process-decompose`; the rules are in the toolkit's `process-decomposition.md`.
+Terms read from vnext-schema {{schemaVersion}}.
+
+## Flows
+
+| Key | Type | Started by | Parent | Decided from (quoted) |
+|---|---|---|---|---|
+| | `F` / `S` / `P` | | — | |
+
+## Per flow
+
+### <flow key>
+
+- **States:** key · `stateType` (and `subType` when it has one) · who acts · view · timeout, if it has one
+- **Transitions:** from → to · `triggerType` as the schema names it · schema · tasks
+- **Starts:** which child flows, from which state or transition, what goes in, what comes back
+
+## Components
+
+| Type | Key | Used by | External dependency | Build order | Status |
+|---|---|---|---|---|---|
+| schema | | | — | 1 | waiting |
+
+Status is one of `waiting` · `written` · `validated` · `test written` · `test green`.
+Build order: schemas → tasks and functions → views → `S` and `P` flows → `F` flows.
+
+## External systems
+
+| System | Called by | Endpoint and credentials | Written against |
+|---|---|---|---|
+| | | | the real service / MockLab |
+
+## Not split, and why
+
+<!-- Steps that looked separable and stayed in their flow, one line each. -->
+
+## Assumptions
+
+<!-- Where the source is silent and one ordinary reading was taken: the assumption, and what it replaces. -->
+
+## Open questions
+
+<!-- Everything the source does not answer. While this section is not empty, nothing is built. -->

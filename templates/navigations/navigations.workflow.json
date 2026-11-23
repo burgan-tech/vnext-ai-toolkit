@@ -1,0 +1,180 @@
+{
+  "key": "navigations",
+  "version": "1.0.0",
+  "domain": "{{domain}}",
+  "flow": "sys-flows",
+  "flowVersion": "1.0.0",
+  "tags": [
+    "{{domain}}",
+    "config",
+    "navigations"
+  ],
+  "attributes": {
+    "type": "F",
+    "labels": [
+      {
+        "language": "en-US",
+        "label": "navigations (navigation-group)"
+      },
+      {
+        "language": "tr-TR",
+        "label": "navigations"
+      }
+    ],
+    "schema": {
+      "key": "navigations-master",
+      "domain": "{{domain}}",
+      "flow": "sys-schemas",
+      "version": "1.0.0"
+    },
+    "startTransition": {
+      "key": "create",
+      "target": "draft",
+      "triggerType": 0,
+      "versionStrategy": "Minor",
+      "schema": {
+        "key": "navigations-master",
+        "domain": "{{domain}}",
+        "version": "1.0.0",
+        "flow": "sys-schemas"
+      },
+      "labels": [
+        {
+          "language": "en-US",
+          "label": "Create navigation record"
+        }
+      ]
+    },
+    "states": [
+      {
+        "key": "draft",
+        "stateType": 1,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "Draft"
+          }
+        ],
+        "transitions": [
+          {
+            "key": "activate",
+            "target": "active",
+            "triggerType": 0,
+            "versionStrategy": "Minor",
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "Activate"
+              }
+            ]
+          },
+          {
+            "key": "archive",
+            "target": "archived",
+            "triggerType": 0,
+            "versionStrategy": "Minor",
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "Archive"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "active",
+        "stateType": 2,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "Active"
+          }
+        ],
+        "transitions": [
+          {
+            "key": "update",
+            "target": "active",
+            "triggerType": 0,
+            "versionStrategy": "Minor",
+            "schema": {
+              "key": "navigations-master",
+              "domain": "{{domain}}",
+              "version": "1.0.0",
+              "flow": "sys-schemas"
+            },
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "Update"
+              }
+            ]
+          },
+          {
+            "key": "deactivate",
+            "target": "passive",
+            "triggerType": 0,
+            "versionStrategy": "Minor",
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "Deactivate"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "passive",
+        "stateType": 2,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "Passive"
+          }
+        ],
+        "transitions": [
+          {
+            "key": "activate",
+            "target": "active",
+            "triggerType": 0,
+            "versionStrategy": "Minor",
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "Activate"
+              }
+            ]
+          },
+          {
+            "key": "archive",
+            "target": "archived",
+            "triggerType": 0,
+            "versionStrategy": "Minor",
+            "labels": [
+              {
+                "language": "en-US",
+                "label": "Archive"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "key": "archived",
+        "stateType": 3,
+        "versionStrategy": "Minor",
+        "labels": [
+          {
+            "language": "en-US",
+            "label": "Archived"
+          }
+        ],
+        "transitions": []
+      }
+    ]
+  }
+}

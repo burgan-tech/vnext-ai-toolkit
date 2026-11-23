@@ -8,6 +8,17 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
 ### Added
 
+- **`/vnext-ai-toolkit:process-build`** (new command) builds a whole process from its description — a markdown file, a folder, or the workspace's `docs/process/`. It decomposes, stops for approval of the process map, writes one `docs/<Type>/<key>.md` spec per component so the existing pipeline derives each docs-first, authors in dependency order, validates and writes the lifecycle tests. Running the tests in Testcontainers and publishing to the cluster are each ASKED afterwards; the report says how far it got (written and validated / ran locally / ran on the cluster).
+- **`process-decompose`** (new skill) makes the one-flow-or-several decision in writing: top-level flow, SubFlow, SubProcess, function, FanOut. Every split carries the sentence it was decided from; what the description does not answer becomes an open question, and a map with open questions is not built.
+- **`references/concepts/process-decomposition.md`** (new) holds the rules — the default is one flow, the test that tells `S` from `P`, and what is NOT a reason to split. Templates: `templates/process/PROCESS.md.tmpl` for the description and `PROCESS-MAP.md.tmpl` for the map.
+
+- **Three skills for a domain that runs on a cluster**, measured end to end on a real domain (request → build → load → menu → views) from a workspace of its own:
+  - **`domain-request`** opens a domain through the back-office client's request wizard and watches the build. The person signs in and approves; nothing is sent without a yes.
+  - **`cluster-publish`** loads the workspace through a port-forward to the domain's orchestrator, with **`scripts/cluster-publish.mjs`** (no default target, `DRY=1`, dependency order, sibling `.csx` inlined, `publish/completed` at the end). It warns off `wf update` / `wf reset` against a forwarded runtime: they delete rows from the Postgres on `DB_HOST`.
+  - **`backoffice-menu`** adds the `navigations` flow, its schema and the `backoffice-side` record the back-office client discovers. Templates in **`templates/navigations/`**.
+- **`references/concepts/domain-on-cluster.md`** and **`references/concepts/backoffice-navigation.md`** (new). The first covers the request stages, what a built domain has, and how the client and cluster addresses are FOUND — the toolkit ships none (`templates/environments.example.json` shows the local file's shape). The second covers the menu contract: the two discovery questions, the item shape, and why a New button appears.
+- **`view-design` step 10** names the three places a view binds, says that binding edits and re-versions the flow, and describes what a flow without views looks like.
+
 - **`references/concepts/resource-lock.md`** (new, copied into workspaces). It covers the `resourceLock` contract and the three answers to losing the race:
   - `Abort` (default): the instance is Faulted and the caller gets `409 Execution:200010`.
   - `Reject` (vnext #1143, runtime 0.0.106, schema 0.0.61): the instance is untouched and the caller gets `409 Execution:200014`, so it can repeat the same call.

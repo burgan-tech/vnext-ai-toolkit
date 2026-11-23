@@ -1,0 +1,427 @@
+{
+  "key": "navigations-master",
+  "version": "1.0.0",
+  "domain": "{{domain}}",
+  "flow": "sys-schemas",
+  "flowVersion": "1.0.0",
+  "tags": [
+    "{{domain}}",
+    "navigations",
+    "schema"
+  ],
+  "attributes": {
+    "type": "workflow",
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "$id": "https://vnext.io/schemas/{{domain}}/navigations-master.json",
+      "title": "navigations record (navigation-group)",
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "x-labels": {
+            "tr": "Menü öğeleri",
+            "en": "Menu items"
+          },
+          "description": "The menu, top to bottom. Every KEYED item (at any depth) also becomes a ROUTE — the sidebar and the route table are one structure, which is why a divider carries no key: a rule is not a destination. The record's `attributes` holds nothing else.",
+          "items": {
+            "$ref": "#/$defs/navItem"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "patternProperties": {
+        "^_": {}
+      },
+      "additionalProperties": false,
+      "$defs": {
+        "groupConfig": {
+          "type": "object",
+          "description": "Group presentation flags. Absent config entirely: the group renders expanded at depth 0, collapsed deeper — the defaultExpanded default below.",
+          "properties": {
+            "expandable": {
+              "type": "boolean",
+              "description": "In data everywhere, read by NOTHING — NavigationTree reads only defaultExpanded; every group is expandable in practice. Kept legal until deleted from records and here together."
+            },
+            "defaultExpanded": {
+              "type": "boolean",
+              "description": "Whether the subtree starts open. Absent means: open at depth 0, closed deeper (NavigationTree)."
+            }
+          },
+          "patternProperties": {
+            "^_": {}
+          },
+          "additionalProperties": false
+        },
+        "viewConfig": {
+          "type": "object",
+          "description": "dynamicView payload: WHICH backend view opens, and HOW its tab behaves. `key`+`domain` required: the seed guard only engages when both are present, every record carries both, and an unguarded pointer is the silent-404 failure this schema exists to prevent.",
+          "properties": {
+            "view": {
+              "type": "string",
+              "description": "The view this route MOUNTS, as a URN: `urn:client:view:open:<domain>:<key>`. Replaces the old {key,domain,version,flow} 4-tuple — one address, and NO version (a view is fetched by KEY, so a nav ref never pinned a version that mattered; dropping it ends the bump cascade for nav view refs). `flow` is always sys-views for a view, so it is implicit. The route KEEPS the nav item's own key as its identity — only the view REFERENCE became a URN."
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "description": "View key (sys-views component) this route renders. Fetched by KEY at open time — a key that is not published opens an empty surface, every call returning 200."
+            },
+            "domain": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Domain hosting the view. Cross-domain is ordinary (mobile's items point at staff views; the bench items point at sample). Required so the seed guard always engages — it verifies the {key,domain,version} resolves to a sys-views component on disk before seeding."
+            },
+            "version": {
+              "type": "string",
+              "description": "Exact version pin. INERT at runtime (the fetch is by key — CLAUDE.md gotcha) but the seed guard compares it to the on-disk version and FAILS the seed on drift: it keeps the file truthful, which is how 18 stale refs were found in staff."
+            },
+            "flow": {
+              "type": "string",
+              "description": "Component type of the target — always 'sys-views' here. Read by neither guard (it infers type from the item's `type`) nor client; carried for humans and bump-refs."
+            },
+            "singletonKey": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "description": "A payload field name; dot-paths reach into nested payloads ('person.key')."
+              },
+              "description": "PAYLOAD fields that form the tab's identity under singleton lifetime: same route + same values in these fields = the SAME tab (re-activated), different values = a new tab. E.g. ['instanceId'] gives one detail tab per record. Absent: identity is the route key alone — one tab total for the route."
+            },
+            "lifetime": {
+              "type": "string",
+              "enum": [
+                "singleton",
+                "transient"
+              ],
+              "description": "Tab identity policy (page-router). 'singleton': a tab IS its (routeKey + singletonKey values) pair — navigating to the same identity re-activates the existing tab, and a replayed route (history, a restored session) lands on the tab it already opened. 'transient': EVERY navigation opens a new tab and payload identity is dropped — which also means replayed routes cannot find their tab again; measured on instance-start, transient was the WRONG fix for 'New only works once' (the real cause was a renderer guard). Absent means 'singleton'. Pick transient only when two simultaneous copies of the same identity is the actual requirement."
+            },
+            "presentation": {
+              "type": "string",
+              "enum": [
+                "surface",
+                "overlay"
+              ],
+              "description": "How the route presents. 'surface': an ordinary routed page in the tab content area — the default and the overwhelming case. 'overlay': presented OVER the current surface via router.presentOverlay (the router owns all overlays; the host decides what one looks like — dialog on web, sheet on mobile). The enum matters because the code only recognises the literal 'overlay' — anything else silently means surface, so a typo ('modal') would demote a dialog to a page without a word. Absent means surface."
+            },
+            "overlayScope": {
+              "type": "string",
+              "enum": [
+                "tab",
+                "app"
+              ],
+              "description": "Only meaningful with presentation:'overlay'. 'tab': the overlay is anchored to the tab that opened it — hidden while that tab is inactive, dismissed with it. 'app': the overlay spans the whole app above the tab strip — survives tab switches; for things that concern the session, not one record. Absent means 'tab'."
+            },
+            "overlayModality": {
+              "type": "string",
+              "enum": [
+                "dismissible",
+                "mandatory"
+              ],
+              "description": "Only meaningful with presentation:'overlay'. 'dismissible': X/backdrop closes it — the user may walk away. 'mandatory': no dismiss affordance — the overlay must be resolved through its own flow (a forced re-auth, a required consent). Absent means 'dismissible'. Pick mandatory sparingly: it takes the whole surface hostage by design."
+            },
+            "tabTone": {
+              "type": "string",
+              "description": "SEMANTIC tone of the tab — 'list' (a collection) and 'record' (one record's detail) are the two the themes style today (tab-list-*/tab-record-* tokens). Declared HERE because the item is the only thing that knows which kind of surface a route opens. Never a colour: a hex would survive neither the dark theme nor a rebrand. Absent: the neutral tab palette."
+            },
+            "tabSubtitle": {
+              "$ref": "#/$defs/localizedText",
+              "description": "Tab's second line. '{{payloadKey}}' templates interpolate from the tab payload at open time ('{{deviceId}}'); an entry whose template does not resolve is dropped by the host rather than shown raw. Absent: single-line tab."
+            },
+            "dataSource": {
+              "type": "string",
+              "description": "Host-side data feed for the view: the host fetches something and hands it to the view as $instance.*. The one value read today is 'transitionHistory' — fetch the instance's transitions, feed them as $instance.transitions (NavView). A free string because the vocabulary is the host's; an unknown value feeds nothing and the view renders empty."
+            },
+            "payload": {
+              "type": "object",
+              "description": "SEED DATA for the opened view — it becomes the surface's `$instance`, which is how ONE generic view serves many flows. `instance-list` is the proof: `{domain, workflow, title}` is what turns the same definition into the Collected Logs list, the Client Context list or a config-record list, with no second near-identical view. Measured shapes in this repo: `{domain, workflow, title}` (a flow's records), `{title}` (a view that only needs its heading), and `{create}` alongside them (whether the list offers a New button). It is OPEN on purpose — the payload's contract belongs to the VIEW being opened, not to this schema, so constraining the keys here would mean editing the navigation schema every time a view learns a new prop. THIS PROPERTY WAS MISSING UNTIL 2026-08-11 while ten records used it, and the rejection was invisible: `start` on an existing key is a no-op, so only a NEW record ever validated, and the seeder tolerated the `update 400` that said so.",
+              "additionalProperties": true,
+              "patternProperties": {
+                "^_": {}
+              }
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1,
+              "description": "DEEP-LINK PATH TEMPLATE for this route — `record/:domain/:workflow/:instanceId`, placeholders `:name`, no leading slash needed. Every placeholder MUST also appear in `inputs` or the value is parsed and then dropped, which opens the surface with nothing. ABSENT: the template is derived from the route KEY as a single segment (`/north-star`), which is collision-free but carries NO parameters — so a surface whose identity lives in its payload cannot be linked at all. That absence is not theoretical: until 14.08.2026 nothing declared this field, so `getShareLink` refused every record detail (its `singletonKey` could not be carried), the address bar kept whatever it had, and the entire link layer was unreachable. Declare one when the URL must carry parameters, or when the shareable URL should be pinned independently of the key — a URL is a contract, and renaming a key would otherwise break links people have already sent. Declared paths CAN collide, and the client refuses duplicates and reports overlaps at boot rather than letting two routes fight over one URL."
+            },
+            "inputs": {
+              "type": "array",
+              "description": "WHAT THIS ROUTE ACCEPTS, and which of it a link may carry. Each entry names a payload field; a path placeholder must appear here, and `inQuery: true` sends the value in the link's QUERY STRING instead of its path. Absent: the route still accepts anything an opener passes (an undeclared value reaches the payload untouched) — what is lost is defaults, the required-input check, and the ability to put anything in a link. THE DECLARATION IS ALSO THE SECURITY BOUNDARY for the query half: only declared names are ever written into or read back out of a URL, which is what keeps an OAuth redirect's `?code=&state=` from becoming route parameters, and a tab's payload (titles, transient flags, whatever a drill-in passed through) out of every link somebody shares.",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The payload field name. Must match what an opener passes and what a `:placeholder` in `path` is called."
+                  },
+                  "required": {
+                    "type": "boolean",
+                    "description": "Navigation is REFUSED when this value is absent (reported as `missing-required-input`). Use it only for a value the surface genuinely cannot render without — for a generic surface, refusing is a dead screen where reporting would have been a diagnosable one. Absent = false."
+                  },
+                  "default": {
+                    "description": "Substituted when the opener passes nothing. Logged when it engages, because a view rendering on a value nobody passed is the kind of thing that is only obvious in hindsight."
+                  },
+                  "inQuery": {
+                    "type": "boolean",
+                    "description": "Carry this value in the link's QUERY (`?q=…`) rather than in its path. For STATE rather than identity: which page a list is on, how it is sorted, what it filters — there can be any amount of it, it is optional by nature (a link without it still opens the surface), and it has no place in a readable hierarchy. A name declared BOTH here and as a path placeholder is refused: one value cannot have two carriers in the same link."
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": "What this input is for. Read by people and agents, never by the client."
+                  }
+                }
+              }
+            }
+          },
+          "required": [],
+          "patternProperties": {
+            "^_": {}
+          },
+          "additionalProperties": false,
+          "$comment": "`terminateOnDismiss` was REMOVED on 12.08.2026: it fired the flow's `exit` on the X, and `exit` is EARLY SUCCESSFUL termination — so closing a half-filled wizard pulled the record to the flow's SUCCESS state, where it could not be continued and looked like a completed registration. The X now leaves the record where it is; abandonment is closed by the flow's own `timeout` (→ `cancelled`), not by the client.",
+          "anyOf": [
+            {
+              "required": [
+                "view"
+              ]
+            },
+            {
+              "required": [
+                "key",
+                "domain"
+              ]
+            }
+          ]
+        },
+        "localizedText": {
+          "description": "The three shapes pseudo-ui's canonical localizeLabel accepts — ONE resolver on purpose, so these shapes are legal wherever display text lives: (1) plain string — locale-neutral, and the shape templated titles use; (2) {lang:text} map; (3) the core [{language,label}] array — matched exactly first, then by base language ('tr' ↔ 'tr-TR'), falling back to the FIRST entry for an unknown locale, so list the most widely understood language first.",
+          "oneOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "description": "Locale-neutral text, or a '{{payloadKey}}' template on hidden detail items."
+            },
+            {
+              "type": "object",
+              "minProperties": 1,
+              "description": "{lang:text} map — key is the locale code, value the text in that locale.",
+              "additionalProperties": {
+                "type": "string",
+                "description": "The text in that locale."
+              }
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "description": "The core [{language,label}] array. An unknown locale falls back to the FIRST entry — ordering is meaning.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "type": "string",
+                    "description": "Locale tag (e.g. 'tr-TR'). Omitted = the neutral entry, which should come first."
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "The text for that locale — may itself be a '{{payloadKey}}' template on hidden detail items."
+                  }
+                },
+                "required": [
+                  "label"
+                ],
+                "additionalProperties": false
+              }
+            }
+          ]
+        },
+        "navItem": {
+          "type": "object",
+          "description": "One menu entry / route. Which fields matter depends on `type` — the if/then branches below hold the per-type contracts. Common failure worth knowing: an item whose `config` pointer names a view or version not on disk seeds only because the guard catches it; at RUNTIME such a pointer opens an empty surface with every call returning 200.",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "group",
+                "divider",
+                "dynamicView",
+                "staticView",
+                "webView",
+                "search",
+                "instance",
+                "command"
+              ],
+              "description": "What this item IS — the declared vocabulary (app-host types.ts). `group`: an expandable subtree — needs `children`; its own key becomes no surface, but its children flatten into routes. `divider`: a visual separator between sections — carries NO key on purpose (a keyed item becomes a route, and a rule is not a destination); drawn with the theme's nav-divider-* tokens. `dynamicView`: the workhorse — opens a BACKEND view (config.key names it); needs `config`. `workflow`: DEPRECATED (18.08.2026) — it compiled into the `WorkflowView` node, which is being deleted; use `command` with a `urn:client:auth:login:*` / `urn:client:flow:start:*` address instead. `command`: the item is not a destination at all — it FIRES `config.command` (a client URN, with optional `config.args`) and opens nothing itself, which is what a menu row that performs an ACT should be (\"Sign In\" is the first). Needs no key; a `command` item with no `config.command` is DROPPED at the config boundary, because it would render and do nothing. `staticView`: a host-registered static surface — declared, renders a phase-2 placeholder today. `webView`: an embedded web URL — declared, placeholder today. `search`: a search surface — declared, placeholder today. `instance`: a deep link to ONE record's detail — declared, placeholder today (the working way to open one record is `urn:client:flow:open:<domain>:<flow>:<id>` from a view). Pick dynamicView unless you are building the thing the other types name."
+            },
+            "key": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Route identity — what `homepage`, navigate intents and tab identity refer to. An item WITHOUT a key is dropped from routes entirely (registry.ts), which is correct for a divider and a mistake for anything else. Unique within the record; duplicated keys silently shadow each other."
+            },
+            "title": {
+              "$ref": "#/$defs/localizedText",
+              "description": "Sidebar row text and default tab title. Absent: the item's `key` is shown — legible for dev, wrong for users. On hidden detail items a '{{payloadKey}}' template interpolates from the tab payload at open time (e.g. '{{title}}')."
+            },
+            "subtitle": {
+              "$ref": "#/$defs/localizedText",
+              "description": "Second line under the sidebar row (NavigationTree). Absent: single-line row. Not the TAB subtitle — that is config.tabSubtitle."
+            },
+            "icon": {
+              "type": "string",
+              "description": "Material-icons LIGATURE (e.g. 'dashboard'): the sidebar row glyph AND the route's tab glyph — registry hoists it as tabIcon, there is deliberately no separate tabIcon field (one destination, one glyph). Absent: text-only row and tab."
+            },
+            "iconUrn": {
+              "type": "string",
+              "description": "urn:local:icons:* pointer from an earlier icon design. In data, typed, read by NOTHING today — `icon` is what renders. Kept legal until deleted from records and here together."
+            },
+            "hidden": {
+              "type": "boolean",
+              "description": "True = routable but NOT shown in the sidebar — the pattern for detail/start/history targets that are only ever navigated to programmatically (instance-detail, instance-start). Absent means false (visible)."
+            },
+            "order": {
+              "type": "number",
+              "description": "Authoring sort weight (100000-spaced in the records). Read by NOTHING today — items render in ARRAY order; the field survives as authoring convention. Do not rely on it to reorder."
+            },
+            "version": {
+              "type": "string",
+              "description": "Item-level authoring marker ('v1'/'v2') from an earlier design. Read by nothing."
+            },
+            "disabled": {
+              "type": "boolean",
+              "description": "Typed in app-host, read by NOTHING today — a true here does NOT grey the row out yet. Kept legal for the day the renderer honours it."
+            },
+            "disabledReason": {
+              "oneOf": [
+                {
+                  "type": "string",
+                  "description": "Why the item is disabled — intended as tooltip text."
+                },
+                {
+                  "type": "null",
+                  "description": "Explicit 'no reason' — the shape the records actually carry."
+                }
+              ],
+              "description": "Companion to `disabled`; read by nothing today (not even typed)."
+            },
+            "badge": {
+              "type": "object",
+              "description": "Row badge flags. Typed in app-host, read by NOTHING today — pseudo-ui's NavigationDrawer badge is a DIFFERENT shape on a different node; setting these currently changes nothing on screen.",
+              "properties": {
+                "isNew": {
+                  "type": "boolean",
+                  "description": "Intended: mark the entry as new. Unread today."
+                },
+                "isHot": {
+                  "type": "boolean",
+                  "description": "Intended: highlight the entry. Unread today."
+                },
+                "count": {
+                  "oneOf": [
+                    {
+                      "type": "boolean",
+                      "description": "false = no count badge — the shape every record carries today."
+                    },
+                    {
+                      "type": "number",
+                      "description": "A numeric count badge."
+                    }
+                  ],
+                  "description": "Intended: a count bubble. Unread today; the boolean form exists because the records predate the number form."
+                }
+              },
+              "patternProperties": {
+                "^_": {}
+              },
+              "additionalProperties": false
+            },
+            "children": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/navItem"
+              },
+              "description": "Subtree — same navItem shape, recursively. Flattened into routes for ANY keyed item (registry.ts), rendered as an expandable group in the sidebar. Required on `group` (a group without children renders an empty caret and routes nothing)."
+            },
+            "config": {
+              "type": "object",
+              "description": "Per-type payload — a VIEW pointer + tab knobs on dynamicView, a FLOW pointer + start options on workflow, expand flags on group. The if/then branches below pick the exact shape by `type`."
+            },
+            "repeatFor": {
+              "type": "string",
+              "description": "TEMPLATE SYNTAX, meaningful only when a client-config entry composes this record WITH `params`: this item is replaced by one copy per element of the named ARRAY-of-strings parameter, `{{item}}` bound to the element in every string beneath (keys, titles, payload values). It never reaches a composed menu — the instantiation strips it. On a record composed without params the field is inert prose. See the staff `sys-catalog` record for the living example: seven sys flows declared once, fanned out per domain by whichever client composes it."
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "patternProperties": {
+            "^_": {}
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "dynamicView",
+                    "description": "Discriminator: this branch applies when type is 'dynamicView'."
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              "then": {
+                "required": [
+                  "key",
+                  "config"
+                ],
+                "properties": {
+                  "config": {
+                    "$ref": "#/$defs/viewConfig",
+                    "description": "dynamicView items: `config` MUST exist and be a view pointer (viewConfig) — a dynamicView without one renders nothing, silently."
+                  }
+                },
+                "description": "dynamicView items: `config` MUST exist and be a view pointer (viewConfig) — a dynamicView without one renders nothing, silently."
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "const": "group",
+                    "description": "Discriminator: this branch applies when type is 'group'."
+                  }
+                },
+                "required": [
+                  "type"
+                ]
+              },
+              "then": {
+                "required": [
+                  "key",
+                  "children"
+                ],
+                "properties": {
+                  "config": {
+                    "$ref": "#/$defs/groupConfig",
+                    "description": "group items: `children` MUST exist (an empty group routes nothing); `config`, when present, is groupConfig."
+                  }
+                },
+                "description": "group items: `children` MUST exist (an empty group routes nothing); `config`, when present, is groupConfig."
+              }
+            }
+          ]
+        }
+      },
+      "$comment": "F32: the `navigation-group` half of the former unified client-resource-master, now its OWN flow (`navigations`) so its version cascades independently of the other kinds (agenda C6). A MENU CONTRIBUTION — `items` joined, in client-config order, into a level's sidebar or profile menu. Every KEYED item also becomes a route. A record no longer carries `kind` — the FLOW is the kind. Referenced by instance URN: urn:vnext:flow:instance:<domain>:navigations:<key>."
+    }
+  }
+}
