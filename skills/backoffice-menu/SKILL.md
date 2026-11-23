@@ -14,8 +14,9 @@ Changing an existing menu is only data and needs none.
 
 ## 1. See what the domain already has
 
-Through a port-forward — open it as the `cluster-publish` skill's steps 2–3 describe, and CLOSE it as its
-step 5 does when this skill is done, whether or not anything was published. URL-encode the `filter` value:
+Through a port-forward — load the `cluster-publish` skill (do not read its file by path) and open the
+forward as its steps 2–3 describe; CLOSE it as its step 5 does when this skill is done, whether or not
+anything was published. URL-encode the `filter` value:
 
 ```
 GET <origin>/api/v1/<domain>/workflows/sys-flows/instances?filter={"key":{"eq":"navigations"}}&pageSize=1
@@ -32,12 +33,13 @@ Copy from the plugin's `templates/navigations/`, replacing `{{domain}}`:
 - `navigations-master.schema.json` → the workspace's Schemas folder as `navigations-master.json`
 - `navigations.workflow.json` → the Workflows folder as `navigations.json`
 
-Resolve both folders from `vnext.config.json`. Run `npm run validate`, then publish with `cluster-publish`.
+Resolve both folders from `vnext.config.json` (`paths.componentsRoot` joined with `paths.schemas` and
+`paths.workflows`). Run `npm run validate`, then publish with `cluster-publish`.
 
 ## 3. Start the record
 
 Fill `templates/navigations/backoffice-side.record.json` — one item per flow the menu should open — and
-keep the filled file in the workspace so the menu is reviewable. Then, on the forwarded origin:
+keep the filled file in the workspace as `records/backoffice-side.json`, so the menu is reviewable. Then, on the forwarded origin:
 
 ```
 POST  <origin>/api/v1/<domain>/workflows/navigations/instances/start?sync=true     <the filled record>
@@ -49,7 +51,8 @@ records from the list. **No `payload.create`, no New button.**
 
 ## 4. Change an existing menu
 
-Edit the workspace's record file and send the whole `attributes`:
+Edit the workspace's record file (`records/backoffice-side.json`; if the workspace has none, read the live
+record in step 1 and save its `key`, `tags` and `attributes` there first) and send the whole `attributes`:
 
 ```
 PATCH <origin>/api/v1/<domain>/workflows/navigations/instances/backoffice-side/transitions/update?sync=true   { "attributes": { "items": [ … ] } }

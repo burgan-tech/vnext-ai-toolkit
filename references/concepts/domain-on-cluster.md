@@ -19,6 +19,7 @@ flow; a person approves it; the environment's agent builds it.
 | waiting | `Awaiting approval` | **Approve and build**, **Send back**, **Abandon** |
 | building | `Building` — a Build card names the run and its attempt | Abandon; Retry after a failure |
 | built | the domain is listed as registered | — |
+| given up | `Abandoned`, read in Domains › Requests | — |
 
 - The request record is created by the click that opens the first form, so a walk that is given up is
   **abandoned**, not closed.

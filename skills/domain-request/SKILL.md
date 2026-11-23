@@ -28,8 +28,8 @@ Ask for what is missing; never invent a name or a directory user.
 
 | Input | Rule |
 |---|---|
-| Environment | one the client offers in its picker |
-| Domain name | `^[a-z][a-z0-9-]{0,28}[a-z0-9]$`, not already listed among the client's domains |
+| Environment | one the client offers in its picker — short codes (`dev`, `test`), not the display name in the client's header |
+| Domain name | `^[a-z][a-z0-9-]{0,28}[a-z0-9]$`, not already listed under Domains › All. That list holds built domains only: a pending request for the same name is not visible there, and the wizard's first step is what refuses a taken name |
 | Description, owner team | read by the approver; owner team is required, the description is optional |
 | Access | 1–10 directory user names. **Include whoever will publish** — only these can reach the namespace. Do not assume the requester is added: name them |
 | Capacity | one of the environment's profiles; the default is prefilled |
@@ -41,8 +41,9 @@ Ask for what is missing; never invent a name or a directory user.
 Resolve the back-office client's address as `domain-on-cluster.md` § Finding the addresses describes: the
 workspace's local file, else composed from `oc` and proved by opening it, else asked. Say which it was.
 
-- The proof is the client's own first screen: it asks the person to **choose an environment**. A page that
-  merely answers 200 is not it. A cluster's routes often carry an internal certificate — a browser shows a
+- The proof is the client itself: signed out, its first screen asks the person to **choose an environment**;
+  signed in, its header names the environment and its menu has **Domains**. A page that merely answers 200
+  is not it. A cluster's routes often carry an internal certificate — a browser shows a
   warning the person accepts, and `curl` needs `-k` to read the page.
 - Outside a vNext workspace (no `vnext.config.json`) there is no local file to write: report the address
   and go on.
@@ -54,20 +55,29 @@ workspace's local file, else composed from `oc` and proved by opening it, else a
 Domains › All › **New domain**. With a browser tool, drive it; without one, give the person each step's
 values and confirm from the screen they describe.
 
-1. `1 · Environment and name` — environment, name, description, owner team → **Continue**.
-2. `2 · Access` — the directory users → **Continue**. A person who prefers to type their own user name does so
-   in the open form; then continue.
-3. `3 · Capacity` — leave the defaults unless asked → **Continue**.
-4. `Packages` → **Continue**. This form carries no number.
-5. `4 · Summary` — the fifth screen, numbered four.
+1. `1 · Environment and name` — Environment (a picker), Domain name, Description, Owner team → **Continue**.
+2. `2 · Access` — one text box, `Sicils with access` (a sicil is a directory user name) → **Continue**. A
+   person who prefers to type their own does so in the open form; then continue.
+3. `3 · Capacity` — `Capacity profile` (prefilled), a `Customise the values` switch, and the three dependency
+   pickers (Postgres · Redis · Kafka, prefilled). Leave all of it unless asked → **Continue**.
+4. `Packages` — `vNext packages`, a multi-select of chips → **Continue**. This form carries no number.
+5. `4 · Summary` — the fifth screen, numbered four. Its sections are headed `1 · Environment and name`,
+   `2 · Access`, `3 · Capacity and dependencies`, `4 · vNext packages`.
 
-The next form appearing is the proof the last one was accepted; allow it up to 90 seconds. A refusal returns
+Behind every form the record's own page reads "This stage has no view" above a dump of raw fields. That is
+the record without a screen, not an error — leave its `Later` button and the form's Cancel alone.
+
+**Never reload or navigate the tab to a record's URL.** A full page load signs the client out, and the
+person has to sign in again. Move inside the client: its menu, its tabs, its buttons.
+
+The next form appearing is the proof the last one was accepted — usually within seconds; allow up to 90
+before calling it stuck. A refusal returns
 to the SAME step with its reason — read it, it names the cause.
 
 **Read the packages on the summary, not on the form.** The Packages form has been seen reopening with every
 catalog package ticked after a Continue that showed only the mandatory one. If the summary lists more than
-was chosen: reopen the step from the summary, untick in the dropdown's list, continue, read the summary
-again. The dialog changes width with its chips — click its buttons by reference, not by an old coordinate.
+was chosen: reopen the step from the summary (its edit buttons are `Environment / name`, `Access`,
+`Capacity`, `Packages`), untick in the dropdown's list, continue, read the summary again. The dialog changes width with its chips — click its buttons by reference, not by an old coordinate.
 
 ## 4. Stop at the summary
 
@@ -75,6 +85,9 @@ Read back the environment, the name, the namespace it will get, the access list,
 packages. Say which values you supplied rather than the person. **Send for approval** only on their yes.
 
 A walk that must build nothing ends with **Abandon** — offered on the summary and while awaiting approval.
+It is two clicks: Abandon opens a dialog titled `Abandon` with an optional `Reason`, and that dialog's
+**Submit** is what abandons (it sends nothing for approval). The record's tab then closes back to the
+Domains list; **Domains › Requests** shows the request as `Abandoned`.
 
 ## 5. Approval and the build
 

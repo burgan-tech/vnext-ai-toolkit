@@ -51,7 +51,8 @@ oc -n <env>-vnext-<domain> get deploy <orchestrator service> -o jsonpath='{..ima
 ```
 
 The Deployment carries the Service's name. Pick a local port nothing else uses — 4201 is the local
-runtime's; something in the 4300s is a safe habit. `200` from `/health` is the forward working. The image tag is the runtime version the
+runtime's; something in the 4300s is a safe habit. `200` from `/health` is the forward working; it can take a few seconds to answer, so retry before
+concluding anything. The image tag is the runtime version the
 domain actually runs — compare it with the workspace's `runtimeVersion` and say so when they differ.
 
 ## 4. List, ask, publish
@@ -61,7 +62,8 @@ DRY=1 VNEXT_RUNTIME_URL=http://localhost:<local port> node ${CLAUDE_PLUGIN_ROOT}
 VNEXT_RUNTIME_URL=http://localhost:<local port> node ${CLAUDE_PLUGIN_ROOT}/scripts/cluster-publish.mjs
 ```
 
-Show the DRY list and publish on the person's yes — this is a shared stage. The script has no default
+Show the DRY list and publish on the person's yes — this is a shared stage. A yes given with the request
+("…and publish it") counts; a request that only said "load" or "check" does not. The script has no default
 target, publishes in dependency order, inlines sibling `.csx` files, and ends with `publish/completed`.
 
 Read the lines, not the exit code:
@@ -69,7 +71,7 @@ Read the lines, not the exit code:
 | Mark | Meaning |
 |---|---|
 | `✓ [200]` | landed |
-| `= [409]` | this key and version is already there. Right for an unchanged file; a CHANGED file needs a new version |
+| `= [409]` | this key and version is already there. Right for an unchanged file; a CHANGED file needs a new version. **A 409 does not say the content matches** — the script compares nothing. A file edited since its last publish and not re-versioned is silently NOT loaded; check the workspace's own diff before trusting a run that sent nothing |
 | `✗ [400]` | refused and not landed — fix and publish again |
 
 **Never `wf update` or `wf reset` against a forwarded runtime.** They delete the existing key and version row
@@ -86,6 +88,7 @@ POST  <origin>/api/v1/<domain>/workflows/<flow>/instances/start?sync=true     { 
 PATCH <origin>/api/v1/<domain>/workflows/<flow>/instances/<key>/transitions/<transition>?sync=true   { "attributes": { … } }
 ```
 
+`attributes` follows the flow's start schema (`attributes.startTransition.schema` in the workflow file).
 The answer carries `flowVersion` — the version that actually ran. On a 500, read the orchestrator's log
 (`oc -n <namespace> logs deploy/<orchestrator deployment>`); the fix is a new version, because a published
 one cannot be replaced.
