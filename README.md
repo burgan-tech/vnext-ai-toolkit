@@ -14,8 +14,8 @@ It ships these capabilities:
 
 1. **Seven specialized agents** that form a build pipeline — `analyst` → `architect` → `component-author` → `validator` → (`security-reviewer` + `doc-writer`), with `reviewer` for PR-style checks.
 2. **A multi-turn design orchestrator** (`vnext-architect`) for designing a whole workflow end-to-end — discovery → state machine → components → tests — through a structured decision tree.
-3. **Seventeen skills** — one umbrella reference skill (`authoring-vnext-components`) plus sixteen focused authoring, testing and review skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `e2e-local`, `validate-and-fix`, `security-audit`, `domain-check`, `report-runtime-issue`).
-4. **Eleven slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:vnext-update`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:review-components`, `/vnext-ai-toolkit:build`, `/vnext-ai-toolkit:e2e`, `/vnext-ai-toolkit:security-audit`, `/vnext-ai-toolkit:domain-check` and `/vnext-ai-toolkit:report-issue` — as entry points.
+3. **Eighteen skills** — one umbrella reference skill (`authoring-vnext-components`) plus seventeen focused authoring, testing and review skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `e2e-local`, `validate-and-fix`, `security-audit`, `domain-check`, `report-runtime-issue`).
+4. **Twelve slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:vnext-update`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:review-components`, `/vnext-ai-toolkit:build`, `/vnext-ai-toolkit:e2e`, `/vnext-ai-toolkit:security-audit`, `/vnext-ai-toolkit:domain-check` and `/vnext-ai-toolkit:report-issue` — as entry points.
 
 ## Install
 
@@ -97,6 +97,7 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 - **`domain-request`** — opens a new domain on a platform-managed cluster: settles the inputs, walks the back-office client's request wizard (drives a browser when one is available), stops for the person at the summary and at approval, and watches the build. Ships no address: the client is found from the workspace's local file, from `oc`, or by asking.
 - **`cluster-publish`** — loads the workspace into a domain running on a cluster: proves the target and the caller's rights, port-forwards to the domain's orchestrator, lists what would be sent, publishes on a yes (`scripts/cluster-publish.mjs`, no default target) and starts a record to prove the load runs.
 - **`backoffice-menu`** — gives a domain its group in the back-office client's left menu: the `navigations` flow and schema the client discovers, the `backoffice-side` record with one entry per flow (list, Flow analysis, optional New button), and how to change it later.
+- **`process-decompose`** — reads a whole process description (a markdown file, a folder, or `docs/process/`) and decides how it becomes components: one flow or several, SubFlow against SubProcess, a function instead of a flow, FanOut instead of a child per item. Writes a process map with every decision tied to the sentence it came from, and the open questions the description leaves. Writes no component.
 - **Security checklist reference** — [references/concepts/security-review-checklist.md](references/concepts/security-review-checklist.md) gives the agents and skills concrete per-category hunt patterns for the vNext component model (`roles`/`queryRoles`/`x-roles`, `.csx` `ScriptContext` data flow, `allowedHosts`, `REF` sources), false-positive rules (MockLab seeds, fixtures, dev URLs), and a severity/confidence rubric with OWASP Top 10 / CWE mapping.
 
 ## Commands
@@ -113,6 +114,7 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 | `/vnext-ai-toolkit:e2e [workflow\|--all]` | Runs the integration tests end to end. Default: Testcontainers pinned to `runtimeVersion`; asks whether you already run a local runtime and, if so, its port. Preflight, `npm run validate`, `dotnet test`, failure triage, `TEST-SCENARIOS.md` row and `.claude/vnext-e2e.json` stamp. |
 | `/vnext-ai-toolkit:domain-check [root] [--config f]` | Read-only runtime-cost audit; scanner + verified findings + triage, then a Turkish report. Never edits components, commits or pushes. |
 | `/vnext-ai-toolkit:report-issue [short description]` | Triages a suspected runtime problem (known gaps, live vnext-meta, docs, domain-side causes), then drafts a redacted English issue for `burgan-tech/vnext` and files it only after approval. |
+| `/vnext-ai-toolkit:process-build [file\|folder]` | Builds a whole process from its description (default `docs/process/`): `process-decompose` → the process map, **approved by you** → one spec per component → every component through the agent pipeline in dependency order → validate → lifecycle tests written. Then it asks, separately, whether to run the tests in Testcontainers and whether to publish to the cluster, and goes by the answers. Reports how far it got: written and validated / ran locally / ran on the cluster. |
 | `/vnext-ai-toolkit:security-audit [scope]` | Runs the four-phase OWASP-inspired security review (recon → hunt → verify → report) and writes `security-report/SECURITY-REPORT.md` with confidence-scored, CWE/OWASP-referenced findings. Empty = full audit; `changed`/`diff` = delta review; `key` = that component + closure. |
 
 ## Design philosophy
@@ -159,17 +161,17 @@ vnext-ai-toolkit/
 │   ├── analyst.md  architect.md  component-author.md
 │   ├── validator.md  reviewer.md  security-reviewer.md  doc-writer.md
 │   └── vnext-architect.md            # multi-turn end-to-end design orchestrator
-├── skills/                           # 17 skills
+├── skills/                           # 18 skills
 │   ├── authoring-vnext-components/SKILL.md   # core reference skill
 │   ├── workflow-scaffold/  view-design/  schema-design/
 │   ├── component-task/  component-function/  component-extension/  component-mapping/
 │   ├── integration-test/  e2e-local/  validate-and-fix/  security-audit/
 │   ├── domain-check/ (SKILL + CHECKS + scan.py)  report-runtime-issue/
-│   └── domain-request/  cluster-publish/  backoffice-menu/
-├── commands/                         # 11 slash commands
+│   └── domain-request/  cluster-publish/  backoffice-menu/  process-decompose/
+├── commands/                         # 12 slash commands
 │   ├── vnext-init.md  vnext-update.md  new-component.md  vnext-design-process.md
 │   ├── validate.md  review-components.md  build.md  security-audit.md
-│   └── e2e.md  domain-check.md  report-issue.md
+│   └── e2e.md  domain-check.md  report-issue.md  process-build.md
 ├── hooks/                            # SessionStart staleness check (toolkit version + runtime version)
 │   └── hooks.json  check-toolkit-version.sh
 ├── references/                       # Runtime knowledge — single source; a subset is copied into
