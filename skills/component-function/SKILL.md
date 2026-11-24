@@ -131,7 +131,7 @@ For each task this function will call:
 
 ### 8. Scaffold `.csx` mappings
 
-For each task reference, scaffold an `IMapping` in `src/`. Inherit `ScriptBase` and read dynamic data ONLY through its helpers (`HasProperty`, `GetPropertyValue`) — direct dynamic access (`context.Body?.x`) throws `RuntimeBinderException` when the member is absent:
+For each task reference, first consider declarative `input` / `output` blocks instead of a `mapping` (runtime after 0.0.106 + a vnext-schema with the blocks — `references/concepts/declarative-task-mappings.md`): the output block's result is the task's output, as an `OutputHandler`'s `Data` would be; `user.available` is always false in a function. A multi-task function's `output` (`IOutputHandler`) stays `.csx`. When a `.csx` is needed, scaffold an `IMapping` in `src/`. Inherit `ScriptBase` and read dynamic data ONLY through its helpers (`HasProperty`, `GetPropertyValue`) — direct dynamic access (`context.Body?.x`) throws `RuntimeBinderException` when the member is absent:
 
 ```csharp
 using System.Threading.Tasks;

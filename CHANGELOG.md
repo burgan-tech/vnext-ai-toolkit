@@ -8,6 +8,8 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
 ### Added
 
+- **`references/concepts/declarative-task-mappings.md`** (new). Declarative task bindings (vnext #1229, runtime after 0.0.106 + the vnext-schema release with `inputMappingBlock` / `outputMappingBlock`): `input` / `output` blocks with `select`, `into` and `set` (Dynamic Expresso) instead of an `IMapping` `.csx`. The file covers the shape, the path subset, the request surfaces per task type, the expression variables (camelCase `instance`, guarded `user`, `result`), missing values vs errors, and a table of what still needs a `.csx`: an environment-driven `API_BASEURL` URL, secrets, loops/helpers, and FanOut / Notification / Human tasks. `component-task`, `workflow-scaffold`, `component-function`, `component-extension`, `component-author`, `authoring-vnext-components` and `mapping-types.md` now scaffold blocks first and keep `.csx` as the escape hatch.
+
 - **`references/concepts/client-forms-and-transitions.md`** (new, copied into workspaces). What the web/back-office client (`vnext-client-sdk-core`) does with a form, measured 24.11.2026 on the deployed staff client:
   - R1: a state-view button with `urn:vnext:flow:transition:<d>:<f>:<tx>` fires the move with the view's data.
   - R2: a transition with a schema and no view gets a GENERATED form in the Transitions menu, so the same inputs appear twice.

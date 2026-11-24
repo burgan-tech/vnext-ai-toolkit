@@ -137,9 +137,10 @@ For each transition capture:
   scaffolds `context.Caller.IsAvailable && await context.Caller.HasRoleAsync("x")` — the `IsAvailable` guard is
   mandatory because a fired timer or a SubFlow resume has no caller (a read throws). Timers see the caller who
   **entered** the state (computed at arming). A provider outage fails the step with `Authorization:110006`
-  instead of taking the default. Never put roles into task mappings — `context.Caller` is unavailable there
-  (`references/concepts/csx-contracts.md` § Caller roles).
-- **`onExecutionTasks`**: which tasks run during the transition, and which `.csx` mapping shapes each task's input/output. Entries at the same `order` run in parallel and merge by slot `variableKey ?? camelCase(task.key)`; if the **same task** is bound twice at one order (e.g. two SubProcess starts), give at least one a `"variableKey"` (0.0.99; publish rejects a slot collision — same rule for `onEntries` / `onExits`). "Do X for each item in a list" → a **FanOut task** (type 21), not an auto loop — `references/concepts/fan-out.md`.
+  instead of taking the default. Never put roles into `.csx` task mappings — `context.Caller` is unavailable there
+  (`references/concepts/csx-contracts.md` § Caller roles); a declarative task binding has its own `user` variable
+  (`user.available ? user.hasRole("x") : false` — unguarded role reads fail on System hops, `references/concepts/declarative-task-mappings.md`).
+- **`onExecutionTasks`**: which tasks run during the transition, and how each task's input/output is shaped (declarative `input`/`output` blocks, or a `.csx` mapping — step 7). Entries at the same `order` run in parallel and merge by slot `variableKey ?? camelCase(task.key)`; if the **same task** is bound twice at one order (e.g. two SubProcess starts), give at least one a `"variableKey"` (0.0.99; publish rejects a slot collision — same rule for `onEntries` / `onExits`). "Do X for each item in a list" → a **FanOut task** (type 21), not an auto loop — `references/concepts/fan-out.md`.
 - **`executionType`** (optional, `"S"` / `"A"`) if this transition must not depend on the caller's `?sync`.
 - **Payload schema** (manual/event, `cancel`, `exit`, `updateData`, start): one `schema`, or — when the
   same transition takes differently shaped bodies (retail vs corporate, per channel) — a rule-based
@@ -198,9 +199,11 @@ For each schema needed (workflow master schema, transition payloads) that does n
 
 These can be deferred (scaffold the workflow first with placeholder refs, then fill in), but record what's pending.
 
-### 7. Scaffold `.csx` mapping files
+### 7. Shape task bindings — declarative blocks first, then `.csx`
 
-For each `onExecutionTasks` entry that needs input/output mapping:
+For each `onEntries` / `onExits` / `onExecutionTasks` entry, first try declarative `input` / `output` blocks (`select`, `into`, `set` with Dynamic Expresso expressions) — `references/concepts/declarative-task-mappings.md` has the shape, variables (`data`, `input`, camelCase `instance`, `now`, `user`, `result`), surfaces per task type and the cases that still need a `.csx` (environment-driven URL, secrets, loops/helpers, FanOut/Notification/Human). Requires the first runtime release after 0.0.106 and a vnext-schema with the blocks; on older pins use `.csx`.
+
+For each entry that needs a `.csx` input/output mapping:
 
 - Create `src/{PascalCaseClassName}.csx` with a skeleton class.
 - The workflow JSON's `mapping.location` points to `./src/{file}.csx`; the VS Code extension auto-encodes the file into `mapping.code` (base64) on save. **Do not manually base64-encode.**
