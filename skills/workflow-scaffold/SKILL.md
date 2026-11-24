@@ -151,6 +151,18 @@ For each transition capture:
   `400 Transition:100025`; ask the user whether unmatched callers must be refused (then omit the
   fallback deliberately). Details: `references/concepts/transition-pipeline.md` §1.1. On an older
   workspace keep the single `schema`.
+- **No input = closed empty schema, never `null`.** A manual move that takes no body (Approve, Edit, Cancel, Confirm)
+  references a closed empty schema (`{"type":"object","properties":{},"additionalProperties":false,"maxProperties":0}`).
+  `schema: null` merges any body into instance data unvalidated — a caller could change an amount between the
+  confirm screen and the send (`references/concepts/transition-pipeline.md` §1.1). When a later step executes what an
+  earlier step checked and showed, add a snapshot written by the checking step and compared by the executing step.
+- **Where does each form live, and can the person come back to it?** Ask for every input step: *"Can a later step
+  send the person back here to correct the data (Edit / Düzenle)?"* — then follow
+  `references/concepts/client-forms-and-transitions.md` §2. With a way back, the submitting transition must be
+  **schema-less and view-less, with a whitelisting `ITransitionMapping`** (the client refuses to re-submit an untouched
+  prefilled form to a transition that has a schema); the format rules move to the next task's output mapping. Never
+  design an extra "intro" state that tells the person to use the Transitions menu — a button in the state view fires the
+  move.
 - **Shared resource?** If the transition touches something other instances also change (a limit, an
   account, a slot), offer a `resourceLock`: key = resource kind + business id (an `ITransitionMapping`
   `.csx` returning the string, never the instance id), `ttlSeconds` covering the whole protected section,
@@ -192,6 +204,15 @@ For each `onExecutionTasks` entry that needs input/output mapping:
 
 - Create `src/{PascalCaseClassName}.csx` with a skeleton class.
 - The workflow JSON's `mapping.location` points to `./src/{file}.csx`; the VS Code extension auto-encodes the file into `mapping.code` (base64) on save. **Do not manually base64-encode.**
+- Outside VS Code, `scripts/cluster-publish.mjs` inlines every `location` at publish time — leave `code` empty in the
+  repository rather than committing a copy that can drift from the file.
+- Before writing a task mapping, apply `references/concepts/csx-contracts.md` golden rules 1 and 8–10: read dynamic
+  data only through `HasProperty` / `GetPropertyValue` (or `IDictionary` in a static helper); write **every** output
+  field in both the ok and the error branch and clear with `""` (a `null` does not clear); route business-rule failures
+  back to a user-facing state instead of throwing in a passive state; after a side-effecting call, a 2xx without the
+  expected reference throws (incident) instead of routing to "failed".
+- HTTP tasks: `acceptedStatusCodes` by side effect — read-only `["4xx","5xx"]`, side-effecting the definite rejections
+  only (`references/concepts/task-types.md` §3 "6 Http").
 
 ### 8. Look at a sibling workflow
 
@@ -260,6 +281,10 @@ Run `npm run validate`. Hand off failures to the `validate-and-fix` skill.
 ### 12. (Optional) MockLab seed update
 
 If transitions call HTTP tasks pointing at MockLab (`API_BASEURL/…`, resolved via `GetConfigValue`), append a `mocks[]` entry to the domain's existing seed file at `etc/docker/config/seed/{collection}.json` — one collection per domain; do not split. Endpoint pattern stays `api/{domain}/{resource}/{action}`. Capture 2xx and 4xx/5xx scenarios via `rules[]` (`conditionField: "query.X" | "body.X"`, operators `equals | regex | exists | greaterThan | ...`) and use `sequenceItems[]` for retry/rate-limit demos (`isSequential: true`). Add 200–500 ms `delayMs` for realistic latency.
+
+**Matching gotchas (MockLab 0.0.10)** — `{param}` routes never match; serve a family of paths from one base route
+and branch on `path` rules. A route also matches any longer path that CONTAINS it. `curl` every rule before wiring a
+task (`mocklab-seed-format.md` §3.1).
 
 **Re-import gotcha** — MockLab skips collections whose name already exists in its DB on restart. After editing a seed, run `docker compose down -v && docker compose up -d mocklab` to force a clean import, or push the new mocks via MockLab's admin API.
 

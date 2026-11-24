@@ -136,6 +136,14 @@ before writing the output. Pull the option sets from the schema, not from memory
    timer schedules needed under the workflow's `src/`, with their interfaces
    (`IMapping` / `IConditionMapping` / `ITimerMapping` — see
    `references/concepts/csx-contracts.md`).
+8. **Forms and the client.** For every input step, answer *"can a later step send the person back
+   here?"* and place the form with `references/concepts/client-forms-and-transitions.md` §2: a state-view
+   form submits through a button (never "use the Transitions menu"); with a way back, the submitting
+   transition is schema-less + whitelisting `ITransitionMapping` and the format rules live in the next
+   task's output mapping. Moves without input get a closed empty schema, never `null`. A confirm-then-execute
+   pair carries a snapshot the executing mapping compares. HTTP tasks: `acceptedStatusCodes` by side effect
+   (`task-types.md` §3 "6 Http"). Business-rule failures route back to a user-facing state; only
+   infrastructure faults throw (`csx-contracts.md` golden rules 8–10).
 
 ## Output
 

@@ -189,6 +189,21 @@ def risk_score(input, context: HandlerContext):          # context is optional
 
 `HandlerContext`: `domain`, `workflow`, `workflow_version`, `instance_id`, `task_key`, `correlation_id`, `timeout_ms`. Every module of the `handlers` package is imported at start; `GET v1/manifest` lists the registered handler names, `GET v1/health` is the probe. Scaffold: `templates/python-runtime/` (Dockerfile, requirements, handlers) and `templates/etc/runtime/docker-compose.python.override.yml.tmpl` for a local runtime; shared environments enable the Helm chart's `pythonRuntime` block (it sets `Workflow:PythonRuntime:AppId` to `vnext-<domain>-python-runtime-app`). Building and pushing the image is the domain's pipeline, not the toolkit's.
 
+### 6 Http — `acceptedStatusCodes` follows the call's side effect
+
+A non-2xx that is **not** in `acceptedStatusCodes` fails the task: the instance is Faulted with an incident and
+no auto transition runs. An accepted code is a success: the `OutputHandler` runs with `context.Body.statusCode`
+and can route. Choose by what the call does:
+
+| Call | Accept | Why |
+|---|---|---|
+| Read-only (inquiry, simulate, validate, quote) | `["4xx","5xx"]` | every answer can be shown to the person; the output writes an error status and the flow returns to the form |
+| Side effect (transfer, create, charge) | the **definite rejections only**, usually `["4xx"]` | a 5xx or a timeout does not say whether the effect happened — it must fault (incident → reconcile → retry with the same idempotency key), never route to "failed, nothing was done" |
+
+A timeout has no status code at all (§7) — no `acceptedStatusCodes` entry catches it. Send an idempotency key that
+survives retries (the instance id) on every side-effecting call, and record in the design how a person
+reconciles before retrying.
+
 ## 4. The schema-validation ceiling
 
 vnext-schema `task-definition.schema.json` enumerates `attributes.type`:

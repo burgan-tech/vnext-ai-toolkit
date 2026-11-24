@@ -101,6 +101,16 @@ the VS Code extension encodes the `.csx` into `code` on save.
   `context.CancellationToken` from the caller (0.0.100+). See `csx-contracts.md` § Runtime notes.
 - A helper is plain code — it cannot see `ScriptContext` unless a caller passes it. Don't pass decrypted
   `x-encryption` values or `GetFileAsync` bytes through a helper into logs or responses.
+- **Reading dynamic data inside a helper.** A static helper has no `ScriptBase`: read `ExpandoObject` data through
+  `IDictionary<string, object>` (`obj is IDictionary<string, object> d && d.TryGetValue(k, out var v)`), never
+  `dynamic` member access (a missing member throws `RuntimeBinderException`; `?.` does not help). Put the class in a
+  namespace and `using` it in consumers.
+- **Changing a published helper** = new `version` on this component AND on every `scripts.helpers` reference.
+  Publishing the same version answers `409` and the cluster keeps the old code.
+- **Publishing.** `scripts/cluster-publish.mjs` inlines this component's own `attributes.location` into `code`
+  and publishes `mappings` before their consumers; keep `code` empty in the repository.
+- Prefer plain code over `System.Text.RegularExpressions` in helpers unless the consumers list it in
+  `allowedAssemblies` — whether the sandbox allows it without that was not measured.
 - Register in `exports.mappings` (vnext.config.json) only if shared cross-domain.
 - The sandbox/security model for `allowedAssemblies` and helper runtime linking is documented on the
   vNext docs portal (`docs/configuration/scripting`) — fetch it if a consumer's script fails to resolve a

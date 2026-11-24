@@ -8,6 +8,14 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
 ### Added
 
+- **`references/concepts/client-forms-and-transitions.md`** (new, copied into workspaces). What the web/back-office client (`vnext-client-sdk-core`) does with a form, measured 24.11.2026 on the deployed staff client:
+  - R1: a state-view button with `urn:vnext:flow:transition:<d>:<f>:<tx>` fires the move with the view's data.
+  - R2: a transition with a schema and no view gets a GENERATED form in the Transitions menu, so the same inputs appear twice.
+  - R3: a prefilled state-view form with nothing touched is "no input". A move with a schema or view refuses to fire, which breaks "Edit → submit unchanged".
+  - R4: root `actions` is drawn only on a `Dialog` (and the app bar).
+
+  A placement table (§2) says where a form lives depending on whether a later step can send the person back. It also covers the schema-less input transition with a whitelisting `ITransitionMapping`, the closed empty schema for moves without input, the confirm → execute snapshot, and testing UI fixes on a NEW record (a record keeps its `flowVersion`).
+
 - **`/vnext-ai-toolkit:process-build`** (new command) builds a whole process from its description — a markdown file, a folder, or the workspace's `docs/process/`. It decomposes, stops for approval of the process map, writes one `docs/<Type>/<key>.md` spec per component so the existing pipeline derives each docs-first, authors in dependency order, validates and writes the lifecycle tests. Running the tests in Testcontainers and publishing to the cluster are each ASKED afterwards; the report says how far it got (written and validated / ran locally / ran on the cluster).
 - **`process-decompose`** (new skill) makes the one-flow-or-several decision in writing: top-level flow, SubFlow, SubProcess, function, FanOut. Every split carries the sentence it was decided from; what the description does not answer becomes an open question, and a map with open questions is not built.
 - **`references/concepts/process-decomposition.md`** (new) holds the rules — the default is one flow, the test that tells `S` from `P`, and what is NOT a reason to split. Templates: `templates/process/PROCESS.md.tmpl` for the description and `PROCESS-MAP.md.tmpl` for the map.
@@ -37,6 +45,45 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 
   A fixture workflow `limit-reserve` and smoke-test assertions cover each line. `scripts/test-domain-check.sh` now documents schema 0.0.61.
 - **Tests:** `WorkflowTestBase.TryTransitionAsync` makes one `?sync=true` attempt and returns status and body, so a test can assert lock outcomes. `integration-test-patterns.md` § Resource-lock conflicts has a Reject example. `TEST-SCENARIOS.md` and the `.http` template explain the difference between 200010 and 200014.
+
+
+### Changed — lessons from building a backoffice flow end to end (24.11.2026)
+
+- **`view-author-guide.md`**: buttons go in the body unless the root is a `Dialog` (§3.5, example `Row`). Four new antipattern rows cover root `actions` on a `Column`, "use the Transitions menu" screens, duplicate input surfaces, and a schema'd target in an Edit loop. Three new checklist items.
+- **`workflow-types.md`**: the Initial-state-input pattern now states the client's constraints. New pattern: *steps that take no input* — a closed empty schema, never `null`, plus a snapshot for confirm → execute.
+- **`transition-pipeline.md` §1.1**: "nothing declared → accepted" is a write. It was measured overwriting a confirmed amount through a schema-less `approve`.
+- **`csx-contracts.md`**:
+  - Golden rule 8: `null` does not clear a value. The merge ignores a null on an existing key; write every field in both branches and clear with `""`.
+  - Golden rule 9: business rules route, infrastructure throws. A throw in a passive state's task strands the record.
+  - Golden rule 10: after a side effect, an inconsistent 2xx faults and never routes to "nothing happened".
+  - A whitelisting `ITransitionMapping` example.
+  - Static helpers read through `IDictionary`; a changed helper means a new version for it and its references.
+- **`task-types.md`**: a new section on HTTP `acceptedStatusCodes` by side effect. Read-only calls accept `4xx`/`5xx`; side-effecting calls accept only definite rejections, and a 5xx or timeout faults.
+- **`mocklab-seed-format.md` §3.1 / `mocklab-spec.md`**, measured on MockLab 0.0.10:
+  - `{param}` routes never match. Use one base route with `path` rules instead.
+  - Matching is exact first, then contains, so a short route catches longer paths. A leading `/` is optional.
+  - Escaped quotes inside a Scriban argument return the template raw.
+  - New section on running MockLab in an OpenShift namespace: the DB goes to an `emptyDir` through `Mocklab__ConnectionString`, `SeedSampleData=false`, the seed comes from a ConfigMap, and the admin API is unauthenticated.
+- **`domain-on-cluster.md`**:
+  - New section: secrets a domain reads. `vnext-<domain>-secret` is written through System Flows › Secrets, with one field `value` per secret. Never use the runtime's Vault token. Reading Dapr's answer tells a missing secret apart from a reachability problem.
+  - New section: a published version is final and a record keeps its version.
+- **Skills / agents**:
+  - `workflow-scaffold`: asks "can a later step send the person back here?", writes no-input moves with a closed schema, and applies the mapping rules.
+  - `view-design`: places buttons in the body and runs a per-button client check.
+  - `schema-design`: gets the no-input schema.
+  - `component-mapping`: covers helper reads, versioning and publish.
+  - `component-task`: picks status codes by side effect and keeps base URLs in a secret or config.
+  - `architect` gets design step 8 (forms and the client). `reviewer` gets Blocker and Suggestion items for all of the above.
+  - `security-review-checklist` covers tampering between steps, MockLab admin exposure, and redacting token bodies in browser-automation captures.
+- **`templates/docker-compose.yml.tmpl`**: MockLab is published on `127.0.0.1` only (its admin API is unauthenticated) and starts without the built-in sample mocks (`Mocklab__SeedSampleData=false`), whose contains-matching routes can answer real paths.
+
+### Fixed
+
+- **`scripts/cluster-publish.mjs`**:
+  - It now inlines a `sys-mappings` component's OWN `attributes.location`. Before, a helper was published with an empty `code` and every consumer failed at run time.
+  - `mappings` now publish before the tasks, functions and workflows that reference them.
+  - A `location` resolving outside `componentsRoot` is refused.
+  - A committed `NAT` code is compared in the right encoding when the script reports stale copies.
 
 ### Changed
 

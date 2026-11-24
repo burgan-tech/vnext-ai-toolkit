@@ -74,11 +74,27 @@ Seed files live under `etc/docker/config/seed/` and are imported on container st
 - `query.X` — query string parameter
 - `body.X` — JSON body field (dotted path supported)
 - `header.X` — request header
-- `route.X` — path parameter
+- `route.X` — path parameter (needs a `{param}` route; **0.0.10 does not match those** — use `path`, see `mocklab-seed-format.md` §3.1)
 - `method` — HTTP verb
 - `path` — request path
 
 Rules are evaluated in `priority` order (lower = first); first match wins. The default response (`statusCode`/`responseBody` at the mock level) is used when no rule matches.
+
+## Running MockLab in a cluster namespace (OpenShift, measured 24.11.2026)
+
+A domain that runs on a cluster can be tested against MockLab in **its own namespace** (same-namespace traffic is
+normally allowed by the platform's NetworkPolicies; the runtime then reaches `http://mocklab.<ns>.svc.cluster.local:5000`).
+The task URLs never change between mock and real: the base URL comes from configuration or a secret, so switching
+is one value.
+
+| Concern | Setting |
+|---|---|
+| OpenShift runs the pod with a random UID, and `/app` (where the SQLite DB lives) is not writable for it | `Mocklab__ConnectionString` **and** `ConnectionStrings__DefaultConnection` = `Data Source=/data/mocklab.db`, `/data` an `emptyDir` |
+| The sample mocks (`/api/users`, …) are imported by default and their contains-match catches real paths | `Mocklab__SeedSampleData=false` |
+| Seed delivery | a ConfigMap built from `etc/docker/config/seed/` mounted at `/app/seed`; a seed change = rebuild the ConfigMap + `rollout restart` (the emptyDir DB starts empty, so there is no stale-collection skip) |
+| `imported: 1, skipped: 2` in the log | normal: the ConfigMap mount exposes each file through two symlinks |
+| Exposure | a `ClusterIP` Service only, no Route. The admin API (`/_admin/*`) is unauthenticated — anyone in the namespace can rewrite answers; remove MockLab when the mocked phase ends |
+| Image | the runtime images already come from `ghcr.io`, which is a good sign the cluster can pull `ghcr.io/burgan-tech/mocklab` — but check, and pin by version |
 
 ## Scriban templating
 
@@ -92,7 +108,7 @@ Rules are evaluated in `priority` order (lower = first); first match wins. The d
 {{ request.body.amount }}                    # value from request JSON body
 {{ request.query["userId"] }}                # query parameter (bracket syntax)
 {{ request.headers["Authorization"] }}       # header
-{{ request.route.id }}                       # route parameter
+{{ request.route.id }}                       # route parameter (unusable on 0.0.10 — {param} routes don't match)
 ```
 
 Helpers take **space-separated args, no parentheses**. The exact helper set depends on the MockLab

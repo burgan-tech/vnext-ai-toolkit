@@ -24,7 +24,8 @@ const filters = process.argv.slice(2);
 console.error(`domain '${cfg.domain}': every call goes to ${origin}${dry ? ' (DRY — nothing is sent)' : ''}`);
 
 // Dependency order: what a component refers to is published before it.
-const ORDER = ['schemas', 'tasks', 'functions', 'mappings', 'extensions', 'workflows', 'views'];
+// `mappings` (sys-mappings helpers) go before anything that lists them in `scripts.helpers` (functions, workflows).
+const ORDER = ['schemas', 'mappings', 'tasks', 'functions', 'extensions', 'workflows', 'views'];
 const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
   const p = path.join(dir, e.name);
   if (e.isDirectory()) return e.name.startsWith('.') || e.name === 'src' ? [] : walk(p);
@@ -38,20 +39,30 @@ const files = ORDER.flatMap((kind) => {
 if (!files.length) fail('nothing to publish — no component matched.');
 
 // A mapping that names a sibling .csx (`location`) is sent with that file's text as base64 `code`.
+// Two places carry one: a script slot inside a component (mapping / rule / timer / output), and a
+// sys-mappings component's OWN attributes (`{ name, location, code, encoding }`) — the helper itself.
+// Missing the second published helpers with an empty `code`, and every consumer failed at run time.
 // A committed `code` that differs from the file is reported: the FILE is what gets sent.
+const componentsRoot = path.resolve(cfg.paths.componentsRoot);
+function fillCsx(m, baseDir, stale) {
+  const csx = path.resolve(baseDir, m.location);
+  // `location` is data from a JSON file: never read outside the components tree.
+  if (!csx.startsWith(componentsRoot + path.sep)) throw new Error(`csx outside ${cfg.paths.componentsRoot}/: ${m.location}`);
+  if (!fs.existsSync(csx)) throw new Error(`csx not found: ${csx}`);
+  const fresh = Buffer.from(fs.readFileSync(csx, 'utf8'), 'utf8').toString('base64');
+  // A NAT (plain text) committed code is compared in the same encoding as the file.
+  const committed = m.code && m.encoding === 'NAT' ? Buffer.from(m.code, 'utf8').toString('base64') : m.code;
+  if (committed && committed !== fresh) stale.push(m.location);
+  m.code = fresh;
+  m.encoding = 'B64';
+}
 function inlineCsx(node, baseDir, stale) {
   if (!node || typeof node !== 'object') return;
   if (Array.isArray(node)) return node.forEach((n) => inlineCsx(n, baseDir, stale));
+  if (typeof node.location === 'string' && node.location.endsWith('.csx') && 'code' in node && node.encoding !== 'REF') fillCsx(node, baseDir, stale);
   for (const key of ['mapping', 'rule', 'timer', 'output']) {
     const m = node[key];
-    if (m && typeof m === 'object' && typeof m.location === 'string' && m.location.endsWith('.csx')) {
-      const csx = path.resolve(baseDir, m.location);
-      if (!fs.existsSync(csx)) throw new Error(`csx not found: ${csx}`);
-      const fresh = Buffer.from(fs.readFileSync(csx, 'utf8'), 'utf8').toString('base64');
-      if (m.code && m.code !== fresh) stale.push(m.location);
-      m.code = fresh;
-      m.encoding = 'B64';
-    }
+    if (m && typeof m === 'object' && typeof m.location === 'string' && m.location.endsWith('.csx') && m.encoding !== 'REF') fillCsx(m, baseDir, stale);
   }
   for (const v of Object.values(node)) inlineCsx(v, baseDir, stale);
 }

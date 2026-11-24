@@ -12,9 +12,11 @@ services:
     image: ghcr.io/burgan-tech/mocklab:${MOCKLAB_VERSION:-0.0.10}
     container_name: mocklab
     ports:
-      - "3001:5000"
+      - "127.0.0.1:3001:5000"   # loopback only: the admin API is unauthenticated
     environment:
       Mocklab__SeedDirectory: /app/seed
+      # No built-in sample mocks (/api/users, /api/products…): matching is 'path contains route', so they can answer real paths.
+      Mocklab__SeedSampleData: "false"
     volumes:
       - ./etc/docker/config/seed:/app/seed
     networks:

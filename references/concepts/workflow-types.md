@@ -35,6 +35,21 @@ Each state in `attributes.states[]` carries a `stateType`. Conceptual mapping:
 
 **Pattern: Initial state input.** When the first state (an Initial `stateType: 1`, or whatever `startTransition.target` names) gathers input from the user before anything happens, the **default placement is `state.view`** (on the state itself), not on the outgoing transition. Reason: the runtime serves the state view immediately on instance start — the user sees the form right away and submits via a `view: null` transition. The reverse (form on the transition) requires the client to discover the transition and trigger it before any UI appears — an extra step with no UX benefit. The skill should propose this placement and confirm with the user (some flows want an intentional "intro → tap → form" two-step; `AskUserQuestion` with state-view marked Recommended). Wizard states (`stateType: 5`) are the exception — their form lives on the single outgoing transition by design.
 
+The submitting transition's own shape is NOT free once the form is in the state view — the client has rules
+about what it will fire (`client-forms-and-transitions.md`):
+- the state view needs a **button** carrying `urn:vnext:flow:transition:<domain>:<flow>:<tx>` (and it must be in
+  the view body, not in root `actions`, unless the root is a `Dialog`);
+- if a later step can send the person **back** to this form (Edit / correction loop), the submitting transition
+  must be **schema-less and view-less** with a whitelisting `ITransitionMapping`; with a schema, "Edit → submit
+  unchanged" is refused by the client;
+- if nothing sends the person back, `schema` = the input schema with `view: null` is fine.
+
+**Pattern: steps that take no input.** Approve / Edit / Cancel and similar moves take no body. Never leave their
+`schema` `null` — `null` means "accept any body and merge it into the data". Reference a closed empty schema
+(`additionalProperties: false`, `maxProperties: 0`). When a step executes what an earlier step checked and showed
+(check → confirm → execute), the checking step's output writes a **snapshot** of the checked input and the
+executing step's input mapping refuses to send when live data differs from it.
+
 ## 2.1 State alias (role-aware state labels)
 
 By default a state's **state function** returns `state.key`. A state can also carry an `alias`
