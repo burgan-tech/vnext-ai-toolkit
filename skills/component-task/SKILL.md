@@ -181,7 +181,7 @@ Write to the path from Step 1.
 
 ### 7. Shape the caller's binding: declarative blocks first, `.csx` when needed
 
-On a runtime/schema that supports them (first release after 0.0.106 — check the pinned versions), scaffold the caller's binding with declarative `input` / `output` blocks (`select`, `into`, `set`; no `.csx`) — `references/concepts/declarative-task-mappings.md`. Fall back to an `IMapping` `.csx` when the binding needs an environment-driven URL (the `API_BASEURL` placeholder of §3 is resolved only in an InputHandler), secrets, file reads, loops or helpers, and always for FanOut (21), Notification (10) and Human tasks, which reject blocks. A binding carries `mapping` **or** blocks, never both.
+On a runtime/schema that supports them (first release after 0.0.106 — check the pinned versions), scaffold the caller's binding with declarative `input` / `output` blocks (`select`, `into`, `set`; no `.csx`) — `references/concepts/declarative-task-mappings.md`. The `API_BASEURL` placeholder of §3 is one input expression: `"$.url": "task.url.ToString().Replace(\"API_BASEURL\", config.get(\"<Key>\", \"<default>\"))"`. Fall back to an `IMapping` `.csx` when the binding needs secrets, file reads, loops or helpers, and always for FanOut (21), Notification (10) and Human tasks, which reject blocks. A binding carries `mapping` **or** blocks, never both.
 
 When a `.csx` is needed: most consumers (transitions, functions) attach a mapping to their reference of this task. The mapping lives in the **caller's** `src/` folder, not the task's:
 

@@ -201,7 +201,7 @@ These can be deferred (scaffold the workflow first with placeholder refs, then f
 
 ### 7. Shape task bindings — declarative blocks first, then `.csx`
 
-For each `onEntries` / `onExits` / `onExecutionTasks` entry, first try declarative `input` / `output` blocks (`select`, `into`, `set` with Dynamic Expresso expressions) — `references/concepts/declarative-task-mappings.md` has the shape, variables (`data`, `input`, camelCase `instance`, `now`, `user`, `result`), surfaces per task type and the cases that still need a `.csx` (environment-driven URL, secrets, loops/helpers, FanOut/Notification/Human). Requires the first runtime release after 0.0.106 and a vnext-schema with the blocks; on older pins use `.csx`.
+For each `onEntries` / `onExits` / `onExecutionTasks` entry, first try declarative `input` / `output` blocks (`select`, `into`, `set` with Dynamic Expresso expressions) — `references/concepts/declarative-task-mappings.md` has the shape, variables (`data`, `input`, camelCase `instance`, `now`, `user`, `task`, `config`, `result`), config-field input targets (`$.url`, `$.body.x`, `$.headers.x`), the `API_BASEURL` URL as one expression, and the cases that still need a `.csx` (secrets, loops/helpers, FanOut/Notification/Human). Requires the first runtime release after 0.0.106 and a vnext-schema with the blocks; on older pins use `.csx`.
 
 For each entry that needs a `.csx` input/output mapping:
 

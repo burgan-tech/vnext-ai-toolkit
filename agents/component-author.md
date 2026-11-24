@@ -30,7 +30,7 @@ Rules:
   component if it doesn't exist, and normally set `startTransition.schema` to the same.
 - For task bindings, prefer declarative `input` / `output` blocks (`select`, `into`, `set`) when the
   project's runtime/schema support them (`references/concepts/declarative-task-mappings.md`); write a `.csx` only for what blocks cannot do
-  (environment-driven URL, secrets, loops/helpers, FanOut/Notification/Human).
+  (secrets, file reads, loops/helpers, FanOut/Notification/Human).
 - For workflows: author C# `.csx` mappings/rules under the workflow's `src/` folder
   (classes PascalCase, inheriting `ScriptBase` and implementing `IMapping`/condition
   interfaces) and a `.http` test file. **Never** manually base64-encode `.csx` into
