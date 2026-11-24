@@ -24,7 +24,10 @@ flow; a person approves it; the environment's agent builds it.
 - The request record is created by the click that opens the first form, so a walk that is given up is
   **abandoned**, not closed.
 - The name becomes the namespace, the gateway route and the registry entry. It cannot change later, and
-  removing a domain is irreversible.
+  removing a domain is irreversible. A removed domain's discovery entry stays ("removed · discovery keeps
+  it"), so the same name cannot be requested again until the platform retires that entry
+  (burgan-tech/vnext-platform#10). Deleting the namespace with `oc` removes even less: the request record,
+  the discovery entry and the Vault engine all survive.
 - Access is a list of directory user names. Each becomes an admin of the domain's namespace and of nothing
   else. **Publishing needs one of them**: anyone else gets `Forbidden` from the namespace.
 - Whether the requester may approve their own request is the platform's four-eyes switch.
@@ -68,10 +71,22 @@ engine). Measured 24.11.2026 on a `dev` domain:
 | Fact | Consequence |
 |---|---|
 | The domain owner has **no** direct Vault access (no CLI token, no rights in the platform's Vault namespace) | secrets are written through the back-office client's **System Flows › \<domain\> › Secrets** screen (a proposal → approve → **apply**). An approved but unapplied proposal writes nothing |
-| That screen's model is **one secret = one field, `value`** | design each secret as one value and read it with `GetSecretAsync("vnext-<domain>-secret", "<name>", "value")` — a multi-key bundle cannot be written from there. The screen's "Read with" column shows the exact line |
+| That screen's model is **one secret = one field, `value`** | design each secret as one value and read it with `GetSecretAsync("vnext-<domain>-secret", "<name>", "value")` — a multi-key bundle cannot be written from there. The screen's "Read with" column shows the exact line. **But every such secret shares the key name `value`, and the store already holds one (`platform-kafka`); see the startup row below before writing any** |
 | The runtime's Dapr component carries its OWN Vault token | never use it to write or read on the person's behalf; that is the runtime's credential, not theirs |
 | A missing secret faults the task: `Failed to retrieve secret 'value' from store 'vnext-<domain>-secret'` | the Dapr answer underneath says which: `secret key or version not exist` = not written (check the Secrets list); a timeout/`context canceled` = reachability |
 | Script secret reads are cached ~30 s | a value changed in Vault (mock → real URL) takes up to that long to show |
+| **The orchestrator loads the WHOLE store as configuration at startup** (`AddDaprSecretStore`, `vaultValueType: map`): every key of every secret becomes one configuration key, so two secrets with the same key name collide | the orchestrator dies at its next start with `InvalidOperationException: A duplicate key 'value' was found in the secret store 'vnext-<domain>-secret'` and stays in CrashLoopBackOff. Publishing, the menu and every start then fail, because they all go through it. Measured 24.11.2026: the platform's own `platform-kafka` secret carries a `value` key, so the FIRST `value`-shaped secret added from the Secrets screen (here `fora-wire-service-url`) took the orchestrator down. It surfaces only at a restart, so it can show up long after the secret was written |
+
+**Before writing a secret into a domain's store**, list what is there (a Dapr bulk read from a pod's sidecar
+names the secrets and their keys without printing values). Never add a second secret whose key name another
+secret already uses. As long as the Secrets screen only writes `value`, a domain whose store holds
+`platform-kafka` cannot take a screen-written secret without this crash. That is a platform fix: raise it on
+`burgan-tech/vnext-platform` rather than working around it.
+
+**When the orchestrator is in CrashLoopBackOff**, read its log first (`oc -n <ns> logs deploy/vnext-<domain>-orchestrator --all-containers`).
+For "duplicate key", the fix is removing or renaming the colliding secret's key in Vault, not deleting
+the domain. A deleted namespace does not take the Vault engine with it, and it locks the name
+(`domain-request` § What is the person's).
 
 Put **environment-specific addresses** (a base URL that is a mock in one phase and the real service in the next)
 in such a secret rather than in task JSON: switching is then one value, with no component publish.
