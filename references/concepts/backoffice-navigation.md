@@ -47,8 +47,18 @@ move carrying the whole `attributes` — no publish, no version bump.
   that opens the record with the flow's moves in its Transitions menu. The domain writes no view for it.
 - **The New button exists only when the entry carries `payload.create`**, and its text is
   `create.label` — the client shows the entry for its current language.
-- New starts the flow directly. A start whose schema asks for nothing required creates the record at once,
-  with no form; what a person should type is then collected on the first move.
+- New starts the flow directly, with an **empty body**. A start whose schema asks for nothing required creates
+  the record at once, with no form; what a person should type is then collected on the first move.
+- **A `required` field anywhere on the start path makes New fail, and no record is created.** Measured
+  24.11.2026 on the staff client:
+  - a `required` in the start transition's schema → `400 App:900002` "JSON schema validation failed";
+  - a `required` in the flow's **master** schema → `500`, with "Start transition validation failed" in the
+    orchestrator log. The first data write is validated against the master schema too.
+
+  The person sees "That did not go through" and nothing opens. Before adding `create` to an entry, check
+  that neither schema has `required`. The master never should (`schema-design`). Move a value the person
+  must give, such as a customer number, to the first manual transition's form, and enforce it in that
+  transition's mapping, before anything depends on it.
 - `sys-record-list` is a different view: the envelope list for `sys-*` records, with no create, no analysis
   and a read-only row. It is the wrong one for a business flow.
 - A keyed item is a ROUTE across the whole client. Prefix keys with the domain; a key another group already

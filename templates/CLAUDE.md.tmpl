@@ -122,6 +122,9 @@ The first question for any view is **which renderer** — `pseudo-ui` (recommend
 - **Auto (`triggerType: 1`) and timer (`2`) transitions** — `view: null`; passive intermediate states usually have no view either.
 - **`dataSchema` follows the view's role** — transition/input views bind a `transition`-role schema; display/summary views bind the `master` schema (which deliberately has no `required` and `additionalProperties: true`); an embedded component's own schema is `component` (where `x-binding` lives).
 - **A parent changing a SubFlow child's view** — `subFlow.overrides.states.<s>.views` / `transitions.<k>.views`, never a fork of the child (`subflow-overrides.md`).
+- **A button on the record's own view** — `"command": "urn:vnext:flow:transition:<domain>:<flow>:<tx>"` (no id segment). `urn:amorphie:wf:…` is parsed by no client ("No handler"), and `…:${param}:<tx>` is not filled on a state view (guide §4.3).
+- **Components have no `showIf`** — it is ignored and every guarded block renders. Use `visible: "$expr"` (truthy only), a bound `{tr,en}` object for per-language text, or an `x-enum` label for enum values (guide §2.5).
+- **A flow with a back-office New button** — New starts with an empty body: no `required` in the start schema or the master schema, or no record is created (`backoffice-navigation.md`).
 
 ### Functions — `.csx` pattern and BFF modes
 

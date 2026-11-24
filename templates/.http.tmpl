@@ -26,7 +26,8 @@ act_sub: {{actSub}}
 sub: {{sub}}
 
 {
-  /* Initial payload — match the workflow's master schema required fields */
+  /* Initial payload — fields the START transition's schema accepts. The master schema carries no `required`.
+     Keep the start schema free of `required` too if the flow gets a back-office New button: New sends an empty body. */
 }
 
 ###
