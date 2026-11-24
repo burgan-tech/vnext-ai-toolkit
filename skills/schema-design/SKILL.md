@@ -65,6 +65,13 @@ Capture `paths.componentsRoot`, `paths.schemas`, `domain`. Target write path:
 - **Editing an existing schema with a legacy value** (`workflow`, `schema`, `view`, `headers`,
   `task-input` …): map it by actual usage (table in `schema-vocabularies.md` §2) and fix it in the same
   change. The runtime still publishes legacy values with a warning; `npm run validate` refuses them.
+- **A move that takes no input still gets a `transition` schema** — the closed empty one:
+  `{"type":"object","properties":{},"additionalProperties":false,"maxProperties":0}`. One per domain is enough
+  (e.g. `<flow>-no-body`); every Approve / Edit / Cancel references it. A transition left at `schema: null`
+  merges any body into instance data (`transition-pipeline.md` §1.1).
+- **An input schema that a state-view form re-submits in an Edit loop** is still written (the view's `dataSchema`
+  uses it for client-side validation), but the transition must not reference it — see
+  `client-forms-and-transitions.md` §3; repeat its format rules in the next task's output mapping.
 - Which view binds to which role: state view → `master`; transition/input view → `transition`; embedded
   `Component` → `component` (`references/concepts/view-roles.md`).
 

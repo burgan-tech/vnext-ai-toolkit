@@ -9,8 +9,11 @@
 3. **Repeated logic goes to `sys-mappings` first.** If the same `.csx` structure appears in more than one place, extracting a `sys-mappings` helper is the *primary* approach, not an afterthought. See `mappings-and-scripts.md`.
 4. **`context.Related` is for correlation data only** (parent / subflow / subprocess of *this* instance, v0.0.79+). Any other cross-instance data must be fetched with a Task.
 5. **Return delta-only output from mappings** (v0.0.79+ immediate-persistence write model): `ScriptResponse.Data` should contain **only the fields you changed**, never a full echo of the instance data — a full echo overwrites concurrent writers' fresher values with stale ones (this bites hardest under parallel branches and `updateData` storms).
-6. **`InputHandler` is not a gate** (#1087). Its return value is audit-only; the task runs whatever it returns. Validate *before* the task, or `throw`. See `IMapping` below.
+6. **`InputHandler` is not a gate** (#1087). Its return value is audit-only; the task runs whatever it returns. Validate *before* the task, or `throw` — but `throw` only for infrastructure faults; a business rule routes (rule 9). See `IMapping` below.
 7. **Encrypted fields arrive as tokens** (0.0.99+). Open them with `await context.Instance.DecryptAsync(path, context.CancellationToken)`, never by copying the token. See § Encrypted fields.
+8. **`null` does not clear a value.** The instance-data merge **ignores a `null` on a key that already exists** and deep-merges nested objects (measured with the runtime's own `JsonCanonicalizer.MergeAndCanonicalize`, 0.0.106). `errorMessage = null` after an earlier error leaves the old message on screen. Clear with `""`, and when an output has an ok branch and an error branch, **write every field in both** — otherwise the error branch leaves the last ok values behind. A `null` under a key that does not exist yet IS stored (and then fails a master schema that types the field as `"string"`).
+9. **Business rules route; infrastructure throws.** A `throw` in a task's `InputHandler` faults the instance **in the state that runs the task**. When that state is passive (auto transitions only, no view), the person is stuck: `cancel` is usually not available there, and a retry runs the same bad data again. Check business rules (same account twice, amount ≤ 0, format) in the `OutputHandler` (or a rule) and write a status the auto pair routes on — back to the form with a message. `throw` only for what a retry can fix (missing secret, wrong task type, an unreachable dependency).
+10. **After a call with a side effect, an inconsistent success faults — it never routes to "nothing happened".** A 2xx from a money-moving / record-creating call that lacks the field you need (reference number, id) means the effect probably happened. `throw` (incident, reconcile, idempotent retry); do not route to a "failed — nothing was done" state.
 
 ## NuGet packages
 
@@ -641,6 +644,24 @@ public class MyTransitionMapping : ScriptBase, ITransitionMapping
 }
 ```
 
+What `Handler` returns is what gets merged into instance data **instead of** the request body. That makes it
+the server-side gate for a transition that has to stay schema-less (`client-forms-and-transitions.md` §3):
+copy only the known keys, drop the rest.
+
+```csharp
+public class OrderInputMapping : ScriptBase, ITransitionMapping
+{
+    private static readonly string[] Fields = { "sourceAccount", "targetAccount", "amount", "note" };
+    public Task<dynamic> Handler(ScriptContext context)
+    {
+        IDictionary<string, object> output = new ExpandoObject();
+        foreach (var f in Fields)
+            if (HasProperty(context.Body, f)) output[f] = Convert.ToString(GetPropertyValue(context.Body, f));
+        return Task.FromResult<dynamic>(output);   // an absent field stays as the record has it
+    }
+}
+```
+
 ### `WorkflowTask` and concrete task types
 
 `InputHandler(WorkflowTask task, …)` receives the task definition; cast to the concrete type to mutate config:
@@ -706,6 +727,14 @@ See `references/concepts/mappings-and-scripts.md`.
 
 > A reusable *mapping* (vs a static helper) may implement a mapping interface — the example
 > `initial-mapping` uses **`ITransitionMapping`** (`Handler(ScriptContext)` → `dynamic`).
+
+
+**A static helper has no `ScriptBase`.** Golden rule 1 still applies inside it: instance data and `Body` are
+`ExpandoObject`, so read through `IDictionary<string, object>` (`obj is IDictionary<string, object> d &&
+d.TryGetValue(name, out var v)`), never `dynamic` member access. Give the helper a namespace and `using` it in
+the consumers. **A published helper version is immutable**: changing its `.csx` means a new `version` on the
+`sys-mappings` component AND on every `scripts.helpers` reference to it — otherwise the consumers keep running the
+old code (publish answers `409` for the unchanged version and sends nothing).
 
 ## Runtime notes that bite scripts (v0.0.81 – v0.0.87)
 

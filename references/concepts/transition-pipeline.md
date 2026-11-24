@@ -97,6 +97,14 @@ rule-based list mirroring `view` / rule-based views and the function `inputSchem
 | Read path | the instance `schema` function serves the matched entry, `404` on no match; `hasSchema` in `transitions[]` is **declared-only** (`schema` or a non-empty `schemas`), like `hasView` |
 | Cache | the schema-function cache key and ETag hash the non-volatile request headers (`RequestHeaderHash`), so a header-driven rule never serves another caller's entry or a false `304` |
 
+**"Nothing declared → accepted" is a write, not a no-op.** A manual transition with `schema: null` (and no
+`mapping`) merges the whole request body into instance data unvalidated — any key, including keys a later task
+reads (an amount, a target account). Measured on 0.0.106: `{"amount":"50000.00"}` sent to a schema-less
+`approve` overwrote the confirmed amount. Rules:
+- a move that takes no input → a closed empty schema (`additionalProperties: false`, `maxProperties: 0`);
+- a move that must stay schema-less for the client's sake (`client-forms-and-transitions.md` §3) → a
+  `transition.mapping` (`ITransitionMapping`) that copies only the known keys and drops the rest.
+
 Design guidance: use `schemas` when **one transition** takes differently shaped bodies (retail vs
 corporate, channel-specific forms, a role-specific contract via `context.Caller`). Selecting a schema by
 role is not authorization: test positively and keep the fallback the **least privileged** contract. Keep a rule-less fallback last unless refusing every unmatched

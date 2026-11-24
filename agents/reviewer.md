@@ -17,6 +17,18 @@ Checklist:
 - Conventions: `key` matches filename and `^[a-z0-9-]+$`; `domain` matches
   vnext.config.json; correct `flow`/`flowVersion` for the component type; semver
   `version`, bumped appropriately for breaking vs. non-breaking changes.
+- Forms and transitions (`references/concepts/client-forms-and-transitions.md`) — Blocker when:
+  a manual transition that takes no input has `schema: null` (any body merges into data);
+  a `Column`-rooted view carries its buttons in root `actions` (never drawn);
+  a state-view form with a way back (Edit loop) submits to a transition that has a schema (the client
+  refuses an unchanged re-submit); a state view whose only way forward is "use the Transitions menu".
+  Suggestion when: the same inputs are in a state view AND a schema-only, view-less transition.
+- Mappings (`csx-contracts.md` golden rules 1, 8–10): dynamic member access without `HasProperty` /
+  `GetPropertyValue` (or `IDictionary` in a static helper); an output that clears with `null` or writes a
+  field in only one branch; a business-rule `throw` in an `InputHandler` of a passive state; a side-effecting
+  call whose 2xx-without-reference routes to a "nothing happened" state; `acceptedStatusCodes` that accepts
+  5xx on a side-effecting call.
+- Versions: a changed `sys-mappings` helper or view without a new version AND moved references.
 - References: every nested `{ key, domain, flow, version }` reference resolves to an
   existing component. Workflow `startTransition` and transitions point to defined
   states; auto transitions (`triggerType: 1`) cover every branch — mutually-exclusive

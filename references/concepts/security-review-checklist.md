@@ -120,6 +120,15 @@ Not a finding:
   gateway model, not a runtime defect. Verify with `authorize` instead and report only if the
   grants themselves are wrong.
 
+### 2.x Data tampering between steps (measured 24.11.2026)
+
+- A manual transition with `schema: null` and no `mapping` merges **any** request body into instance data. On a
+  confirm → execute pair this lets a caller change the amount / target after the confirm screen. Require a closed
+  empty schema on input-less moves, a whitelisting `ITransitionMapping` on a transition that must stay schema-less,
+  and a snapshot compare in the executing mapping (`client-forms-and-transitions.md` §4).
+- A money-moving or record-creating flow with no `roles` / `queryRoles` lets anyone who reaches the gateway start,
+  approve and read it; maker = checker unless a separate approver role (and a `$InstanceStarter` deny) exists.
+
 ## 3. Injection and unsafe execution
 
 - Review task/function `.csx` mappings for unvalidated instance data reaching SQL, command
@@ -279,6 +288,15 @@ Not a finding: MD5/CRC used for non-security checksums or cache keys.
   environment); handlers do not log their input. Local Python overlays keep `read_only`, `cap_drop: ALL`
   and `no-new-privileges`; shared environments use the Helm `pythonRuntime` block, whose NetworkPolicy
   admits only the Orchestration pods.
+
+
+- **Mocks in shared namespaces.** MockLab's admin API (`/_admin/*`) is unauthenticated: anyone who can reach the
+  Service can rewrite answers (e.g. fake a successful transfer). ClusterIP only, no Route; restrict it with a
+  NetworkPolicy to the execution pod when the namespace is shared; remove it when the mocked phase ends. Locally,
+  publish its port on `127.0.0.1` only.
+- **Browser automation evidence.** A recorder that logs request bodies captures the client's background token
+  renewals (refresh tokens). Never log bodies of identity/token/login calls; redact `*token*`, `password`, `otp`,
+  `secret` fields; delete capture files after use.
 
 ## Verification rubric
 

@@ -100,7 +100,10 @@ Ask the user:
   - Never point a transition view at the master schema "just to keep things uniform" — you lose the input-side semantics (required/LOV/validation) and file fields break (the master's `x-storage` node cannot carry `content`).
   - Check the referenced schema's `attributes.type` matches the placement; a legacy value (`workflow`, `view` …) or a mismatch → fix it with the `schema-design` skill (it splits a multi-role schema). If none exists, run `schema-design` first.
 - **Localization** — Turkish + English labels?
-- **Interactions** — which buttons / transitions does it trigger?
+- **Interactions** — which buttons / transitions does it trigger? For each button, decide with `references/concepts/client-forms-and-transitions.md`: a state-view button fires
+  `urn:vnext:flow:transition:<domain>:<flow>:<tx>` with the view's data (R1); a prefilled form that can be re-submitted
+  unchanged needs a schema-less target transition (R3); the same inputs must not also appear as a schema-only
+  transition in the Transitions menu (R2). Ask whether the person can come back to this form after a later step.
 
 ### 6. Look at a sibling example (cheap context)
 
@@ -194,6 +197,12 @@ A view binds in one of three places, and each is the same reference object:
 - `Icon.name` and `Button.icon` values are Material Symbols (MD3) tokens — lowercase `snake_case`. Never kebab-case (`check-circle`), Font Awesome (`fa-check`), or invented names.
 - When the parent state is a Wizard (`stateType: 5`), keep `state.view = null`; the view belongs on that state's (single) transition.
 - **Action model.** Reserved verbs: `submit` (validates by default), `select` (inline set, host NOT called), `reset` (clears formData, runs hooks), `dispatch` (domain dispatch; optional `validate`). The target lives in `command` as a URN (`urn:vnext` scheme) — flow transitions: `urn:vnext:flow:transition:{domain}:{flow}:{transition}`; functions: `urn:vnext:fn:{cmd}:{domain}:{fn}`; client-local nav: `urn:client:nav:/path`. For `Card.onTap`, use `{ "action": "dispatch", "command": "urn:vnext:..." }` or the inline `{ "action": "select", "bind": "...", "value": "..." }`. Attach `preHooks`/`postHooks` for audit/telemetry side-effects (see `view-author-guide.md` §4). Don't invent verbs like `"transition"`.
+- **Buttons go in the body unless the root is a `Dialog`.** Root-level `actions` is drawn only for a `Dialog` root (and the
+  app bar); on a `Column`-rooted state/transition view it is dropped silently. End the body with a `Row`
+  (`mainAxisAlignment: "end"`) of `Button`s (`view-author-guide.md` §3.5).
+- **Placement note — the Initial-state form.** `state.view` is still the default, but the transition it submits to is
+  constrained by the client (`client-forms-and-transitions.md` §2). Never add an intro screen that says "use the
+  Transitions menu".
 - **Auto transitions never carry a view.** `triggerType: 1` (auto/rule) and `triggerType: 2` (timer) must have `transition.view = null`. Auto-state (`stateType: 2`) whose only outgoing transitions are auto/timer should also have `state.view = null` — these states aren't user-facing.
 - **Stepper is for true multi-step forms on one screen** (`steps[].title` + `steps[].content` both required). Don't use it as a wizard progress indicator across separate state views; a simple `Text` "Adım X / N" at the top of each view is the right pattern.
 - **Schema hints the view gets for free**: `x-order` (field order in generated forms), `x-helpText`, `x-placeholder`, `x-uiHint`, `x-group` live on the schema, not in the view. Schema condition operators (`x-conditional`, `x-computed` `when`) are `equals`, `notEquals`, `in`, `notIn`, `isEmpty`, `isNotEmpty`, `contains`, `greaterThan`, `lessThan`, `greaterThanOrEquals`, `lessThanOrEquals`, `startsWith`, `endsWith` — nothing else.

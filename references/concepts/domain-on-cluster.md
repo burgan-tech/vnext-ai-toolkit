@@ -59,3 +59,27 @@ The toolkit ships no address. Resolve them in this order and say which one answe
 
 `oc login` with a password can fail before it asks anything, with a certificate error; the console's
 **Copy login command** (a token) is the way in. Never ask for the token in chat and never type a password.
+
+## Secrets a domain reads
+
+A built domain has a Dapr secret store named **`vnext-<domain>-secret`** (HashiCorp Vault, the domain's own
+engine). Measured 24.11.2026 on a `dev` domain:
+
+| Fact | Consequence |
+|---|---|
+| The domain owner has **no** direct Vault access (no CLI token, no rights in the platform's Vault namespace) | secrets are written through the back-office client's **System Flows › \<domain\> › Secrets** screen (a proposal → approve → **apply**). An approved but unapplied proposal writes nothing |
+| That screen's model is **one secret = one field, `value`** | design each secret as one value and read it with `GetSecretAsync("vnext-<domain>-secret", "<name>", "value")` — a multi-key bundle cannot be written from there. The screen's "Read with" column shows the exact line |
+| The runtime's Dapr component carries its OWN Vault token | never use it to write or read on the person's behalf; that is the runtime's credential, not theirs |
+| A missing secret faults the task: `Failed to retrieve secret 'value' from store 'vnext-<domain>-secret'` | the Dapr answer underneath says which: `secret key or version not exist` = not written (check the Secrets list); a timeout/`context canceled` = reachability |
+| Script secret reads are cached ~30 s | a value changed in Vault (mock → real URL) takes up to that long to show |
+
+Put **environment-specific addresses** (a base URL that is a mock in one phase and the real service in the next)
+in such a secret rather than in task JSON: switching is then one value, with no component publish.
+
+## A published version is final — and a record keeps its version
+
+- Publishing an existing key+version answers `409` and changes nothing. Any change to a component — including a
+  `sys-mappings` helper's `.csx` — is a new `version`, and every reference to it (`scripts.helpers`, a view
+  reference in a workflow) must be moved to that version too.
+- A record runs on the `flowVersion` it started with. After publishing a fix, test it on a **new** record and tell
+  the person that tabs opened earlier still show the old behaviour.

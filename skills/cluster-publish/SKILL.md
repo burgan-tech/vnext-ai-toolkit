@@ -105,11 +105,18 @@ pgrep -fl 'port-forward svc/<orchestrator service>' || echo 'no forward process'
 
 In the back-office client, the domain's Flows list shows each published flow by key.
 
-## Not measured
+## Measured since, and not measured
 
-A load that carries `.csx` mappings through this script, and a domain whose flows are pinned by a
-version-registry pointer (a newly published version then stays pending until the pointer moves — see
-`runtime-operations.md`). Say so in the report when either applies.
+- **`.csx` through this script** — measured 24.11.2026: workflow mappings, rules and transition mappings, and a
+  `sys-mappings` helper (its own `attributes.location`), all inlined and run on the cluster. A helper is
+  published before the components that list it in `scripts.helpers`.
+- **Changing a helper or a view** means a new version for it AND for every reference to it; otherwise the publish
+  answers `409` for the reference holder and the cluster keeps the old code. A record keeps the `flowVersion` it
+  started with — prove a fix on a new record (`domain-on-cluster.md` § A published version is final).
+- **A flow that reads secrets**: write them first (`domain-on-cluster.md` § Secrets a domain reads); a start that
+  reaches the reading task with no secret ends Faulted with an incident.
+- Not measured: a domain whose flows are pinned by a version-registry pointer (a newly published version then
+  stays pending until the pointer moves — see `runtime-operations.md`). Say so in the report when it applies.
 
 ## Example requests
 
