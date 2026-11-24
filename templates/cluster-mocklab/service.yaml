@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: mocklab
+  labels:
+    app.kubernetes.io/name: mocklab
+    app.kubernetes.io/part-of: vnext-{{domain}}-mocks
+spec:
+  selector:
+    app.kubernetes.io/name: mocklab
+  ports:
+    - name: http
+      port: 5000
+      targetPort: http

@@ -27,6 +27,7 @@ is nothing to request: say so and stop.
     engine stay;
   - a new request for the same name is refused at step 1 with "'<env>.<domain>' is already a domain built
     through PRIMUM — choose another name" (burgan-tech/vnext-platform#10).
+  - the domain's Vault token is not revoked: its id was in a Secret of the deleted namespace.
 
   A broken domain is fixed in place (often one Vault value, see `domain-on-cluster.md` § Secrets). Give it up
   only through the platform's own remove, and only on the person's explicit yes. Say that the name stays

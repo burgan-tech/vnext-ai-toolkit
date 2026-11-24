@@ -1,0 +1,61 @@
+# MockLab for the {{domain}} domain on a platform-managed cluster (namespace {{namespace}}).
+# Seed comes from ConfigMap `mocklab-seed` (built from the workspace seed folder by apply.sh).
+# DB lives in an emptyDir: every pod start re-imports the seed from scratch (no stale-collection skip).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mocklab
+  labels:
+    app.kubernetes.io/name: mocklab
+    app.kubernetes.io/part-of: vnext-{{domain}}-mocks
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: mocklab
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: mocklab
+        app.kubernetes.io/part-of: vnext-{{domain}}-mocks
+    spec:
+      containers:
+        - name: mocklab
+          image: ghcr.io/burgan-tech/mocklab:0.0.10
+          ports:
+            - name: http
+              containerPort: 5000
+          env:
+            - name: Mocklab__SeedDirectory
+              value: /app/seed
+            - name: Mocklab__SeedSampleData
+              value: "false"
+            # /app is not writable by OpenShift's random UID — keep the SQLite DB in the emptyDir.
+            - name: Mocklab__ConnectionString
+              value: Data Source=/data/mocklab.db
+            - name: ConnectionStrings__DefaultConnection
+              value: Data Source=/data/mocklab.db
+          volumeMounts:
+            - name: seed
+              mountPath: /app/seed
+              readOnly: true
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: seed
+          configMap:
+            name: mocklab-seed
+        - name: data
+          emptyDir: {}

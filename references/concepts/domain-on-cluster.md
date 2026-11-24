@@ -27,7 +27,9 @@ flow; a person approves it; the environment's agent builds it.
   removing a domain is irreversible. A removed domain's discovery entry stays ("removed · discovery keeps
   it"), so the same name cannot be requested again until the platform retires that entry
   (burgan-tech/vnext-platform#10). Deleting the namespace with `oc` removes even less: the request record,
-  the discovery entry and the Vault engine all survive.
+  the discovery entry and the Vault engine all survive. So does the domain's Vault token: its id lived in a Secret
+  of the deleted namespace, so the platform can no longer revoke it. A domain requested again under the same name
+  gets a policy of the same name, which that old token can read (vnext-platform `agent/internal/step/vault.go`).
 - Access is a list of directory user names. Each becomes an admin of the domain's namespace and of nothing
   else. **Publishing needs one of them**: anyone else gets `Forbidden` from the namespace.
 - Whether the requester may approve their own request is the platform's four-eyes switch.
@@ -77,6 +79,11 @@ engine). Measured 24.11.2026 on a `dev` domain:
 | Script secret reads are cached ~30 s | a value changed in Vault (mock → real URL) takes up to that long to show |
 | **The orchestrator loads the WHOLE store as configuration at startup** (`AddDaprSecretStore`, `vaultValueType: map`): every key of every secret becomes one configuration key, so two secrets with the same key name collide | the orchestrator dies at its next start with `InvalidOperationException: A duplicate key 'value' was found in the secret store 'vnext-<domain>-secret'` and stays in CrashLoopBackOff. Publishing, the menu and every start then fail, because they all go through it. Measured 24.11.2026: the platform's own `platform-kafka` secret carries a `value` key, so the FIRST `value`-shaped secret added from the Secrets screen (here `fora-wire-service-url`) took the orchestrator down. It surfaces only at a restart, so it can show up long after the secret was written |
 
+The platform hit the same crash on PRIMUM itself (`duplicate key 'clientId'`, 01.11.2026) and set the rule there:
+**one field name, one secret** in any engine a runtime reads as a secret store (vnext-platform `platform-lab/FINDINGS.md` #102).
+The domain-side writers do not follow it yet. The agent's `vault-secret` step stores under `value` when no key is given,
+and both `secret.write` (the Secrets screen) and `platform-kafka` use that default.
+
 **Before writing a secret into a domain's store**, list what is there (a Dapr bulk read from a pod's sidecar
 names the secrets and their keys without printing values). Never add a second secret whose key name another
 secret already uses. As long as the Secrets screen only writes `value`, a domain whose store holds
@@ -90,6 +97,28 @@ the domain. A deleted namespace does not take the Vault engine with it, and it l
 
 Put **environment-specific addresses** (a base URL that is a mock in one phase and the real service in the next)
 in such a secret rather than in task JSON: switching is then one value, with no component publish.
+
+## Moving a workspace to another domain
+
+When a flow has to move to a different domain (the first domain is broken, or the name is locked), the workspace
+is retargeted, not rebuilt. Measured 24.11.2026 moving an IBAN-transfer flow from `iban-transfer` to `mehmet2`:
+
+| Change | Where |
+|---|---|
+| `vnext.config.json` → `domain`, and `paths.componentsRoot` (rename the folder to match) | config, folder |
+| every component envelope's `"domain"` and every reference object's `"domain"` | all component JSON |
+| schema `$id` URNs and every view `dataSchema`: `urn:…:schema:<old>:` → `urn:…:schema:<new>:` | Schemas, Views |
+| view commands `urn:vnext:flow:transition:<old>:…` | Views |
+| MockLab seed routes `api/<old>/…`, its collection name and file name; HTTP task URLs pointing at those routes | seed, Tasks |
+| strings inside `.csx` that carry the domain: secret store `vnext-<old>-secret`, idempotency client ids, log tags | mappings, then re-embed if the workspace keeps embedded `code` |
+| the menu record: `payload.domain`, and item keys prefixed with the domain | `records/backoffice-side.json` |
+| deploy scripts, the namespace `<env>-vnext-<old>`, the orchestrator Service name; test config (`Domain`, app ids) | `deploy/`, `tests/` |
+
+**Never blind-replace the old name.** A workflow key, a schema key or a tag often IS the old domain name (an
+`iban-transfer` flow inside an `iban-transfer` domain), and those must not change. Replace the domain only in
+the positions above, with patterns anchored on them (`"domain": "<old>"`, `schema:<old>:`, `api/<old>/`,
+`vnext-<old>`), then grep for what is left and read each hit. Run `npm run validate` and publish with
+`cluster-publish`. Every component is new in the target domain, so versions can stay as they are.
 
 ## A published version is final — and a record keeps its version
 

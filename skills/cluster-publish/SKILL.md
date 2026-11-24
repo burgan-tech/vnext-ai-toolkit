@@ -115,6 +115,13 @@ In the back-office client, the domain's Flows list shows each published flow by 
   started with — prove a fix on a new record (`domain-on-cluster.md` § A published version is final).
 - **A flow that reads secrets**: write them first (`domain-on-cluster.md` § Secrets a domain reads); a start that
   reaches the reading task with no secret ends Faulted with an incident.
+- **A flow whose tasks call MockLab** (`http://mocklab:5000/...`): a built domain has no MockLab, so those tasks
+  fail on the cluster until one runs in the namespace. Measured 24.11.2026: a domain access user (namespace admin)
+  can run one. Copy `templates/cluster-mocklab/` into the workspace as `deploy/mocklab/` and replace `{{domain}}`
+  and `{{namespace}}`. Run it before the proving start, with the person's yes: it creates a Deployment, a Service
+  `mocklab:5000` and a ConfigMap `mocklab-seed` built from the seed folder. Re-run it after a seed change. The DB is an
+  emptyDir, so every restart is a clean import. A ConfigMap holds at most 1 MiB of seed. Once the real upstream
+  exists, point the task at it through a secret rather than editing task JSON (`domain-on-cluster.md`).
 - Not measured: a domain whose flows are pinned by a version-registry pointer (a newly published version then
   stays pending until the pointer moves — see `runtime-operations.md`). Say so in the report when it applies.
 
