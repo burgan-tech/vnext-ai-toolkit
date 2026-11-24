@@ -253,6 +253,23 @@ All carry `children: ComponentNode[]`. Spacing via `gap: 'xs' | 'sm' | 'md' | 'l
 
 - `Button`, `IconButton`, `FAB`
 
+**Where a button can live.** A view's root-level `actions` array is drawn **only** for a `Dialog` root
+(the dialog footer) and the app-bar chrome. On a `Column`-rooted state or transition view it is
+**silently dropped** — the form renders, the button does not, and nothing in the console says why.
+On any non-`Dialog` view, put the buttons in the body, last, in a row:
+
+```json
+{ "type": "Row", "gap": "sm", "mainAxisAlignment": "end", "children": [
+  { "type": "Button", "label": { "tr": "Düzenle", "en": "Edit" }, "variant": "text", "action": "dispatch",
+    "command": "urn:vnext:flow:transition:<domain>:<flow>:edit" },
+  { "type": "Button", "label": { "tr": "Onayla", "en": "Approve" }, "action": "dispatch",
+    "command": "urn:vnext:flow:transition:<domain>:<flow>:approve" } ] }
+```
+
+What the client does when such a button is pressed (fires with the view's data, refuses an untouched
+prefilled form, generates a second form for schema-only transitions) is in
+`concepts/client-forms-and-transitions.md` — read it before placing a form.
+
 ### 3.6 Control flow
 
 - `ForEach` (`source`, `as`, `template`) — array iteration
@@ -519,6 +536,10 @@ In the child view, read parent-provided data via `$param.value`, write local inp
 | Same action on every button | Name it semantically with verb + command | Easier host-side switch |
 | Using `onTap` on Card in a new view | Use `action` | `onTap` is a legacy alias; prefer `action` |
 | Single node-level action on NavigationDrawer | Per-item `action` | NavigationDrawer is item-based |
+| `actions: [...]` on a `Column`-rooted state/transition view | Buttons as the last child (a `Row`) of the body | `actions` is drawn only on a `Dialog` root / the app bar; elsewhere it is dropped silently (§3.5) |
+| A state view telling the person to "pick X from the Transitions menu" | A `Button` with the transition URN in the view | The menu is a fallback; a button fires the move with the view's data (`client-forms-and-transitions.md` R1) |
+| The same inputs in a state view **and** a schema-only (view-less) transition | Inputs in one place: state view + button, or transition view | The Transitions menu generates a form from the schema → the person types twice (R2) |
+| A prefilled state-view form that submits to a transition **with a schema** inside an Edit loop | Schema-less transition + whitelist `ITransitionMapping` | "Edit → submit unchanged" is refused by the client: untouched seed is not input (R3) |
 
 ---
 
@@ -545,6 +566,9 @@ For AI-generated views, check:
 - [ ] URN commands exist in the host's known registry?
 - [ ] Multi-lang content covers all supported languages?
 - [ ] `$ui.x` states are defined for any Dialog/Drawer?
+- [ ] Every button sits in the body (not in root `actions`) unless the root is a `Dialog`?
+- [ ] For each form: is it entered once, or can a later step send the person back to it? (decides the transition's schema — `client-forms-and-transitions.md` §2)
+- [ ] No duplicate input surface: a state view with inputs does not submit to a schema-only, view-less transition that the Transitions menu would render again?
 - [ ] Conditional rules live in `x-conditional` (not in view JS)?
 
 ---

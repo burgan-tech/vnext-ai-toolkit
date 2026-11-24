@@ -142,7 +142,7 @@ Read the list `${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json` → `.vnext.wor
 (plugin-relative paths such as `references/concepts/task-types.md`). Copy **each** file verbatim (no
 substitution) to `.claude/references/<basename>` so the AI has in-repo runtime context even if the
 plugin is uninstalled. Do not hard-code the list here — the manifest is the single source. The set
-covers: `.csx` contracts, function mapping pattern, MockLab seed format, view author guide, workflow
+covers: `.csx` contracts, function mapping pattern, MockLab seed format, view author guide, client forms & transitions, workflow
 types, transition pipeline / `updateData`, roles & `authorize`, component choice, schema vocabularies,
 mapping types, task types 1–23, FanOut, state function response, long-poll `interaction`, human task,
 subflow `overrides`, instance query / `x-indexed`, incidents & retry, observability, runtime operations,

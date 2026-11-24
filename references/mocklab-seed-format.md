@@ -46,7 +46,7 @@ etc/docker/config/seed/
 ```jsonc
 {
   "httpMethod": "GET",                              // GET | POST | PUT | PATCH | DELETE | HEAD | OPTIONS
-  "route": "api/banking/lov/branches",              // no leading slash; MockLab adds it
+  "route": "api/banking/lov/branches",              // literal path; leading "/" optional (see §3.1)
   "queryString": null,                              // optional literal match (e.g. "?type=savings")
   "requestBody": "",                                // optional literal match for POST/PUT/PATCH body
   "statusCode": 200,                                // default response status
@@ -65,6 +65,31 @@ etc/docker/config/seed/
 `responseBody` is **always a JSON string** (escaped). Multi-line JSON is `\n`-separated inside the string.
 
 ---
+
+### 3.1 How a request finds its mock (measured on MockLab 0.0.10, 24.11.2026)
+
+| Fact | Consequence |
+|---|---|
+| Matching is **two-phase: exact path, then "the request path CONTAINS the mock's route"** | a leading `/` is optional; but a short route also catches longer paths (`api/orders` answers `/api/orders/123/items` and `/x/api/orders/y`). Keep routes specific, and give overlapping paths distinct prefixes |
+| **`{param}` templates never match** (`/users/{id}` does not answer `/users/42`, with or without the leading `/`), although the docs and the admin UI accept them | serve a family of paths from ONE base route (`api/orders/`) and branch with rules on `path` (`endsWith`, `contains`) and `query.*` / `body.*` |
+| An exact route beats a contains match | a scenario on one specific path (a timeout for one account) is a separate mock with the full literal path and its own `delayMs` — `delayMs` is per mock, rules have none |
+| After the route, filters apply in order: method, query string, body, `isActive`; first mock that passes wins | two mocks on the same base route differ by method, or by rules |
+
+Example — one base route serving the "per id" and "per sub-resource" shapes:
+
+```jsonc
+{ "httpMethod": "GET", "route": "api/orders/", "statusCode": 200,
+  "responseBody": "{ \"id\": \"{{ request.path }}\" }",
+  "rules": [
+    { "conditionField": "path", "conditionOperator": "contains", "conditionValue": "/history/",
+      "statusCode": 200, "responseBody": "{ \"items\": [] }", "contentType": "application/json", "priority": 0 },
+    { "conditionField": "path", "conditionOperator": "endsWith", "conditionValue": "0404",
+      "statusCode": 404, "responseBody": "{ \"errorMessage\": \"not found\" }", "contentType": "application/json", "priority": 1 }
+  ] }
+```
+
+Prove a new seed with `curl` against every rule **before** wiring a task to it: a seed that imports cleanly
+(`imported: 1`) can still answer nothing.
 
 ## 4. Conditional rules
 
@@ -92,7 +117,7 @@ Rules are evaluated in `priority` ascending order; the first match wins. If no r
 | `query.<param>` | Query string parameter |
 | `body.<jsonPath>` | Body field (e.g. `body.customer.id`) |
 | `header.<HeaderName>` | Request header (case-insensitive) |
-| `route.<param>` | Path parameter (`/users/{id}` → `route.id`) |
+| `route.<param>` | Path parameter (`/users/{id}` → `route.id`) — **not usable on 0.0.10: `{param}` routes never match (§3.1)**; use `path` |
 | `cookie.<name>` | Request cookie |
 | `method` | HTTP method literal |
 | `path` | Full request path |
@@ -139,12 +164,17 @@ args, no parentheses** (`{{ random_int 1 100 }}`, not `helpers.rand_int(1,100)`)
 | `{{ request.body.amount }}` | Echo a field from the parsed JSON request body |
 | `{{ request.query["code"] }}` | Echo a query parameter (bracket syntax) |
 | `{{ request.headers["X-Request-Id"] }}` | Echo a request header |
-| `{{ request.route.id }}` | Echo a route parameter |
+| `{{ request.route.id }}` | Echo a route parameter — needs a `{param}` route, which 0.0.10 does not match; echo `{{ request.path }}` instead |
 
 > **Verify against the live guide.** The helper set evolves — confirm names at
 > `https://github.com/burgan-tech/mocklab/blob/master/docs/user-guide.md` (or via Context7).
 > Wrong forms seen in older docs: `helpers.guid()`, `helpers.now()`, `helpers.rand_int(..)`,
 > `random_account_number`, `random_number_string`, `request.json.X` — all invalid.
+
+**Quoting inside a template breaks the whole body (measured on 0.0.10).** A helper argument that needs escaped
+quotes inside the JSON-string `responseBody` (`{{ random_string 8 \"0123456789\" }}`) made the renderer give up
+and return the template text raw. Prefer argument forms without quotes (`{{ random_int 10000000 99999999 }}`),
+and `curl` every templated mock once.
 
 Inside JSON string responses, template tokens are typed-aware — numbers stay numbers when used as values:
 

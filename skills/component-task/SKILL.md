@@ -83,6 +83,16 @@ Once the user picks a type, the schema tells you the per-type `config` shape. Fo
 
 For URLs that hit external systems, write the `API_BASEURL` placeholder (`API_BASEURL/api/{domain}/{resource}/{action}`) and resolve it in the input mapping with `GetConfigValue("<Domain>:ApiBaseUrl", "http://mocklab:5000")` — `localhost:3001` only works for a runtime run as a host process, never for Testcontainers or vnext-runtime (see `references/concepts/mocklab-spec.md` § URL conventions). Production URLs are hardcoded only when explicitly requested.
 
+**Accepted status codes by side effect.** Read-only calls (inquiry, simulate, quote): `acceptedStatusCodes:
+["4xx","5xx"]` and let the output mapping route on `statusCode`. Side-effecting calls (transfer, create, charge):
+accept only definite rejections (usually `["4xx"]`) — a 5xx or timeout must fault (incident → reconcile → retry with
+the same idempotency key). See `references/concepts/task-types.md` §3 "6 Http".
+
+**Environment-specific base URLs** (a mock now, the real service later) belong in configuration or a domain
+secret read by the input mapping (`GetSecretAsync("vnext-<domain>-secret", "<name>", "value")` —
+`references/concepts/domain-on-cluster.md` § Secrets), never in the task JSON: switching is then one value, no
+publish.
+
 **Error boundary reminders.** `errorBoundary.onError[].action` must be an **integer** (0–5) to pass the schema even though the runtime also accepts strings; `errorBoundary.onTimeout` is accepted by the schema but never read; a task timeout surfaces as `…:TaskCanceledException` with **no status code**, so only an `errorTypes` rule can catch it; `errorTypes` rules now match on the in-process path too (they silently never did on the remote path before 0.0.94) — dormant rules may fire for the first time after an upgrade.
 
 **Outbound headers (0.0.99).** `X-Request-Id` is fill-if-absent: a non-empty value in `headers` or

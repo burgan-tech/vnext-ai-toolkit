@@ -102,6 +102,7 @@
     "references/concepts/file-fields.md",
     "references/concepts/domain-on-cluster.md",
     "references/concepts/backoffice-navigation.md",
+    "references/concepts/client-forms-and-transitions.md",
     "references/concepts/process-decomposition.md"
   ],
   "vnext": {
@@ -129,6 +130,7 @@
       "references/function-mapping-pattern.md",
       "references/mocklab-seed-format.md",
       "references/view-author-guide.md",
+      "references/concepts/client-forms-and-transitions.md",
       "references/concepts/workflow-types.md",
       "references/concepts/transition-pipeline.md",
       "references/concepts/roles-and-authorization.md",
