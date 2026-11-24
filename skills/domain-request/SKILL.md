@@ -21,6 +21,16 @@ is nothing to request: say so and stop.
 - **Nothing is sent without a yes.** A build creates a namespace, a database, a Vault engine and gateway
   routes on a shared cluster, and the name cannot change afterwards.
 - **Remove is never a cleanup step.** A failed build is retried, not removed.
+- **Never delete the namespace yourself to start again** (`oc delete project <env>-vnext-<domain>`). The
+  platform still holds the domain:
+  - the request record, the discovery entry ("removed · discovery keeps it" in Domains › All) and the Vault
+    engine stay;
+  - a new request for the same name is refused at step 1 with "'<env>.<domain>' is already a domain built
+    through PRIMUM — choose another name" (burgan-tech/vnext-platform#10).
+
+  A broken domain is fixed in place (often one Vault value, see `domain-on-cluster.md` § Secrets). Give it up
+  only through the platform's own remove, and only on the person's explicit yes. Say that the name stays
+  locked until the platform retires the entry.
 
 ## 1. Settle the inputs
 

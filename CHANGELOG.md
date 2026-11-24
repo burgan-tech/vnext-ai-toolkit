@@ -47,6 +47,17 @@ All notable changes to the vNext AI Toolkit will be documented in this file. For
 - **Tests:** `WorkflowTestBase.TryTransitionAsync` makes one `?sync=true` attempt and returns status and body, so a test can assert lock outcomes. `integration-test-patterns.md` § Resource-lock conflicts has a Reject example. `TEST-SCENARIOS.md` and the `.http` template explain the difference between 200010 and 200014.
 
 
+### Fixed — lessons from moving a flow onto a second cluster domain (24.11.2026)
+
+Measured on ocptest `dev` with the staff client while bringing an existing IBAN-transfer flow into a newly requested domain.
+
+- **`view-author-guide.md` §2.5 — components have no `showIf`.** The renderer ignores a `showIf` written on a component node, so every guarded block renders. Seen as four status headings on one result view, seven reason labels on a confirm view and an empty error banner. The section now gives the replacements: `visible` (truthy only), a bound `{tr,en}` object, or an `x-enum` label. Four antipattern rows were added in §8.
+- **`view-author-guide.md` §4.3 — the button command.** The no-id `urn:vnext:flow:transition:<d>:<f>:<tx>` is now listed first as THE form for a button on the record's own view. The staff client does not fill `…:${param}:<tx>`; it asks for instance `${param}` (404) and nothing fires. `urn:amorphie:wf:…` is parsed by no client (TS or Flutter `navCommand`), so the click ends in "No handler".
+- **`backoffice-navigation.md` + `backoffice-menu`: New sends an empty body.** A `required` in the start schema fails with 400; one in the master schema fails with 500 ("Start transition validation failed"). Either way no record is created. The skill now checks both schemas before keeping `create`, and has a "When New does nothing" section.
+- **`domain-on-cluster.md` § Secrets — a duplicate key crashes the orchestrator.** The orchestrator loads the whole `vnext-<domain>-secret` store as configuration, so two secrets with the same key name crash it at the next start (`duplicate key 'value'`, CrashLoopBackOff). The Secrets screen writes only `value`, and `platform-kafka` already holds one. The doc says to check the store first and to fix it in Vault, never by deleting the domain.
+- **`domain-request` + `domain-on-cluster.md`: never `oc delete project` to start over.** The request record, the discovery entry and the Vault engine survive. The name is refused afterwards with "already a domain built through PRIMUM" (burgan-tech/vnext-platform#10).
+- **`templates/CLAUDE.md.tmpl`**: the button-command, component-visibility and New-button rules were added to the view placement list. **`templates/.http.tmpl`**: the start payload comment no longer points at master `required` fields.
+
 ### Changed — lessons from building a backoffice flow end to end (24.11.2026)
 
 - **`view-author-guide.md`**: buttons go in the body unless the root is a `Dialog` (§3.5, example `Row`). Four new antipattern rows cover root `actions` on a `Column`, "use the Transitions menu" screens, duplicate input surfaces, and a schema'd target in an Edit loop. Three new checklist items.

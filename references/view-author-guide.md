@@ -186,6 +186,25 @@ Compound: `allOf`, `anyOf`, `not`. `x-conditional` takes at least one of `showIf
 
 `showIf`/`hideIf` → visibility; `enableIf`/`disableIf` → input enabled/disabled.
 
+> **Components have no `showIf`.** `x-conditional` lives on a schema **property** and governs the field
+> bound to it. A `showIf` written on a component node (a `Card`, `Column`, `Text`, …) is ignored by the
+> renderer, so every guarded block renders at once. Measured 24.11.2026 on the deployed staff client:
+> four status headings drawn together on a result view, seven reason labels stacked on a confirm view,
+> an empty banner on an input view.
+>
+> A component's own switch is **`visible: "$expr"`**. It is truthy only: `''`, `null` and a missing value
+> hide; anything else shows. Expressions are dotted paths, so `visible` cannot compare or negate. Three patterns
+> cover what a per-component `showIf` was reaching for:
+>
+> | Need | Write |
+> |---|---|
+> | show a block only in one outcome | `visible` on a field that is filled only then — `"$instance.validation.errorCode"` for an error banner, `"$instance.execution.wireNumber"` for a success card |
+> | one text per language | bind the `{tr, en}` object itself: `"content": "$instance.result.message"`. The client picks the language; no `$context.lang` switch |
+> | the label of an enum value | `"content": "$instance.transferReason"` with `enum` + `x-enum` on that property, so the label is drawn. Do not write one `Text` per value |
+>
+> When none fits (a choice between several literal blocks), have the mapping write the field the view needs,
+> such as a localized `result.title`, and bind that.
+
 ### 2.6 Custom async validation
 
 ```json
@@ -431,11 +450,11 @@ An item is one of three kinds:
 # Flow start
 urn:vnext:flow:start:<domain>:<flow>
 
-# Transition on a specific instance (${param} = instance id, bound at runtime)
-urn:vnext:flow:transition:<domain>:<flow>:${param}:<transition>
-
-# Transition on the current instance (no id segment)
+# Transition on the current instance (no id segment) — THE form for a button on a state/transition view
 urn:vnext:flow:transition:<domain>:<flow>:<transition>
+
+# Transition on a specific instance (${param} = instance id, bound by an opener that supplies it)
+urn:vnext:flow:transition:<domain>:<flow>:${param}:<transition>
 
 # Function (cmd ∈ get|post|patch|delete; get is the default and may be omitted)
 urn:vnext:fn:<cmd>:<domain>:<flow>:${param}:<fn-key>
@@ -451,6 +470,16 @@ urn:client:nav:<route>
 
 **Binding format**: `http`, `deeplink`, and `urn` values support runtime data binding via the
 `${param}` placeholder (e.g. `urn:vnext:flow:transition:core:account-opening:${param}:approved`).
+
+> **A button on the record's own view uses the no-id form.** Measured 24.11.2026 on the deployed staff
+> client: `…:${param}:submit` on a state view was NOT filled. The client read `${param}` as the instance id
+> and asked `/instances/%24%7Bparam%7D/functions/state` (404), so the move was "not offered" and nothing
+> fired. `urn:vnext:flow:transition:<domain>:<flow>:<tx>` fires on the record the surface shows
+> (`vnext-client-sdk-core` `navCommand.ts`, `TRANSITION_ON_SURFACE`).
+>
+> **`urn:amorphie:wf:<flow>:transition:<tx>` is not a command.** No client parses it; neither the TS nor the
+> Flutter `navCommand` has a branch for it. The click reaches the host as "No handler … wiring gap" and
+> nothing is sent. Workspaces scaffolded from older toolkit text still carry it: replace it.
 
 Group entries in the action picker by these prefixes.
 
@@ -539,6 +568,10 @@ In the child view, read parent-provided data via `$param.value`, write local inp
 | `actions: [...]` on a `Column`-rooted state/transition view | Buttons as the last child (a `Row`) of the body | `actions` is drawn only on a `Dialog` root / the app bar; elsewhere it is dropped silently (§3.5) |
 | A state view telling the person to "pick X from the Transitions menu" | A `Button` with the transition URN in the view | The menu is a fallback; a button fires the move with the view's data (`client-forms-and-transitions.md` R1) |
 | The same inputs in a state view **and** a schema-only (view-less) transition | Inputs in one place: state view + button, or transition view | The Transitions menu generates a form from the schema → the person types twice (R2) |
+| `"showIf": {…}` on a `Card` / `Column` / `Text` | `visible: "$instance.<field filled only in that case>"`, a bound `{tr,en}` object, or an `x-enum` label (§2.5) | Components have no `showIf`; the renderer ignores it and draws every guarded block |
+| Two `Text`s switched on `$context.lang` | One `Text` bound to the `{tr,en}` object | A bound localized object is shown in the client's language; the lang switch is a component `showIf` and is ignored |
+| `"command": "urn:amorphie:wf:<flow>:transition:<tx>"` | `"command": "urn:vnext:flow:transition:<domain>:<flow>:<tx>"` | The amorphie spelling is parsed by no client: "No handler", nothing fires (§4.3) |
+| `…:${param}:<tx>` on a button of the record's own view | `urn:vnext:flow:transition:<domain>:<flow>:<tx>` | The staff client does not fill `${param}` there; it asks for instance `${param}` (404) (§4.3) |
 | A prefilled state-view form that submits to a transition **with a schema** inside an Edit loop | Schema-less transition + whitelist `ITransitionMapping` | "Edit → submit unchanged" is refused by the client: untouched seed is not input (R3) |
 
 ---

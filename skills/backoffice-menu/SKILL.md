@@ -51,6 +51,13 @@ Per item, settle with the person: which flow, the title in each language, and wh
 records from the list. The New button is drawn only for an entry that carries `payload.create`: keep it
 to offer the button, leave it out to offer none.
 
+**Before keeping `create`, read the flow's start schema (`attributes.startTransition.schema`) and its
+master schema (the workflow's `schema` reference).** New starts with an empty body, so a `required` in
+either schema makes every click fail: 400 from the start schema, 500 from the master. The person sees
+"That did not go through" and no record is created (`backoffice-navigation.md`). Drop the `required`. Move what
+the person must type to the first manual transition's form, give that form a view, and publish the new
+versions before you prove the menu.
+
 ## 4. Change an existing menu
 
 Edit the workspace's record file (`records/backoffice-side.json`; if the workspace has none, read the live
@@ -80,6 +87,19 @@ move. That is usable but bare; its screens are the `view-design` skill.
 - The record is closed — only a live one (status `A` or `B`) is drawn.
 - An item repeats a key another group holds, or carries an absolute URL — see the reference.
 - The client was not reloaded: the menu is composed once, at boot.
+
+## When New does nothing
+
+The group and list appear, but New shows "That did not go through" and no record opens. Read the start
+request in the browser's network panel:
+
+- `400` "JSON schema validation failed", "Required properties [...]" → the start schema has `required`.
+- `500` → read the orchestrator log for "Start transition validation failed". Usually a `required` in the
+  master schema.
+
+The fix is new schema versions without `required`, plus a workflow version that references them (step 3).
+Once the record opens, a button that does nothing is a view problem, not a menu problem: see
+`view-author-guide.md` §4.3 for the button command and §2.5 for component visibility.
 
 ## Example requests
 
