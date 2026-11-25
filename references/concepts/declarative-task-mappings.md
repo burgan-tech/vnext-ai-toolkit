@@ -67,6 +67,27 @@ No filters, no recursive descent.
 - `select` + `into` copy one value and must appear together; `select` starts with a JSON variable
   (`$.data.customer`, `$.input.items`, `$.task.body`); `config` is not selectable.
 
+#### Several headers
+
+One `set` key per header; configured headers the block does not touch are kept, a written one is overridden:
+
+```json
+"input": {
+  "set": {
+    "$.headers.x-channel": "\"web\"",
+    "$.headers.x-customer-id": "data.customer.id",
+    "$.headers.x-amount": "data.amount",
+    "$.headers['x-correlation.id']": "instance.key",
+    "$.headers.Accept-Language": "data.lang ?? \"tr-TR\""
+  }
+}
+```
+
+- Values are sent as strings (`data.amount` → `"1250.5"`). A name with a dot or space needs `['...']`; hyphens
+  don't.
+- `null` / a missing value writes nothing (the configured value stays); a header cannot be removed.
+- **Never `into: "$.headers"` to add headers** — `into` replaces the whole object and drops the configured ones.
+
 #### Environment-driven URL
 
 The `API_BASEURL` placeholder a `.csx` resolves with `GetConfigValue` is one expression:
@@ -97,6 +118,30 @@ The `API_BASEURL` placeholder a `.csx` resolves with `GetConfigValue` is one exp
 - Order: `into` first, then `set` in declaration order (a later key wins). In a workflow everything lands in **one**
   instance-data append — x-encryption, versioning and ETag behave as for any other write; an empty result
   writes no version.
+- The block builds a **delta**, merged at the end. `data` in a `set` value is the data **before** this task —
+  what `into` wrote is not visible through it; read the new value from `result`.
+
+#### Worked example
+
+Data `{ "kyc": { "level": "basic", "score": 10, "history": [1, 2] } }`, response
+`body: { "score": 87, "band": "A", "checks": ["id", "address"] }`, block
+`select: "$.body.score", into: "$.kyc.score", set: { "$.kyc.checkedAt": "now" }`:
+
+1. `select` + `into` → delta `{ "kyc": { "score": 87 } }`
+2. `set` → delta `{ "kyc": { "score": 87, "checkedAt": "2026-11-24T10:15:03Z" } }`
+3. Merge → `{ "kyc": { "level": "basic", "score": 87, "history": [1, 2], "checkedAt": "…" } }` — `band` / `checks`
+   not written.
+
+| Authored | Delta (same response) |
+|---|---|
+| `into: "$.kyc.response"` only | `{ "kyc": { "response": { "score": 87, "band": "A", "checks": [...] } } }` |
+| `select: "$.body"` only | `{ "score": 87, "band": "A", "checks": [...] }` at the data root |
+| `select: "$.body.score"` only | **fails** — a non-object cannot merge at the root |
+
+Merge rules: objects merge deeply (absent fields survive); **arrays are replaced whole**
+(`"$.kyc.history": "result.body.checks"` → `["id", "address"]`); `null` never clears a field — use a sentinel
+(`""`, `false`); a path inside a non-object (`$.kyc.score.detail` after `score` = 87) fails.
+Response headers/status: `result.headers["x-request-id"]`, `result.statusCode`.
 
 ## Expression variables
 
