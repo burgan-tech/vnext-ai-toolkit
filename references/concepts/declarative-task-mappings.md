@@ -148,7 +148,7 @@ Response headers/status: `result.headers["x-request-id"]`, `result.statusCode`.
 | Variable | What it is | Example |
 |---|---|---|
 | `data` | latest instance data | `data.customer.id` |
-| `input` | the transition request body (not the task payload; null with no transition) | `input.amount` |
+| `input` | the request body of the hop (not the task payload); `null` on timers, continuations, SubFlow resume and read paths | `input.amount` |
 | `instance` | read-only view, **camelCase**: `id`, `key`, `flow`, `version`, `currentState`, `effectiveState`, `effectiveStateType`, `effectiveStateSubType`, `effectiveStatus`, `type` (`R`/`S`/`P`), `data` | `instance.currentState` |
 | `now` | one timestamp per mapping | `now` |
 | `user` | the caller: `available`, `roles`, `hasRole("x")` | `user.available && user.hasRole("approver")` |
@@ -156,6 +156,7 @@ Response headers/status: `result.headers["x-request-id"]`, `result.statusCode`.
 | `task` | the task's `config` (a JSON view); in the output phase as the input phase left it | `task.url` |
 | `config` | host configuration, same reach as `GetConfigValue` (connection strings included) | `config.get("Example:ApiBaseUrl", "http://localhost:3001")` |
 | `result` | output only: `body`, `headers`, `statusCode` | `result.body.score` |
+| `headers` | the **incoming** request's headers, read-only, case-insensitive names | `headers["x-channel"]`, `headers.has("x-channel")` |
 
 - Function `urlEncode(value)` percent-encodes one URL component. `task`, `config` and `urlEncode` exist
   in task mappings only, not in condition rules.
@@ -166,6 +167,12 @@ Response headers/status: `result.headers["x-request-id"]`, `result.statusCode`.
 - Assignment is off: `data.x = 1` is a publish error. Only `into` / `set` keys write.
 - Only the variables an expression uses are built (roles are resolved only when `user.roles` /
   `user.hasRole` appears).
+
+### `input` and `headers`
+
+- `input` is one value per hop (the triggering request body); `input == null` tells a continuation or timer from the triggering hop.
+- `x-encryption` fields arrive in **plaintext**: copying one to an unprotected path stores plaintext (writing it back to its own path keeps the protection; `data.email` is the stored token and cannot go elsewhere). `x-storage` fields arrive as the stored handle, except the transition / start `schemas[]` rule, which sees the request as sent.
+- `headers["x-channel"]` (indexer for hyphenated names; `null` when absent) and `headers.has("x-channel")`. The `Workflow:HeaderExposure:Deny` list applies. `headers` is **not** a `select` root — read it with `set`. `task.headers` is the task's own **outgoing** headers, not `headers`; forward one with `"$.headers.x-channel": "headers[\"x-channel\"]"`.
 
 ### `user` — guard it
 
@@ -182,8 +189,37 @@ exposes them to every later reader — protect the field with `x-roles` / `x-mas
 - Any other failure — a bad conversion (`"gold".AsInt32()`), an unwritable path, a role read on a System
   hop — **fails the task**: the error boundary applies, and with no boundary the instance faults. Nothing
   of the delta is written.
+- **No methods on JSON values — convert first**: `input.name.ToString().Substring(0, 3)`. An unknown method call on a present value (`input.name.ToUpper()`) fails the mapping; through a missing intermediate it is a missing source and writes nothing.
 - A **non-JSON response body** is a string: `result.body.x` reads as missing (skipped), and a `select`
   without `into` fails ("must select a JSON object"). Check the backend's content type.
+
+## Blocks on transitions and SubFlow states
+
+Three more sites take a block instead of a C# `mapping` (a block and a `mapping` together is a publish error; `select` / `into` / `set` and the expression rules are the same):
+
+| Site | Block | Target | Notes |
+|---|---|---|---|
+| Transition | `output` only (`input` is a publish error) | instance data | Not on automatic / scheduled transitions. `"select": "$.input"` keeps the whole request. Empty delta = no data version |
+| SubFlow state (`type: S` only) | `input` | the child's start document `{ attributes, headers, key, tags }` | `key` must be a string, `tags` a string array; `input` is `null` on an automatic chain and a retry restart |
+| SubFlow state | `output` | instance data | Runs on completion **and** fault; `result` is `{ data, status }`, `status` is `"completed"` or `"faulted"`; `input` is `null` |
+
+```json
+{ "key": "submit", "target": "review",
+  "output": { "select": "$.input.customer", "into": "$.customer",
+              "set": { "$.submittedAt": "now" } } }
+```
+
+```json
+"subFlow": {
+  "type": "S",
+  "process": { "key": "kyc-check", "domain": "core", "version": "1.0.0", "flow": "sys-flows" },
+  "input": { "set": { "$.attributes.customerId": "data.customer.id",
+                      "$.headers.x-channel": "\"web\"",
+                      "$.tags": "new string[] { \"kyc\" }" } },
+  "output": { "select": "$.data.score", "into": "$.kyc.score",
+              "set": { "$.kyc.outcome": "result.status" } }
+}
+```
 
 ## Authoring checklist
 
@@ -195,3 +231,4 @@ exposes them to every later reader — protect the field with `x-roles` / `x-mas
 5. Any `user.roles` / `user.hasRole` is guarded by `user.available`.
 6. `npm run validate` against a vnext-schema that knows the blocks, then publish — publish errors carry the
    JSON location (`states[x].onEntries[0].output.set['$.a']: ...`).
+7. Transition and SubFlow sites: `output` on transitions, `input` / `output` on `type: S` SubFlow states; never alongside a `mapping`.
