@@ -200,7 +200,7 @@ Three more sites take a block instead of a C# `mapping` (a block and a `mapping`
 | Site | Block | Target | Notes |
 |---|---|---|---|
 | Transition | `output` only (`input` is a publish error) | instance data | Not on automatic / scheduled transitions. `"select": "$.input"` keeps the whole request. Empty delta = no data version |
-| SubFlow state (`type: S` only) | `input` | the child's start document `{ attributes, headers, key, tags }` | `key` must be a string, `tags` a string array; `input` is `null` on an automatic chain and a retry restart |
+| SubFlow state (`type: S` only) | `input` | the child's start document `{ attributes, headers, key, tags }` | `key` must be a string (convert a number with `.ToString()`: `"\"kyc-\" + data.customer.id.ToString()"`), `tags` a string array; `input` is `null` on an automatic chain and a retry restart |
 | SubFlow state | `output` | instance data | Runs on completion **and** fault; `result` is `{ data, status }`, `status` is `"completed"` or `"faulted"`; `input` is `null` |
 
 ```json
