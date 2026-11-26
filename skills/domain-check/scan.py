@@ -65,9 +65,9 @@ LOCK_CONFLICT, LOCK_REJECTED = "Execution:200010", "Execution:200014"
 LOCK_CODES = {LOCK_CONFLICT, LOCK_REJECTED}
 FULL_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-")
 # Check 23: what keeps a .csx mapping from becoming a declarative block (runtime 0.0.107).
-# Conservative on purpose: a false "kalir" costs a missed suggestion, a false "aday" costs a
-# broken migration. Each entry: (reason printed to the user, pattern over the script text).
-BLOCK_BLOCKERS = [
+# Three buckets: `kalir` (a hard reason: a block cannot do it), `incele` (only soft reasons: a block
+# usually can, the author decides), `aday` (no reason). Each entry: (reason, pattern over the text).
+BLOCK_HARD = [
     ("secret okuma (GetSecret*)", re.compile(r"\bGetSecrets?(?:Async)?\b")),
     ("dosya okuma (GetFileAsync)", re.compile(r"\bGetFileAsync\b")),
     ("context.Related", re.compile(r"\bcontext\s*\.\s*Related\b")),
@@ -76,20 +76,22 @@ BLOCK_BLOCKERS = [
     ("Selector (event korelasyon filtresi)", re.compile(r"\bSelector\b")),
     ("dongu (for/foreach/while)", re.compile(r"\b(?:for|foreach|while)\s*\(|\bdo\s*\{")),
     ("throw", re.compile(r"\bthrow\b")),
-    ("try/catch", re.compile(r"\btry\s*\{")),
-    ("ScriptBase yardimcisi (GetPropertyValue/HasProperty/...)",
-     re.compile(r"\b(?:GetPropertyValue|HasProperty|SetProperty|RemoveProperty|CreateObject|CreateList|GetList|AsList"
-                r"|ToDictionary|List[A-Z]\w*)\s*[<(]")),
     ("yardimci sinif (*Helper.)", re.compile(r"\b[A-Z]\w*Helpers?\s*\.")),
-    ("log cagrisi (blokta log yok)", re.compile(r"\bLog(?:Information|Warning|Error|Debug|Critical|Trace)\s*\(")),
     ("binary yanit (byte[]/ScriptFile)", re.compile(r"\bbyte\s*\[\s*\]|\bScriptFile\b")),
     ("Mutations (blogu yok)", re.compile(r"\bMutations\b")),
     ("await (I/O)", re.compile(r"\bawait\s+(?!Task\.FromResult\b)")),
     ("harici kutuphane (using)", re.compile(r"^\s*using\s+(?!System\b|BBT\.)[\w.]+\s*;", re.M)),
+]
+BLOCK_SOFT = [
+    ("log cagrisi (blok log satirini dusurur)", re.compile(r"\bLog(?:Information|Warning|Error|Debug|Critical|Trace)\s*\(")),
+    ("ScriptBase guvenli erisim (GetPropertyValue/HasProperty/...; blokta eksik deger null)",
+     re.compile(r"\b(?:GetPropertyValue|HasProperty|SetProperty|RemoveProperty|CreateObject|CreateList|GetList|AsList"
+                r"|ToDictionary|List[A-Z]\w*)\s*[<(]")),
+    ("try/catch", re.compile(r"\btry\s*\{")),
     ("LINQ / lambda", re.compile(r"=>\s*[^{;]*\b(?:Where|Select|Any|All|First|Sum|Count)\b|\.(?:Where|Select|Any|All|FirstOrDefault|Sum|OrderBy)\s*\(")),
 ]
-BLOCK_MAX_IFS = 3          # more `if (` than this: branching a single expression per target cannot carry
-BLOCK_MAX_LINES = 60       # effective code lines (no usings, comments or brace-only lines)
+BLOCK_MAX_IFS = 3          # up to this many `if (`: one ternary each; more: heavy branching (both soft)
+BLOCK_MAX_LINES = 60       # effective code lines (no usings, comments or brace-only lines) — hard
 CONFIG_RE = re.compile(r"\bGetConfigValue\s*\(")
 # method declarations; the interface's own handlers (*Handler, Handle, ItemSelector) are not helpers
 METHOD_RE = re.compile(r"^\s*(?:(?:public|private|protected|internal|static|async|override)\s+)+"
@@ -1056,21 +1058,25 @@ def script_text(comp_file, m, root, croot):
         return code, "inline"
 
 
-def block_blockers(text, site):
-    """Reasons a .csx mapping at `site` must stay a script; [] means a block can express it."""
-    why = [reason for reason, rx in BLOCK_BLOCKERS if rx.search(text)]
-    if site != "binding" and CONFIG_RE.search(text):
-        why.append("GetConfigValue (config.get yalniz gorev mapping'inde)")
-    if len(re.findall(r"\bif\s*\(", text)) > BLOCK_MAX_IFS:
-        why.append(f"cok dallanma (>{BLOCK_MAX_IFS} if)")
+def block_reasons(text, site):
+    """(hard, soft) reasons for a .csx mapping at `site`; both empty means a block can express it."""
+    hard = [reason for reason, rx in BLOCK_HARD if rx.search(text)]
+    soft = [reason for reason, rx in BLOCK_SOFT if rx.search(text)]
     code = [ln for ln in text.splitlines()
             if ln.strip() and not re.match(r"\s*(?://|using\s|[{}\[\]();,]+\s*$|/?\*)", ln)]
     if len(code) > BLOCK_MAX_LINES:
-        why.append(f"uzun script (>{BLOCK_MAX_LINES} satir)")
+        hard.append(f"uzun script (>{BLOCK_MAX_LINES} satir)")
+    if site != "binding" and CONFIG_RE.search(text):
+        soft.append("GetConfigValue (config.get yalniz gorev mapping'inde; erisilebilir mi bakin)")
+    ifs = len(re.findall(r"\bif\s*\(", text))
+    if ifs > BLOCK_MAX_IFS:
+        soft.append(f"cok dallanma (>{BLOCK_MAX_IFS} if)")
+    elif ifs:
+        soft.append("if (ternary ile)")
     local = {m for m in METHOD_RE.findall(text) if not m.endswith("Handler") and m not in ("Handle", "ItemSelector")}
     if local:
-        why.append("yerel yardimci metod")
-    return why
+        soft.append("yerel yardimci metod")
+    return hard, soft
 
 
 def block_migration(root, croot, paths, wfs, tasks, by_stem, E, is_auto):
@@ -1082,17 +1088,19 @@ def block_migration(root, croot, paths, wfs, tasks, by_stem, E, is_auto):
 
     def add(site, where, comp_file, m, stay=None, helpers=()):
         text, src = script_text(comp_file, m, root, croot)
+        hard, soft = [], []
         if stay:
-            why = [stay]
+            hard = [stay]
         elif text is None:
-            why = ["REF yardimci referansi" if src == "REF" else
-                   "bos mapping (location/code yok)" if not (m.get("location") or m.get("code")) else
-                   "script okunamadi (elle bakin)"]
+            hard = ["REF yardimci referansi" if src == "REF" else
+                    "bos mapping (location/code yok)" if not (m.get("location") or m.get("code")) else
+                    "script okunamadi (elle bakin)"]
         else:
-            why = block_blockers(text, site)
-            why += [f"yardimci ({h})" for h in helpers if re.search(rf"\b{re.escape(h)}\b", text)]
+            hard, soft = block_reasons(text, site)
+            hard += [f"yardimci ({h})" for h in helpers if re.search(rf"\b{re.escape(h)}\b", text)]
+        bucket = "kalir" if hard else "incele" if soft else "aday"
         sites.append({"site": site, "where": where, "file": os.path.relpath(comp_file, root), "script": src,
-                      "verdict": "kalir" if why else "aday", "reasons": why})
+                      "bucket": bucket, "reasons": hard + soft, "hard": hard, "soft": soft})
 
     def helper_names(a):
         sc = a.get("scripts") if isinstance(a.get("scripts"), dict) else {}
@@ -1146,12 +1154,14 @@ def block_migration(root, croot, paths, wfs, tasks, by_stem, E, is_auto):
         a = d["attributes"]
         binding(a.get("task"), f"{d['key']}::task", f, helper_names(a))
 
-    reasons = collections.Counter(r for x in sites for r in x["reasons"])
+    count = lambda b: sum(1 for x in sites if x["bucket"] == b)
     return {"sites": sites,
-            "candidates": sum(1 for x in sites if x["verdict"] == "aday"),
-            "stays": sum(1 for x in sites if x["verdict"] == "kalir"),
-            "bySite": dict(collections.Counter(f"{x['site']}:{x['verdict']}" for x in sites)),
-            "stayReasons": dict(reasons.most_common())}
+            "candidates": count("aday"), "review": count("incele"), "stays": count("kalir"),
+            "bySite": dict(collections.Counter(f"{x['site']}:{x['bucket']}" for x in sites)),
+            "reviewReasons": dict(collections.Counter(r for x in sites if x["bucket"] == "incele"
+                                                      for r in x["soft"]).most_common()),
+            "stayReasons": dict(collections.Counter(r for x in sites if x["bucket"] == "kalir"
+                                                    for r in x["hard"]).most_common())}
 
 
 def ref_nodes(o, top=False):
@@ -1423,16 +1433,20 @@ def human(o):
         p("")
     elif g.get("ge_0_0_107"):
         p("## surum gecisi (0.0.107)")
-        p(f"  .csx mapping (blok alabilen yerde): {len(bm['sites'])}  aday: {bm['candidates']}  kalir: {bm['stays']}")
-        cands = [x for x in bm["sites"] if x["verdict"] == "aday"]
+        p(f"  .csx mapping (blok alabilen yerde): {len(bm['sites'])}  aday: {bm['candidates']}  "
+          f"incele: {bm['review']}  kalir: {bm['stays']}")
+        cands = [x for x in bm["sites"] if x["bucket"] == "aday"]
         if cands:
             p(f"  bloga cevrilebilir .csx ({len(cands)}; migrate-to-blocks):")
             for x in cands[:15]:
                 p(f"    {x['site']:15} {x['where']}  <- {x['script']}")
             if len(cands) > 15:
                 p(f"    ... +{len(cands) - 15}")
+        top = lambda d: ", ".join(f"{r}: {n}" for r, n in list(d.items())[:8])
+        if bm["reviewReasons"]:
+            p(f"  incele — yalniz yumusak neden, yazar karar verir (en sik): {top(bm['reviewReasons'])}")
         if bm["stayReasons"]:
-            p("  .csx kalir (neden: adet): " + ", ".join(f"{r}: {n}" for r, n in bm["stayReasons"].items()))
+            p(f"  .csx kalir — blok yapamaz (en sik): {top(bm['stayReasons'])}")
         p("")
     p("## en agir viewlar")
     for v in o["heaviestViews"]:

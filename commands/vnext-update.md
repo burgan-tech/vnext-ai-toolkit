@@ -49,7 +49,7 @@ Compare the workspace `runtimeVersion` with the plugin's `knownRuntimeVersion`:
   guidance about newer behaviour as unverified."
 - **Workspace on 0.0.107 or later** (whichever case above) → also run
   `python3 "${CLAUDE_PLUGIN_ROOT}/skills/domain-check/scan.py" --json`; when `blockMigration.candidates`
-  is above zero, add one line offering the `migrate-to-blocks` skill. Offer only; never convert unasked.
+  or `blockMigration.review` is above zero, add one line offering the `migrate-to-blocks` skill. Offer only; never convert unasked.
 
 This command never edits `vnext.config.json`.
 

@@ -74,7 +74,7 @@ stale until it does.
 
 **Declarative mappings (0.0.107).** After a bump to `runtimeVersion` >= 0.0.107, or on a workspace
 already there, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/domain-check/scan.py" --json` and read
-`blockMigration.candidates`. When it is above zero, **offer** the `migrate-to-blocks` skill in one line
+`blockMigration.candidates` (`aday`) and `blockMigration.review` (`incele`). When either is above zero, **offer** the `migrate-to-blocks` skill in one line
 ("N `.csx` mappings could become declarative blocks — want a proposal?"). Offer only; never convert
 unasked. New components scaffold blocks by default from now on
 (`references/concepts/declarative-task-mappings.md` § Version gate).

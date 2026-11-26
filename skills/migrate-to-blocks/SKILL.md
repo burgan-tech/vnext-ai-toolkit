@@ -36,11 +36,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/skills/domain-check/scan.py" [root] [--config FIL
 
 Read `blockMigration`: `sites[]` with `site` (`binding`, `transition`, `subflow`, `event`,
 `workflowOutput`, `functionOutput`), `where`, `file` (the component), `script` (the `.csx` path or
-`inline`), `verdict` (`aday` / `kalir`) and `reasons`. Work only on `aday`. The scanner is a
-conservative text heuristic (blocker list: domain-check CHECKS.md § 23): a `kalir` whose only
-reasons are `ScriptBase yardimcisi`, `log cagrisi` or `cok dallanma` may still convert — a block's
-missing value writes nothing, which is what most `HasProperty` guards do — but look at those only
-when the user asks.
+`inline`), `bucket` and its `hard` / `soft` reasons (lists: domain-check CHECKS.md § 23):
+
+1. **`aday`** — no reason found. Propose these first.
+2. **`incele`** — only soft reasons: a block usually can, the author decides. Go one at a time and
+   show the reasons: a `Log*` call means the block drops that log line; `GetPropertyValue` /
+   `HasProperty` guards are usually unnecessary (a block reads a missing value as null and writes
+   nothing); `if` becomes a ternary; a local helper or LINQ must fit one expression per target;
+   `GetConfigValue` outside a task binding has no `config.get` there.
+3. **`kalir`** — a hard reason. List them with the reasons; never convert one.
+
+The scanner is a text heuristic: read every script before proposing, whatever its bucket.
 
 ## 3. Read and propose
 
@@ -71,8 +77,8 @@ Per approved site:
    republished).
 4. Run `npm run validate`; fix or roll back any failure before the next site.
 
-End with the list of what stayed `.csx` and why (the scanner's `kalir` reasons, plus anything you
-kept after reading), and suggest running the domain's integration tests (`/vnext-ai-toolkit:e2e`) —
+End with the list of what stayed `.csx` and why (the `kalir` items with their reasons, the `incele`
+items the author declined, anything you kept after reading), and suggest running the domain's integration tests (`/vnext-ai-toolkit:e2e`) —
 a block that validates can still map differently at run time.
 
 ## Worked conversions

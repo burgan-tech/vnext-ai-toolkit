@@ -75,8 +75,11 @@ check(len(k["lockBoundaryTargetHasLock"]) == 2, f"boundary target with lock: {k[
 check(len(k["lockBoundaryReroutes"]) == 2, f"200010 reroutes: {k['lockBoundaryReroutes']}")
 check(k["floatingRefs"] > 0, "floating component references not counted")
 bm = o["blockMigration"]
-cand = [x["where"] for x in bm["sites"] if x["verdict"] == "aday"]
-check(cand == ["fn-cities::task [http-get-cities]"], f"block migration candidates: {cand}")
+bucket = lambda b: [x["where"] for x in bm["sites"] if x["bucket"] == b]
+check(bucket("aday") == ["fn-cities::task [http-get-cities]"], f"block migration aday: {bucket('aday')}")
+check(bucket("incele") == ["ext-cities::task [http-get-cities]"], f"block migration incele: {bucket('incele')}")
+check(bm["candidates"] == 1 and bm["review"] == 1 and bm["stays"] == len(bm["sites"]) - 2, f"bucket counts: {bm}")
+check(any(r.startswith("log cagrisi") for r in bm["reviewReasons"]), f"log call not a soft reason: {bm['reviewReasons']}")
 check(bm["stayReasons"].get("secret okuma (GetSecret*)", 0) >= 1, f"secret read not kept as .csx: {bm['stayReasons']}")
 check(o["gates"]["ge_0_0_107"] is False, "0.0.107 gate on a 0.0.103 fixture")
 
@@ -98,6 +101,6 @@ python3 "$scan" "$fixture" --schema-dir "$schemas" --no-fetch > "$out"
 grep -q 'bloklar runtime 0.0.107+ ister' "$out" && ! grep -q '## surum gecisi (0.0.107)' "$out" || {
   echo "FAIL domain-check check 23 printed below 0.0.107"; exit 1; }
 python3 "$scan" "$fixture" --schema-dir "$schemas" --no-fetch --runtime-version 0.0.107 > "$out"
-grep -q '## surum gecisi (0.0.107)' "$out" && grep -q 'fn-cities::task' "$out" || {
+grep -q '## surum gecisi (0.0.107)' "$out" && grep -q 'fn-cities::task' "$out" && grep -q 'incele: 1' "$out" || {
   echo "FAIL domain-check check 23 block missing with --runtime-version 0.0.107"; exit 1; }
-echo "ok domain-check check 23 (version gate + candidate)"
+echo "ok domain-check check 23 (version gate + aday + incele)"
