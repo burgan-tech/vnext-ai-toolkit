@@ -4,7 +4,7 @@ vNext runs C# scripts (`.csx` files) as "mappings" — input/output adapters bet
 
 > **Interface contracts come from the NuGet packages.** See `csx-contracts.md` for the exact type signatures, the `ScriptContext` API, and standard `using` directives. This file gives the conceptual map: when do you write which interface?
 
-> **Task bindings: declarative first.** On a runtime after 0.0.106 with a vnext-schema that has the
+> **Task bindings: declarative first.** On runtime 0.0.107 or later with a vnext-schema that has the
 > blocks, a task binding can use `input` / `output` blocks (`select`, `into`, `set`) instead of an
 > `IMapping` — `declarative-task-mappings.md`. The interfaces below remain the escape hatch and are still
 > the only option for every non-task-binding slot (rules, timers, subflows, FanOut, notifications, events).

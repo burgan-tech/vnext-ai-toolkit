@@ -5,7 +5,7 @@ A task binding (`state.onEntries[]` / `onExits[]`, `transition.onExecutionTasks[
 **without a `.csx` file**: two optional JSON blocks, `input` and `output`, each with `select`, `into` and
 `set`. Values in `set` are Dynamic Expresso expressions — no Roslyn compile, checked at publish.
 
-> **Availability.** Runtime: the first release after **0.0.106**. Schema: the vnext-schema release that
+> **Availability.** Runtime: **0.0.107** and later. Schema: the vnext-schema release that
 > adds `inputMappingBlock` / `outputMappingBlock`. On 0.0.106 / schema 0.0.61 a binding still needs
 > `mapping`; check the project's pinned versions before scaffolding blocks. Runtime contract:
 > vnext `docs/runtime/declarative-task-mappings.md`.
