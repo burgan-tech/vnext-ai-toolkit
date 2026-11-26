@@ -101,7 +101,7 @@ For each task this extension calls:
 
 ### 8. Scaffold the mapping — declarative blocks or `.csx`
 
-When the enrichment is a plain projection of the upstream response (`select` / `into` / `set` over `result`), use a declarative `output` block instead of `mapping` (runtime 0.0.107+ and a vnext-schema with the blocks — `references/concepts/declarative-task-mappings.md`); `user.available` is always false in an extension. Otherwise write a `.csx`:
+When the enrichment is a plain projection of the upstream response (`select` / `into` / `set` over `result`), use a declarative `output` block instead of `mapping` — the default on `runtimeVersion` >= 0.0.107 (`references/concepts/declarative-task-mappings.md` § Version gate); `user.available` is always false in an extension. Below 0.0.107, or when the enrichment needs a `.csx` (e.g. `DecryptAsync`, loops, helpers), write one:
 
 The mapping shapes the upstream task's response into the enrichment object that gets attached to the instance read response. Since 0.0.99 a master-schema field with `x-encryption: { type: "encrypt" }` reaches the script as its `ENCRYPTED:…` token — call `await context.Instance.DecryptAsync("path", ct)` only when the plain value is really needed, and never copy it into the extension output (that would bypass field protection; `references/concepts/field-protection.md`). Typical signature:
 

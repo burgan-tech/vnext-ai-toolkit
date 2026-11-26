@@ -140,12 +140,13 @@ For client-callable endpoints (LOV functions, BFF-style aggregation, stateless s
   BFF View** decision (view need → `inputView`/`outputView`; no view need → plain API — proposed to
   the user for confirmation, never assumed).
 
-For `.csx` mappings (auto-transition rules, timer schedules, custom input/output handlers):
-- The relevant component skill scaffolds them using `csx-contracts.md` for interface signatures.
+For mappings (auto-transition rules, timer schedules, custom input/output handlers):
+- The form follows the version gate in `references/concepts/declarative-task-mappings.md` § Version gate: blocks / Dynamic Expresso on `runtimeVersion` >= 0.0.107, `.csx` below that or where blocks cannot.
+- The relevant component skill scaffolds them; a `.csx` uses `csx-contracts.md` for interface signatures.
 
 ### Phase 4 — Workflow Assembly
 
-Once components are designed (or stubbed), delegate to `workflow-scaffold`. Pass the structured state/transition graph from Phase 2 plus references to all components from Phase 3. The skill emits the workflow JSON, the `src/` folder for `.csx` files, and an `.http` test file.
+Once components are designed (or stubbed), delegate to `workflow-scaffold`. Pass the structured state/transition graph from Phase 2 plus references to all components from Phase 3. The skill emits the workflow JSON, the `src/` folder for any `.csx` files, and an `.http` test file.
 
 ### Phase 5 — Test & Validate
 

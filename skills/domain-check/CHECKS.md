@@ -551,6 +551,47 @@ floating line, ask how many versions the referenced components have; a short his
 [resource-lock.md](../../references/concepts/resource-lock.md),
 [runtime-operations.md](../../references/concepts/runtime-operations.md) § Component cache.
 
+## 23. `.csx` mappings a block can replace (0.0.107)
+
+**Scanner:** the `## surum gecisi (0.0.107)` block (printed only when `runtimeVersion` >= 0.0.107;
+below that one line says blocks need 0.0.107), plus `blockMigration` in `--json`. `--runtime-version
+0.0.107` reads the gates as if the package were already there (what-if before a bump).
+
+Runtime 0.0.107 added declarative `select` / `into` / `set` blocks on task bindings, transition
+`output`, SubFlow (`S`) `input` / `output`, event `input`, and workflow / function `output`. The
+scanner lists every `.csx` (`mapping` with `location` / `code`, and a script-shaped workflow or
+function `output`) on those sites, reads the script (the file at `location`, else the inline `code`,
+base64 unless `encoding` is `NAT`) and marks it `aday` or `kalir`. Every candidate is **Yapılsa iyi
+olur**, never Yapılmalı: the `.csx` keeps working. The gain is readability, publish-time checking,
+a 15x cheaper compile on the first call after a publish or pod start and less memory per mapping; a
+compiled `.csx` is 1–2 µs faster per call, so never sell the migration as speed
+([declarative-task-mappings.md § Version gate](../../references/concepts/declarative-task-mappings.md#version-gate--which-form-to-scaffold)).
+
+| Scanner line | What it means | Recommend |
+|---|---|---|
+| `bloga cevrilebilir .csx` | the script matched no blocker on a block-capable site | offer `migrate-to-blocks`; read the script first — the scan is a text heuristic |
+| `.csx kalir (neden: adet)` | the site or the script needs a `.csx` | nothing; it is the inventory of what stays and why |
+| `.csx mapping (N) — declarative bloklar runtime 0.0.107+ ister` | runtime below 0.0.107 | no migration; mention it only next to a runtime bump |
+
+`kalir` reasons, chosen conservatively (a missed candidate costs nothing, a wrong one breaks a
+mapping): the site — FanOut / Notification / Human task binding, SubProcess (`P`) mapping, an
+unreadable or `REF` script; the text — `GetSecret*`, `GetFileAsync`, `context.Related`,
+`DecryptAsync`, `InstanceQuery`, `Selector`, `for` / `foreach` / `while` / `do`, `throw`,
+`try`, `ScriptBase` helpers (`GetPropertyValue`, `HasProperty`, `SetProperty`, `CreateObject`,
+`List*` …), a `*Helper.` class or a `scripts.helpers` class name, a method other than the
+interface's handlers, a `Log*` call, `byte[]` / `ScriptFile`, `Mutations`, LINQ / lambdas, an
+`await` other than `await Task.FromResult`, a `using` outside `System` / `BBT.`, `GetConfigValue`
+outside a task binding (`config.get` exists only there), more than 3 `if`, more than 60 code lines.
+
+**Verify:** open each candidate before proposing it — the scanner reads text, not semantics (a
+dynamic member read that may be absent, a culture-sensitive number format, a header read through
+the indexer). A transition `mapping` on an automatic or scheduled transition is not listed: those
+transitions take neither form.
+
+**Docs:** toolkit references
+[declarative-task-mappings.md](../../references/concepts/declarative-task-mappings.md),
+[mapping-types.md](../../references/concepts/mapping-types.md); the `migrate-to-blocks` skill.
+
 ## Tooling (optional)
 
 If the user asks about build or validation speed, the template tooling at the domain root is

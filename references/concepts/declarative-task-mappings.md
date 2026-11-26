@@ -10,6 +10,37 @@ A task binding (`state.onEntries[]` / `onExits[]`, `transition.onExecutionTasks[
 > `mapping`; check the project's pinned versions before scaffolding blocks. Runtime contract:
 > vnext `docs/runtime/declarative-task-mappings.md`.
 
+## Version gate — which form to scaffold
+
+This is the one rule every scaffolding skill and agent follows. Read `runtimeVersion` from the
+workspace's `vnext.config.json` (or the named variant the user works in):
+
+| `runtimeVersion` | Scaffold |
+|---|---|
+| **>= 0.0.107** | Blocks / Dynamic Expresso **by default** on every block-capable site: task bindings, transition `output`, SubFlow (`S`) `input` / `output`, event `input`, workflow and function `output`, and the Dynamic Expresso value slots (rules, keys, timers — [`mapping-types.md`](mapping-types.md)). A `.csx` only where the table in the next section says so. |
+| **< 0.0.107** (or unknown) | `.csx` (`IMapping` and the other interfaces). Blocks fail publish there. |
+
+The schema pin must also carry the block definitions; if `npm run validate` rejects `input` /
+`output` on a binding, bump `schemaVersion` the way `/vnext-ai-toolkit:vnext-init` does before
+scaffolding blocks. An existing domain on >= 0.0.107 with `.csx` mappings a block can express:
+offer the `migrate-to-blocks` skill (domain-check check 23 lists the candidates) — offer, never
+convert unasked.
+
+**Why blocks, and what they cost.** Measured on the same task mapping in both forms (vnext
+`test/BBT.Workflow.Benchmarks/baselines/2026-11-26-mapping-form.md`):
+
+| Phase | `.csx` | Block |
+|---|---|---|
+| Output mapping, compiled (per execution) | 0.67 µs | 1.54 µs |
+| Input mapping, compiled (per execution) | 1.3 µs | 3.5 µs |
+| First execution after publish / pod start (compile) | 7.1 ms, 1.6 MB allocated | 0.48 ms, 164 KB |
+| Memory kept per compiled mapping | about 11 KB | about 4 KB |
+
+Once compiled a `.csx` runs 2–2.6x faster per call, a 1–2 µs gap that is small against a
+transition hop; a block compiles 15x faster, allocates 10x less on that first run and keeps less
+memory. Choose blocks for readability, publish-time checking, compile cost and memory — never
+describe them as simply "faster".
+
 ## Default: blocks first, `.csx` as the escape hatch
 
 Scaffold blocks for a new binding when every step is "copy this value there" or "compute this value from
@@ -17,10 +48,13 @@ one expression". Keep (or write) an `IMapping` `.csx` when the binding needs any
 
 | Need | Why blocks cannot do it |
 |---|---|
-| Secrets (`GetSecretAsync`), `GetFileAsync`, `context.Related`, `DecryptAsync` | Expressions see variables only, no I/O |
+| Secrets (`GetSecret*`), `GetFileAsync`, `context.Related`, `DecryptAsync`, `InstanceQuery` | Expressions see variables only, no I/O |
 | Loops, branching over several statements, helpers (`scripts.helpers`) | One expression per target |
 | Throwing to stop the call from the input side | Blocks never stop the call |
 | FanOut (21), Notification (10), Human tasks | The runtime **rejects** blocks on these at run time (`IFanOutMapping` / `INotificationMapping`) |
+| SubProcess (`P`) mapping | A `P` state rejects both blocks; it is started by its own task |
+| Event mapping that builds a `Selector` (`InstanceQuery` correlation filter) | No block form; a block that sets no key is ignored like an unmatched event |
+| Binary function response (`byte[]`, `ScriptFile`) | Script-only |
 
 `mapping` and the blocks are **mutually exclusive** on one binding — schema and publish both reject a
 binding with both, and one with neither.

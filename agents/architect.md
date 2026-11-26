@@ -132,8 +132,10 @@ before writing the output. Pull the option sets from the schema, not from memory
    transitions need Views, which Schemas are needed (master + per-transition payloads),
    and whether instance-read enrichment needs an Extension. Use
    `references/concepts/function-vs-extension-vs-task.md` to pick the right component.
-7. **`.csx` mappings.** Identify the input/output mappings, auto-transition rules, and
-   timer schedules needed under the workflow's `src/`, with their interfaces
+7. **Mappings.** Identify the input/output mappings, auto-transition rules, and timer schedules,
+   and the form of each by the version gate (`references/concepts/declarative-task-mappings.md` § Version gate): on
+   `runtimeVersion` >= 0.0.107 declarative blocks / Dynamic Expresso expressions, a `.csx` under
+   the workflow's `src/` only for the stay-`.csx` cases; below 0.0.107 `.csx` with their interfaces
    (`IMapping` / `IConditionMapping` / `ITimerMapping` — see
    `references/concepts/csx-contracts.md`).
 8. **Forms and the client.** For every input step, answer *"can a later step send the person back
@@ -152,7 +154,7 @@ Produce a design (markdown, no JSON authoring) that the `component-author` can i
 1. The full path list of component files to add/change and each one's responsibility.
 2. For workflows: the states, the `startTransition`, the transition map (with
    `triggerType` per transition; auto transitions covering every branch —
-   exclusive rules or `priority` + a `triggerKind: 10` default), and the `.csx` mappings/rules/timers needed under `src/`, plus a `.http`
+   exclusive rules or `priority` + a `triggerKind: 10` default), and the mappings/rules/timers with their form (blocks on 0.0.107+, `.csx` under `src/` below that or where blocks cannot), plus a `.http`
    test file.
 3. For tasks/functions/extensions: chosen `type`/`scope` and how they're referenced
    (nested `{ key, domain, flow, version }` shape).

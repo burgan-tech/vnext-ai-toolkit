@@ -7,6 +7,7 @@ Standard library only.
 
 Usage:
   python3 scan.py [root] [--config FILE] [--schema-dir DIR] [--no-fetch] [--json]
+                  [--runtime-version V]
 
   root          domain package root; default: walk up from the current directory to the
                 first folder holding the config file (exit 2 if there is none)
@@ -15,6 +16,9 @@ Usage:
   --schema-dir  folder holding the vnext-schema *-definition.schema.json files
   --no-fetch    never download schemas (offline / CI)
   --json        machine-readable output
+  --runtime-version
+                read the version gates as if the package were on runtime V (what-if before a
+                bump); the config file is not changed
 
 Enum labels (task types, trigger types, error actions, extension type/scope, function
 scope, state type/subtype) are read from the domain's pinned @burgan-tech/vnext-schema at
@@ -23,6 +27,8 @@ then the plugin manifest's vnext.schemaFallbackUrl at the config's schemaVersion
 that cannot be resolved is printed as the raw value with a `!! ENUM:` warning.
 """
 import argparse
+import base64
+import binascii
 import collections
 import glob
 import json
@@ -58,6 +64,36 @@ TOKEN_TASK_RE = re.compile(r"token|oauth|login|auth", re.I)
 LOCK_CONFLICT, LOCK_REJECTED = "Execution:200010", "Execution:200014"
 LOCK_CODES = {LOCK_CONFLICT, LOCK_REJECTED}
 FULL_VERSION_RE = re.compile(r"^\d+\.\d+\.\d+-")
+# Check 23: what keeps a .csx mapping from becoming a declarative block (runtime 0.0.107).
+# Conservative on purpose: a false "kalir" costs a missed suggestion, a false "aday" costs a
+# broken migration. Each entry: (reason printed to the user, pattern over the script text).
+BLOCK_BLOCKERS = [
+    ("secret okuma (GetSecret*)", re.compile(r"\bGetSecrets?(?:Async)?\b")),
+    ("dosya okuma (GetFileAsync)", re.compile(r"\bGetFileAsync\b")),
+    ("context.Related", re.compile(r"\bcontext\s*\.\s*Related\b")),
+    ("DecryptAsync", re.compile(r"\bDecryptAsync\b")),
+    ("InstanceQuery", re.compile(r"\bInstanceQuery\b")),
+    ("Selector (event korelasyon filtresi)", re.compile(r"\bSelector\b")),
+    ("dongu (for/foreach/while)", re.compile(r"\b(?:for|foreach|while)\s*\(|\bdo\s*\{")),
+    ("throw", re.compile(r"\bthrow\b")),
+    ("try/catch", re.compile(r"\btry\s*\{")),
+    ("ScriptBase yardimcisi (GetPropertyValue/HasProperty/...)",
+     re.compile(r"\b(?:GetPropertyValue|HasProperty|SetProperty|RemoveProperty|CreateObject|CreateList|GetList|AsList"
+                r"|ToDictionary|List[A-Z]\w*)\s*[<(]")),
+    ("yardimci sinif (*Helper.)", re.compile(r"\b[A-Z]\w*Helpers?\s*\.")),
+    ("log cagrisi (blokta log yok)", re.compile(r"\bLog(?:Information|Warning|Error|Debug|Critical|Trace)\s*\(")),
+    ("binary yanit (byte[]/ScriptFile)", re.compile(r"\bbyte\s*\[\s*\]|\bScriptFile\b")),
+    ("Mutations (blogu yok)", re.compile(r"\bMutations\b")),
+    ("await (I/O)", re.compile(r"\bawait\s+(?!Task\.FromResult\b)")),
+    ("harici kutuphane (using)", re.compile(r"^\s*using\s+(?!System\b|BBT\.)[\w.]+\s*;", re.M)),
+    ("LINQ / lambda", re.compile(r"=>\s*[^{;]*\b(?:Where|Select|Any|All|First|Sum|Count)\b|\.(?:Where|Select|Any|All|FirstOrDefault|Sum|OrderBy)\s*\(")),
+]
+BLOCK_MAX_IFS = 3          # more `if (` than this: branching a single expression per target cannot carry
+BLOCK_MAX_LINES = 60       # effective code lines (no usings, comments or brace-only lines)
+CONFIG_RE = re.compile(r"\bGetConfigValue\s*\(")
+# method declarations; the interface's own handlers (*Handler, Handle, ItemSelector) are not helpers
+METHOD_RE = re.compile(r"^\s*(?:(?:public|private|protected|internal|static|async|override)\s+)+"
+                       r"[\w<>\[\],?.\s]*?\b(\w+)\s*\(", re.M)
 
 
 # ---------------------------------------------------------------------------
@@ -425,10 +461,13 @@ def grant_roles(grant):
 # ---------------------------------------------------------------------------
 # the scan
 # ---------------------------------------------------------------------------
-def scan(root, cfg_path, schema_dir, no_fetch):
+def scan(root, cfg_path, schema_dir, no_fetch, runtime_override=None):
     manifest = read_manifest()
     mv = manifest.get("vnext") or {}
     cfg = load_json(cfg_path) or {}
+    configured_rt = cfg.get("runtimeVersion")
+    if runtime_override:
+        cfg["runtimeVersion"] = runtime_override
     paths = cfg.get("paths") or {}
     croot = os.path.join(root, paths.get("componentsRoot", "."))
     rt = ver(cfg.get("runtimeVersion"))
@@ -466,11 +505,13 @@ def scan(root, cfg_path, schema_dir, no_fetch):
              "ge_0_0_94": at_least(rt, "0.0.94"), "ge_0_0_99": at_least(rt, "0.0.99"),
              "ge_0_0_100": at_least(rt, "0.0.100"), "ge_0_0_104": at_least(rt, "0.0.104"),
              "ge_0_0_105": at_least(rt, "0.0.105"), "ge_0_0_106": at_least(rt, "0.0.106"),
+             "ge_0_0_107": at_least(rt, "0.0.107"),
              "schema_ge_0_0_61": at_least(ver(cfg.get("schemaVersion")), "0.0.61")}
     out = {
         "root": root, "config": os.path.relpath(cfg_path, root),
         "domain": cfg.get("domain"),
         "runtimeVersion": cfg.get("runtimeVersion"), "schemaVersion": cfg.get("schemaVersion"),
+        "runtimeVersionConfigured": configured_rt, "runtimeVersionOverridden": bool(runtime_override),
         "toolkitKnownRuntimeVersion": mv.get("knownRuntimeVersion"),
         "toolkitKnownSchemaVersion": mv.get("knownSchemaVersion"),
         "schemaSource": source, "schemaInstalledVersion": installed,
@@ -922,6 +963,9 @@ def scan(root, cfg_path, schema_dir, no_fetch):
             lk["floatingRefFiles"].append(os.path.relpath(f, root))
     out["resourceLock"] = lk
 
+    # ---- check 23: .csx mappings a declarative block can replace (0.0.107) ---
+    out["blockMigration"] = block_migration(root, croot, paths, wfs, tasks, by_stem, E, is_auto)
+
     # ---- orphans -----------------------------------------------------------
     all_json = files(croot, "*.json")
     csx_files = files(croot, "*.csx")
@@ -983,6 +1027,133 @@ def scan(root, cfg_path, schema_dir, no_fetch):
     return out
 
 
+def is_script(m):
+    """A ScriptCode-shaped value ({location, code}); a declarative block has neither member."""
+    return isinstance(m, dict) and ("location" in m or "code" in m)
+
+
+def script_text(comp_file, m, root, croot):
+    """(text, source) of a ScriptCode: the file at `location` (relative to the component file, the
+    components root or the package root), else the inline `code` (B64 by default, NAT as is).
+    text is None when the script cannot be read (REF encoding, missing file, empty code)."""
+    loc = m.get("location")
+    if isinstance(loc, str) and loc and loc != "dynamicExpresso":
+        for base in (os.path.dirname(comp_file), croot, root):
+            cand = os.path.normpath(os.path.join(base, loc))
+            if os.path.isfile(cand):
+                return read_text(cand), os.path.relpath(cand, root)
+    code = m.get("code")
+    if not isinstance(code, str) or not code.strip():
+        return None, loc or "?"
+    enc = str(m.get("encoding") or "B64").upper()
+    if enc == "REF":
+        return None, "REF"
+    if enc == "NAT":
+        return code, "inline"
+    try:
+        return base64.b64decode(code, validate=True).decode("utf-8", "replace"), "inline"
+    except (binascii.Error, ValueError):
+        return code, "inline"
+
+
+def block_blockers(text, site):
+    """Reasons a .csx mapping at `site` must stay a script; [] means a block can express it."""
+    why = [reason for reason, rx in BLOCK_BLOCKERS if rx.search(text)]
+    if site != "binding" and CONFIG_RE.search(text):
+        why.append("GetConfigValue (config.get yalniz gorev mapping'inde)")
+    if len(re.findall(r"\bif\s*\(", text)) > BLOCK_MAX_IFS:
+        why.append(f"cok dallanma (>{BLOCK_MAX_IFS} if)")
+    code = [ln for ln in text.splitlines()
+            if ln.strip() and not re.match(r"\s*(?://|using\s|[{}\[\]();,]+\s*$|/?\*)", ln)]
+    if len(code) > BLOCK_MAX_LINES:
+        why.append(f"uzun script (>{BLOCK_MAX_LINES} satir)")
+    local = {m for m in METHOD_RE.findall(text) if not m.endswith("Handler") and m not in ("Handle", "ItemSelector")}
+    if local:
+        why.append("yerel yardimci metod")
+    return why
+
+
+def block_migration(root, croot, paths, wfs, tasks, by_stem, E, is_auto):
+    """Check 23: every .csx mapping on a block-capable site, marked `aday` (a block can replace it)
+    or `kalir` (stays a script) with the reason."""
+    STAY_TASKS = {"fanout": "FanOut gorevi", "notification": "Notification gorevi", "human": "Human gorevi"}
+    SCHEDULED = E.codes("TriggerType", "scheduled")
+    sites = []
+
+    def add(site, where, comp_file, m, stay=None, helpers=()):
+        text, src = script_text(comp_file, m, root, croot)
+        if stay:
+            why = [stay]
+        elif text is None:
+            why = ["REF yardimci referansi" if src == "REF" else
+                   "bos mapping (location/code yok)" if not (m.get("location") or m.get("code")) else
+                   "script okunamadi (elle bakin)"]
+        else:
+            why = block_blockers(text, site)
+            why += [f"yardimci ({h})" for h in helpers if re.search(rf"\b{re.escape(h)}\b", text)]
+        sites.append({"site": site, "where": where, "file": os.path.relpath(comp_file, root), "script": src,
+                      "verdict": "kalir" if why else "aday", "reasons": why})
+
+    def helper_names(a):
+        sc = a.get("scripts") if isinstance(a.get("scripts"), dict) else {}
+        out = []
+        for h in sc.get("helpers") or []:
+            k = h.get("key") if isinstance(h, dict) else h
+            if isinstance(k, str):
+                out += [k, camel(k)[:1].upper() + camel(k)[1:]]
+        return out
+
+    def binding(entry, where, comp_file, helpers):
+        if not isinstance(entry, dict) or not is_script(entry.get("mapping")):
+            return
+        tk = ref_key(entry.get("task"), by_stem)
+        stay = STAY_TASKS.get((tasks.get(tk) or {}).get("norm"))
+        add("binding", f"{where} [{tk}]", comp_file, entry["mapping"], stay, helpers)
+
+    for w in wfs:
+        a, f, wk = w["_attrs"], w["file"], w["key"]
+        helpers = helper_names(a)
+        for origin, hook, entries in hooks_of(a):
+            for e in entries if isinstance(entries, list) else []:
+                binding(e, f"{wk}::{origin}.{hook}", f, helpers)
+        for origin, tr in transitions_of(a):
+            where = f"{wk}::{origin}->{tr.get('key')}"
+            auto = is_auto(tr) or str(tr.get("triggerType")) in SCHEDULED
+            if is_script(tr.get("mapping")) and not auto:
+                add("transition", where, f, tr["mapping"], None, helpers)
+            ev = tr.get("event")
+            if isinstance(ev, dict) and is_script(ev.get("mapping")):
+                add("event", f"{where}.event", f, ev["mapping"], None, helpers)
+        ev = a.get("event")
+        if isinstance(ev, dict) and is_script(ev.get("mapping")):
+            add("event", f"{wk}::event", f, ev["mapping"], None, helpers)
+        for s in a.get("states") or []:
+            sf = s.get("subFlow") if isinstance(s, dict) else None
+            if isinstance(sf, dict) and is_script(sf.get("mapping")):
+                stay = None if str(sf.get("type") or "S") == "S" else "SubProcess (P) mapping"
+                add("subflow", f"{wk}::{s.get('key')}.subFlow", f, sf["mapping"], stay, helpers)
+        if is_script(a.get("output")):
+            add("workflowOutput", f"{wk}::output", f, a["output"], None, helpers)
+    for f, d in components(croot, paths.get("functions", "Functions")):
+        a = d["attributes"]
+        helpers = helper_names(a)
+        binding(a.get("task"), f"{d['key']}::task", f, helpers)
+        for e in a.get("onExecutionTasks") or []:
+            binding(e, f"{d['key']}::onExecutionTasks", f, helpers)
+        if is_script(a.get("output")):
+            add("functionOutput", f"{d['key']}::output", f, a["output"], None, helpers)
+    for f, d in components(croot, paths.get("extensions", "Extensions")):
+        a = d["attributes"]
+        binding(a.get("task"), f"{d['key']}::task", f, helper_names(a))
+
+    reasons = collections.Counter(r for x in sites for r in x["reasons"])
+    return {"sites": sites,
+            "candidates": sum(1 for x in sites if x["verdict"] == "aday"),
+            "stays": sum(1 for x in sites if x["verdict"] == "kalir"),
+            "bySite": dict(collections.Counter(f"{x['site']}:{x['verdict']}" for x in sites)),
+            "stayReasons": dict(reasons.most_common())}
+
+
 def ref_nodes(o, top=False):
     """Component references ({key, flow, version}) below the envelope."""
     if isinstance(o, dict):
@@ -1041,6 +1212,8 @@ def human(o):
     p(f"# domain: {o['domain']}  runtime: {o['runtimeVersion']}  schema: {o['schemaVersion']}"
       f"   (toolkit bilinen: runtime {o['toolkitKnownRuntimeVersion']} / schema {o['toolkitKnownSchemaVersion']})")
     p(f"  config: {o['config']}   kok: {o['root']}")
+    if o.get("runtimeVersionOverridden"):
+        p(f"  !! runtime --runtime-version ile {o['runtimeVersion']} sayildi (config: {o['runtimeVersionConfigured']})")
     p(f"  sema kaynagi: {o['schemaSource']}   kurulu vnext-schema: {o['schemaInstalledVersion'] or '?'}")
     for w in o["schemaWarnings"]:
         p(f"  !! SCHEMA: {w}")
@@ -1243,6 +1416,24 @@ def human(o):
           f"{o['runtimeVersion']}: bilinen sorun floating-version-resolution-loads-every-version; uzun publish "
           f"gecmisli component'te OOM / sessizce eski surum. 0.0.106'ya gecin ya da o referanslari tam surume cekin")
     p("")
+    bm = o["blockMigration"]
+    if bm["sites"] and g.get("ge_0_0_107") is not True:
+        p(f"  .csx mapping ({len(bm['sites'])}) — declarative bloklar runtime 0.0.107+ ister "
+          f"(runtime {o['runtimeVersion']}); gecis onerisi yok")
+        p("")
+    elif g.get("ge_0_0_107"):
+        p("## surum gecisi (0.0.107)")
+        p(f"  .csx mapping (blok alabilen yerde): {len(bm['sites'])}  aday: {bm['candidates']}  kalir: {bm['stays']}")
+        cands = [x for x in bm["sites"] if x["verdict"] == "aday"]
+        if cands:
+            p(f"  bloga cevrilebilir .csx ({len(cands)}; migrate-to-blocks):")
+            for x in cands[:15]:
+                p(f"    {x['site']:15} {x['where']}  <- {x['script']}")
+            if len(cands) > 15:
+                p(f"    ... +{len(cands) - 15}")
+        if bm["stayReasons"]:
+            p("  .csx kalir (neden: adet): " + ", ".join(f"{r}: {n}" for r, n in bm["stayReasons"].items()))
+        p("")
     p("## en agir viewlar")
     for v in o["heaviestViews"]:
         p(f"    {v['bytes']:7} {os.path.relpath(v['file'], o['root'])}")
@@ -1264,6 +1455,7 @@ def main(argv=None):
     ap.add_argument("--schema-dir")
     ap.add_argument("--no-fetch", action="store_true")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--runtime-version", help="read the version gates as if the package were on this runtime")
     args = ap.parse_args(argv)
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -1275,7 +1467,7 @@ def main(argv=None):
         print(f"{name} bulunamadi ({os.path.abspath(args.root or os.getcwd())} ve ust klasorleri). "
               "domain-check yalnizca bir vNext domain paketinde calisir.", file=sys.stderr)
         return 2
-    res = scan(root, cfg_path, args.schema_dir, args.no_fetch)
+    res = scan(root, cfg_path, args.schema_dir, args.no_fetch, args.runtime_version)
     for w in res["workflows"]:
         w["file"] = os.path.relpath(w["file"], root)
     if args.json:

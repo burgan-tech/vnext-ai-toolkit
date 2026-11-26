@@ -4,10 +4,20 @@ vNext runs C# scripts (`.csx` files) as "mappings" — input/output adapters bet
 
 > **Interface contracts come from the NuGet packages.** See `csx-contracts.md` for the exact type signatures, the `ScriptContext` API, and standard `using` directives. This file gives the conceptual map: when do you write which interface?
 
-> **Task bindings: declarative first.** On runtime 0.0.107 or later with a vnext-schema that has the
-> blocks, a task binding can use `input` / `output` blocks (`select`, `into`, `set`) instead of an
-> `IMapping` — `declarative-task-mappings.md`. The interfaces below remain the escape hatch and are still
-> the only option for every non-task-binding slot (rules, timers, subflows, FanOut, notifications, events).
+> **Declarative first on 0.0.107+.** On runtime 0.0.107 or later with a vnext-schema that has the
+> blocks, these sites take `select` / `into` / `set` blocks instead of an interface below: task
+> bindings (`IMapping`), transition `output` (`ITransitionMapping`; not on automatic or scheduled
+> transitions), SubFlow `S` `input` / `output` (`ISubFlowMapping`), event `input` (`IEventMapping`),
+> and workflow / function `output` (`IOutputHandler`). These slots take an inline Dynamic Expresso
+> expression (`location: "dynamicExpresso"`, `encoding: "NAT"`) instead of a script: auto-transition,
+> view, `schemas[]`, long-poll and state-notification `rule` (`IConditionMapping`), CacheAside `key` and
+> function cache keys (`ICacheKeyMapping`), resource-lock `keyExpression`, transition `timer`, workflow
+> and SubFlow `timeout.mapping` (`ITimerMapping`), agent prompt and decision. Still `.csx` only:
+> FanOut (`IFanOutMapping`), Notification (`INotificationMapping` / `IStateNotificationMapping`),
+> Human tasks, SubProcess `P` (`ISubProcessMapping`), an event mapping that builds a `Selector`, agent
+> `hintsMapping`, and any mapping that needs secrets, files, `context.Related`, `DecryptAsync`,
+> `InstanceQuery`, loops or helpers. Which form to scaffold:
+> [`declarative-task-mappings.md` § Version gate](declarative-task-mappings.md#version-gate--which-form-to-scaffold).
 
 ## Interface inventory
 

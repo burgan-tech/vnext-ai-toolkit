@@ -59,6 +59,7 @@
     "./skills/security-audit",
     "./skills/e2e-local",
     "./skills/domain-check",
+    "./skills/migrate-to-blocks",
     "./skills/report-runtime-issue",
     "./skills/domain-request",
     "./skills/cluster-publish",
