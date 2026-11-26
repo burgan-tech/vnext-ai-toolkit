@@ -170,7 +170,7 @@ Response headers/status: `result.headers["x-request-id"]`, `result.statusCode`.
 
 ### `input` and `headers`
 
-- `input` is one value per hop (the triggering request body); `input == null` tells a continuation or timer from the triggering hop.
+- `input` is one value per hop (the triggering request body); `input == null` tells a continuation or timer from the triggering hop. Exceptions: in an event `input` block it is the event payload; task mappings on an event-triggered transition see the mapped body the event block built; in a function it is the function request body.
 - `x-encryption` fields arrive in **plaintext**: copying one to an unprotected path stores plaintext (writing it back to its own path keeps the protection; `data.email` is the stored token and cannot go elsewhere). `x-storage` fields arrive as the stored handle, except the transition / start `schemas[]` rule, which sees the request as sent.
 - `headers["x-channel"]` (indexer for hyphenated names; `null` when absent) and `headers.has("x-channel")`. The `Workflow:HeaderExposure:Deny` list applies. `headers` is **not** a `select` root — read it with `set`. `task.headers` is the task's own **outgoing** headers, not `headers`; forward one with `"$.headers.x-channel": "headers[\"x-channel\"]"`.
 
@@ -221,6 +221,38 @@ Three more sites take a block instead of a C# `mapping` (a block and a `mapping`
 }
 ```
 
+## Blocks on events, workflow output and function output
+
+Three more sites take a block beside their script: an event's `input` (beside `mapping`), and a workflow's or a function's `output` (beside the `output` script). On all three `select` and `into` must come **together** (either alone is a publish error), an empty block is a publish error, and `headers` is never a `select` root.
+
+| Site | Variables | Target | Notes |
+|---|---|---|---|
+| Event `input` | `input` (event payload), `now`, `context`, `headers` | `{ key, attributes }` | `key` is a string or unset; no `data` / `instance` / `user`; `mapping` and `input` together is a publish error; `Selector` stays C#-only |
+| Workflow `output` | `data`, `input`, `instance`, `now`, `user`, `context`, `headers` | `{ data, statusCode, headers }` | Sync start / transition response only, never for sub-flow instances; `input` is `null` when no hop ran here (idempotent start, proxy to a SubFlow); a block failure falls back to the standard envelope |
+| Function `output` | `data`, `input` (request body), `instance`, `now`, `context`, `headers`, `result` | `{ data, statusCode, headers }` | `select` reads `result` (`{ <variableKey>: { body, headers, statusCode } }`), no default; **no caller**: reading `user` is a publish error; `statusCode` / `headers` take effect only with `rawResponse: true` |
+
+In a workflow or function `output` JSON, an object with `location` / `code` is a script and one with `select` / `into` / `set` is a block; both together is a publish 400.
+
+```json
+"event": {
+  "input": { "select": "$.input.payload", "into": "$.attributes",
+             "set": { "$.key": "input.customerId.ToString()" } }
+}
+```
+
+```json
+"output": { "select": "$.data.score", "into": "$.data.score",
+            "set": { "$.statusCode": "201", "$.headers.x-score-band": "data.score > 700 ? \"high\" : \"low\"" } }
+```
+
+```json
+"rawResponse": true,
+"output": { "select": "$.fetch.body.items", "into": "$.data.items",
+            "set": { "$.data.count": "result.fetch.body.items.AsArrayLength()", "$.statusCode": "200" } }
+```
+
+Binary function responses (`byte[]`, `ScriptFile`) stay a `.csx` `IOutputHandler`.
+
 ## Authoring checklist
 
 1. Pick blocks vs `.csx` with the table above.
@@ -232,3 +264,4 @@ Three more sites take a block instead of a C# `mapping` (a block and a `mapping`
 6. `npm run validate` against a vnext-schema that knows the blocks, then publish — publish errors carry the
    JSON location (`states[x].onEntries[0].output.set['$.a']: ...`).
 7. Transition and SubFlow sites: `output` on transitions, `input` / `output` on `type: S` SubFlow states; never alongside a `mapping`.
+8. Event `input`, workflow `output`, function `output`: `select` + `into` together, a string `key`, no `user` in a function output, `rawResponse: true` when setting `statusCode` / `headers`.
