@@ -231,6 +231,8 @@ Three more sites take a block beside their script: an event's `input` (beside `m
 | Workflow `output` | `data`, `input`, `instance`, `now`, `user`, `context`, `headers` | `{ data, statusCode, headers }` | Sync start / transition response only, never for sub-flow instances; `input` is `null` when no hop ran here (idempotent start, proxy to a SubFlow); a block failure falls back to the standard envelope |
 | Function `output` | `data`, `input` (request body), `instance`, `now`, `context`, `headers`, `result` | `{ data, statusCode, headers }` | `select` reads `result` (`{ <variableKey>: { body, headers, statusCode } }`), no default; **no caller**: reading `user` is a publish error; `statusCode` / `headers` take effect only with `rawResponse: true` |
 
+`.ToString()` on an absent event member fails the mapping; guard optional fields (`input.customerId != null ? input.customerId.ToString() : null`).
+
 In a workflow or function `output` JSON, an object with `location` / `code` is a script and one with `select` / `into` / `set` is a block; both together is a publish 400.
 
 ```json
@@ -242,7 +244,7 @@ In a workflow or function `output` JSON, an object with `location` / `code` is a
 
 ```json
 "output": { "select": "$.data.score", "into": "$.data.score",
-            "set": { "$.statusCode": "201", "$.headers.x-score-band": "data.score > 700 ? \"high\" : \"low\"" } }
+            "set": { "$.statusCode": "201", "$.headers.x-score-band": "data.score.AsDouble() > 700 ? \"high\" : \"low\"" } }
 ```
 
 ```json
