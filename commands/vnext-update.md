@@ -47,6 +47,9 @@ Compare the workspace `runtimeVersion` with the plugin's `knownRuntimeVersion`:
 - **Workspace newer** → one line: "This workspace targets runtime vX but the toolkit only knows vY —
   update the plugin (`claude plugin marketplace update burgan-tech`); until then treat toolkit
   guidance about newer behaviour as unverified."
+- **Workspace on 0.0.107 or later** (whichever case above) → also run
+  `python3 "${CLAUDE_PLUGIN_ROOT}/skills/domain-check/scan.py" --json`; when `blockMigration.candidates`
+  or `blockMigration.review` is above zero, add one line offering the `migrate-to-blocks` skill. Offer only; never convert unasked.
 
 This command never edits `vnext.config.json`.
 

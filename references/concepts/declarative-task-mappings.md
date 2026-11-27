@@ -5,10 +5,41 @@ A task binding (`state.onEntries[]` / `onExits[]`, `transition.onExecutionTasks[
 **without a `.csx` file**: two optional JSON blocks, `input` and `output`, each with `select`, `into` and
 `set`. Values in `set` are Dynamic Expresso expressions — no Roslyn compile, checked at publish.
 
-> **Availability.** Runtime: the first release after **0.0.106**. Schema: the vnext-schema release that
+> **Availability.** Runtime: **0.0.107** and later. Schema: the vnext-schema release that
 > adds `inputMappingBlock` / `outputMappingBlock`. On 0.0.106 / schema 0.0.61 a binding still needs
 > `mapping`; check the project's pinned versions before scaffolding blocks. Runtime contract:
 > vnext `docs/runtime/declarative-task-mappings.md`.
+
+## Version gate — which form to scaffold
+
+This is the one rule every scaffolding skill and agent follows. Read `runtimeVersion` from the
+workspace's `vnext.config.json` (or the named variant the user works in):
+
+| `runtimeVersion` | Scaffold |
+|---|---|
+| **>= 0.0.107** | Blocks / Dynamic Expresso **by default** on every block-capable site: task bindings, transition `output`, SubFlow (`S`) `input` / `output`, event `input`, workflow and function `output`, and the Dynamic Expresso value slots (rules, keys, timers — [`mapping-types.md`](mapping-types.md)). A `.csx` only where the table in the next section says so. |
+| **< 0.0.107** (or unknown) | `.csx` (`IMapping` and the other interfaces). Blocks fail publish there. |
+
+The schema pin must also carry the block definitions; if `npm run validate` rejects `input` /
+`output` on a binding, bump `schemaVersion` the way `/vnext-ai-toolkit:vnext-init` does before
+scaffolding blocks. An existing domain on >= 0.0.107 with `.csx` mappings a block can express:
+offer the `migrate-to-blocks` skill (domain-check check 23 lists the candidates) — offer, never
+convert unasked.
+
+**Why blocks, and what they cost.** Measured on the same task mapping in both forms (vnext
+`test/BBT.Workflow.Benchmarks/baselines/2026-11-26-mapping-form.md`):
+
+| Phase | `.csx` | Block |
+|---|---|---|
+| Output mapping, compiled (per execution) | 0.67 µs | 1.54 µs |
+| Input mapping, compiled (per execution) | 1.3 µs | 3.5 µs |
+| First execution after publish / pod start (compile) | 7.1 ms, 1.6 MB allocated | 0.48 ms, 164 KB |
+| Memory kept per compiled mapping | about 11 KB | about 4 KB |
+
+Once compiled a `.csx` runs 2–2.6x faster per call, a 1–2 µs gap that is small against a
+transition hop; a block compiles 15x faster, allocates 10x less on that first run and keeps less
+memory. Choose blocks for readability, publish-time checking, compile cost and memory — never
+describe them as simply "faster".
 
 ## Default: blocks first, `.csx` as the escape hatch
 
@@ -17,10 +48,13 @@ one expression". Keep (or write) an `IMapping` `.csx` when the binding needs any
 
 | Need | Why blocks cannot do it |
 |---|---|
-| Secrets (`GetSecretAsync`), `GetFileAsync`, `context.Related`, `DecryptAsync` | Expressions see variables only, no I/O |
+| Secrets (`GetSecret*`), `GetFileAsync`, `context.Related`, `DecryptAsync`, `InstanceQuery` | Expressions see variables only, no I/O |
 | Loops, branching over several statements, helpers (`scripts.helpers`) | One expression per target |
 | Throwing to stop the call from the input side | Blocks never stop the call |
 | FanOut (21), Notification (10), Human tasks | The runtime **rejects** blocks on these at run time (`IFanOutMapping` / `INotificationMapping`) |
+| SubProcess (`P`) mapping | A `P` state rejects both blocks; it is started by its own task |
+| Event mapping that builds a `Selector` (`InstanceQuery` correlation filter) | No block form; a block that sets no key is ignored like an unmatched event |
+| Binary function response (`byte[]`, `ScriptFile`) | Script-only |
 
 `mapping` and the blocks are **mutually exclusive** on one binding — schema and publish both reject a
 binding with both, and one with neither.
@@ -170,7 +204,7 @@ Response headers/status: `result.headers["x-request-id"]`, `result.statusCode`.
 
 ### `input` and `headers`
 
-- `input` is one value per hop (the triggering request body); `input == null` tells a continuation or timer from the triggering hop.
+- `input` is one value per hop (the triggering request body); `input == null` tells a continuation or timer from the triggering hop. Exceptions: in an event `input` block it is the event payload; task mappings on an event-triggered transition see the mapped body the event block built; in a function it is the function request body.
 - `x-encryption` fields arrive in **plaintext**: copying one to an unprotected path stores plaintext (writing it back to its own path keeps the protection; `data.email` is the stored token and cannot go elsewhere). `x-storage` fields arrive as the stored handle, except the transition / start `schemas[]` rule, which sees the request as sent.
 - `headers["x-channel"]` (indexer for hyphenated names; `null` when absent) and `headers.has("x-channel")`. The `Workflow:HeaderExposure:Deny` list applies. `headers` is **not** a `select` root — read it with `set`. `task.headers` is the task's own **outgoing** headers, not `headers`; forward one with `"$.headers.x-channel": "headers[\"x-channel\"]"`.
 
@@ -221,6 +255,40 @@ Three more sites take a block instead of a C# `mapping` (a block and a `mapping`
 }
 ```
 
+## Blocks on events, workflow output and function output
+
+Three more sites take a block beside their script: an event's `input` (beside `mapping`), and a workflow's or a function's `output` (beside the `output` script). On all three `select` and `into` must come **together** (either alone is a publish error), an empty block is a publish error, and `headers` is never a `select` root.
+
+| Site | Variables | Target | Notes |
+|---|---|---|---|
+| Event `input` | `input` (event payload), `now`, `context`, `headers` | `{ key, attributes }` | `key` is a string or unset; no `data` / `instance` / `user`; `mapping` and `input` together is a publish error; `Selector` stays C#-only |
+| Workflow `output` | `data`, `input`, `instance`, `now`, `user`, `context`, `headers` | `{ data, statusCode, headers }` | Sync start / transition response only, never for sub-flow instances; `input` is `null` when no hop ran here (idempotent start, proxy to a SubFlow); a block failure falls back to the standard envelope |
+| Function `output` | `data`, `input` (request body), `instance`, `now`, `context`, `headers`, `result` | `{ data, statusCode, headers }` | `select` reads `result` (`{ <variableKey>: { body, headers, statusCode } }`), no default; **no caller**: reading `user` is a publish error; `statusCode` / `headers` take effect only with `rawResponse: true` |
+
+`.ToString()` on an absent event member fails the mapping; guard optional fields (`input.customerId != null ? input.customerId.ToString() : null`).
+
+In a workflow or function `output` JSON, an object with `location` / `code` is a script and one with `select` / `into` / `set` is a block; both together is a publish 400.
+
+```json
+"event": {
+  "input": { "select": "$.input.payload", "into": "$.attributes",
+             "set": { "$.key": "input.customerId.ToString()" } }
+}
+```
+
+```json
+"output": { "select": "$.data.score", "into": "$.data.score",
+            "set": { "$.statusCode": "201", "$.headers.x-score-band": "data.score.AsDouble() > 700 ? \"high\" : \"low\"" } }
+```
+
+```json
+"rawResponse": true,
+"output": { "select": "$.fetch.body.items", "into": "$.data.items",
+            "set": { "$.data.count": "result.fetch.body.items.AsArrayLength()", "$.statusCode": "200" } }
+```
+
+Binary function responses (`byte[]`, `ScriptFile`) stay a `.csx` `IOutputHandler`.
+
 ## Authoring checklist
 
 1. Pick blocks vs `.csx` with the table above.
@@ -232,3 +300,4 @@ Three more sites take a block instead of a C# `mapping` (a block and a `mapping`
 6. `npm run validate` against a vnext-schema that knows the blocks, then publish — publish errors carry the
    JSON location (`states[x].onEntries[0].output.set['$.a']: ...`).
 7. Transition and SubFlow sites: `output` on transitions, `input` / `output` on `type: S` SubFlow states; never alongside a `mapping`.
+8. Event `input`, workflow `output`, function `output`: `select` + `into` together, a string `key`, no `user` in a function output, `rawResponse: true` when setting `statusCode` / `headers`.

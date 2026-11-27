@@ -171,6 +171,8 @@ Do not produce JSON before gathering: the schema's **role** (`attributes.type`: 
 
 ### C# mapping files (`.csx`)
 
+On `runtimeVersion` >= 0.0.107 a mapping is a declarative `select` / `into` / `set` block by default wherever the site takes one; a `.csx` is the fallback for what blocks cannot do, and the only form below 0.0.107 ([`declarative-task-mappings.md`](./.claude/references/declarative-task-mappings.md) § Version gate). `migrate-to-blocks` proposes block versions of existing `.csx` mappings.
+
 Workflows reference `.csx` files in `src/` next to the workflow JSON; the vNext VS Code extension base64-encodes them into `mapping.code` on save — **never encode by hand**. Class names PascalCase, file names kebab-case. Golden rules ([`csx-contracts.md`](./.claude/references/csx-contracts.md)):
 
 1. **No direct dynamic member access** — `ScriptBase` + `HasProperty` / `GetPropertyValue<T>` / `GetList`.
@@ -238,7 +240,7 @@ MockLab is the canonical mock API (Mockoon is gone). One collection file per dom
 
 ## Skills
 
-When a user wants to build a component end-to-end, prefer the matching toolkit skill over freestyling: `workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `e2e-local`, `validate-and-fix`, `security-audit`, `domain-check`, `report-runtime-issue`; `/vnext-design-process` for a whole workflow.
+When a user wants to build a component end-to-end, prefer the matching toolkit skill over freestyling: `workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `e2e-local`, `validate-and-fix`, `security-audit`, `domain-check`, `migrate-to-blocks`, `report-runtime-issue`; `/vnext-design-process` for a whole workflow.
 
 ## Critical Rules
 

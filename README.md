@@ -14,7 +14,7 @@ It ships these capabilities:
 
 1. **Seven specialized agents** that form a build pipeline — `analyst` → `architect` → `component-author` → `validator` → (`security-reviewer` + `doc-writer`), with `reviewer` for PR-style checks.
 2. **A multi-turn design orchestrator** (`vnext-architect`) for designing a whole workflow end-to-end — discovery → state machine → components → tests — through a structured decision tree.
-3. **Eighteen skills** — one umbrella reference skill (`authoring-vnext-components`) plus seventeen focused authoring, testing and review skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `e2e-local`, `validate-and-fix`, `security-audit`, `domain-check`, `report-runtime-issue`).
+3. **Nineteen skills** — one umbrella reference skill (`authoring-vnext-components`) plus eighteen focused authoring, testing and review skills (`workflow-scaffold`, `view-design`, `schema-design`, `component-task`, `component-function`, `component-extension`, `component-mapping`, `integration-test`, `e2e-local`, `validate-and-fix`, `security-audit`, `domain-check`, `migrate-to-blocks`, `report-runtime-issue`).
 4. **Twelve slash commands** — `/vnext-ai-toolkit:vnext-init`, `/vnext-ai-toolkit:vnext-update`, `/vnext-ai-toolkit:new-component`, `/vnext-ai-toolkit:vnext-design-process`, `/vnext-ai-toolkit:validate`, `/vnext-ai-toolkit:review-components`, `/vnext-ai-toolkit:build`, `/vnext-ai-toolkit:e2e`, `/vnext-ai-toolkit:security-audit`, `/vnext-ai-toolkit:domain-check` and `/vnext-ai-toolkit:report-issue` — as entry points.
 
 ## Install
@@ -184,6 +184,7 @@ Beyond the per-component pipeline, **`vnext-architect`** is a multi-turn orchest
 - **`validate-and-fix`** — runs `npm run validate`, categorizes failures, proposes schema-cited fixes before applying.
 - **`security-audit`** — runs a four-phase OWASP-style security review (recon → hunt → verify → report) for secrets, authz, injection, SSRF/path traversal, weak crypto, dependency issues, and misconfiguration. Candidates are verified for reachability and existing mitigations, scored for confidence (0–100), and written to `security-report/SECURITY-REPORT.md` with CWE/OWASP references.
 - **`domain-check`** — read-only runtime-cost and unused-capability audit of the domain package (CacheAside, GetInstances, error-boundary Retry, `P` vs `S`, same-order parallelism, function scope, `history: none`, `x-indexed`, behaviour changes the next runtime upgrade brings, …). A stdlib scanner reads enum labels from the pinned `@burgan-tech/vnext-schema`; every finding is verified in the file and triaged with you before a Turkish `Yapılmalı` / `Yapılsa iyi olur` report is written. Port of the runtime repo's `domain-performance-audit` (#27).
+- **`migrate-to-blocks`** — on runtime 0.0.107+, turns `.csx` mappings a declarative block can express into `select` / `into` / `set` blocks: takes the candidates from `domain-check` (check 23), proposes each block next to its `.csx`, and on approval replaces the mapping, bumps the component version and validates. Lists what stays `.csx` and why; never converts unasked.
 - **`report-runtime-issue`** — when a problem is the runtime's, not the domain's: triages against known gaps, live `vnext-meta` known issues and the docs, searches for duplicates, collects evidence, redacts secrets/PII/internal hosts, drafts an English issue and files it on `burgan-tech/vnext` only after your approval.
 - **`domain-request`** — opens a new domain on a platform-managed cluster: settles the inputs, walks the back-office client's request wizard (drives a browser when one is available), stops for the person at the summary and at approval, and watches the build. Ships no address: the client is found from the workspace's local file, from `oc`, or by asking.
 - **`cluster-publish`** — loads the workspace into a domain running on a cluster: proves the target and the caller's rights, port-forwards to the domain's orchestrator, lists what would be sent, publishes on a yes (`scripts/cluster-publish.mjs`, no default target) and starts a record to prove the load runs.
@@ -252,12 +253,12 @@ vnext-ai-toolkit/
 │   ├── analyst.md  architect.md  component-author.md
 │   ├── validator.md  reviewer.md  security-reviewer.md  doc-writer.md
 │   └── vnext-architect.md            # multi-turn end-to-end design orchestrator
-├── skills/                           # 18 skills
+├── skills/                           # 19 skills
 │   ├── authoring-vnext-components/SKILL.md   # core reference skill
 │   ├── workflow-scaffold/  view-design/  schema-design/
 │   ├── component-task/  component-function/  component-extension/  component-mapping/
 │   ├── integration-test/  e2e-local/  validate-and-fix/  security-audit/
-│   ├── domain-check/ (SKILL + CHECKS + scan.py)  report-runtime-issue/
+│   ├── domain-check/ (SKILL + CHECKS + scan.py)  migrate-to-blocks/  report-runtime-issue/
 │   └── domain-request/  cluster-publish/  backoffice-menu/  process-decompose/
 ├── commands/                         # 12 slash commands
 │   ├── vnext-init.md  vnext-update.md  new-component.md  vnext-design-process.md

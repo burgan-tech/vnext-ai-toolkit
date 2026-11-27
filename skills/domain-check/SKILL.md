@@ -14,7 +14,8 @@ and authorization are `/vnext-ai-toolkit:security-audit`. Stay on runtime cost a
 capability: CacheAside, GetInstances, error-boundary Retry, `P` vs `S` subflows, same-`order`
 parallelism, function `scope` and instance-address lookups, `history: none`, attribute indexes,
 behaviour changes a runtime upgrade brings to this package (checks 21–22, incl. resource-lock
-rules and floating version references), and the rest of
+rules and floating version references), `.csx` mappings a declarative block can replace on 0.0.107
+(check 23, handed to the `migrate-to-blocks` skill), and the rest of
 [CHECKS.md](CHECKS.md).
 
 Product teams run this without a vNext runtime checkout and without write access to the vNext
@@ -37,7 +38,8 @@ between sibling domains.
    `python3 "${CLAUDE_PLUGIN_ROOT}/skills/domain-check/scan.py" [root] [--config FILE]`
    — read-only, standard library only, writes nothing. `--json` gives the same data
    machine-readable; `--schema-dir DIR` points at a vnext-schema `schemas/` folder; `--no-fetch`
-   forbids the network fallback.
+   forbids the network fallback; `--runtime-version V` reads the version gates as if the package
+   were on V (what-if before a bump, e.g. check 23 on a package still pinned below 0.0.107).
    Enum labels are read at run time from the domain's pinned `@burgan-tech/vnext-schema`
    (`node_modules`, then parent folders, then the vnext-schema tag for the config's
    `schemaVersion`). The header prints where they came from and the installed version.

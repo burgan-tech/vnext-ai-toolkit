@@ -72,6 +72,13 @@ After a `runtimeVersion` bump: the toolkit test environment reads the image tag 
 `vnext.config.json`, so the next `/vnext-ai-toolkit:e2e` runs the new runtime; the e2e stamp (G4) turns
 stale until it does.
 
+**Declarative mappings (0.0.107).** After a bump to `runtimeVersion` >= 0.0.107, or on a workspace
+already there, run `python3 "${CLAUDE_PLUGIN_ROOT}/skills/domain-check/scan.py" --json` and read
+`blockMigration.candidates` (`aday`) and `blockMigration.review` (`incele`). When either is above zero, **offer** the `migrate-to-blocks` skill in one line
+("N `.csx` mappings could become declarative blocks — want a proposal?"). Offer only; never convert
+unasked. New components scaffold blocks by default from now on
+(`references/concepts/declarative-task-mappings.md` § Version gate).
+
 ## Steps 3+ — Layer / revise the toolkit-owned files
 
 These files are **not** produced by the CLI; they are the toolkit's value-add. For each one: resolve

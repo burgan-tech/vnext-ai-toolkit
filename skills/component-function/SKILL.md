@@ -1,6 +1,6 @@
 ---
 name: component-function
-description: Use when the user wants to create a vNext Function — a REST endpoint exposed by the runtime. Fetches function.json schema first, walks scope (D/F/I) and task composition (single-task vs multi-task), scaffolds the IMapping or IOutputHandler .csx using contracts from csx-contracts.md.
+description: Use when the user wants to create a vNext Function — a REST endpoint exposed by the runtime. Fetches function.json schema first, walks scope (D/F/I) and task composition (single-task vs multi-task), scaffolds declarative input/output blocks on runtime 0.0.107+ (an IMapping or IOutputHandler .csx below that, or where blocks cannot) using contracts from csx-contracts.md.
 ---
 
 # Component Function
@@ -129,9 +129,9 @@ For each task this function will call:
 - If a matching task already exists, reference it.
 - Otherwise, hand off to `component-task` first; come back when it's ready.
 
-### 8. Scaffold `.csx` mappings
+### 8. Scaffold mappings — blocks first, `.csx` as the fallback
 
-For each task reference, first consider declarative `input` / `output` blocks instead of a `mapping` (runtime after 0.0.106 + a vnext-schema with the blocks — `references/concepts/declarative-task-mappings.md`): the output block's result is the task's output, as an `OutputHandler`'s `Data` would be; `user.available` is always false in a function. A multi-task function's `output` (`IOutputHandler`) stays `.csx`. When a `.csx` is needed, scaffold an `IMapping` in `src/`. Inherit `ScriptBase` and read dynamic data ONLY through its helpers (`HasProperty`, `GetPropertyValue`) — direct dynamic access (`context.Body?.x`) throws `RuntimeBinderException` when the member is absent:
+Apply the version gate in `references/concepts/declarative-task-mappings.md` § Version gate. On `runtimeVersion` >= 0.0.107, scaffold declarative `input` / `output` blocks for each task reference instead of a `mapping`: the output block's result is the task's output, as an `OutputHandler`'s `Data` would be; `user.available` is always false in a function. A function's `output` is a declarative block by default too (`select` reads `result`, `{ <variableKey>: { body, headers, statusCode } }`, and needs `into`; no `user`; `statusCode` / `headers` only with `rawResponse: true`) — it also covers multi-task aggregation; reach for an `IOutputHandler` `.csx` only for what a block cannot do, such as binary responses (`byte[]`, `ScriptFile`). Below 0.0.107, or when a `.csx` is needed, scaffold an `IMapping` in `src/`. Inherit `ScriptBase` and read dynamic data ONLY through its helpers (`HasProperty`, `GetPropertyValue`) — direct dynamic access (`context.Body?.x`) throws `RuntimeBinderException` when the member is absent:
 
 ```csharp
 using System.Threading.Tasks;

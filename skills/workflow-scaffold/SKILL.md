@@ -1,6 +1,6 @@
 ---
 name: workflow-scaffold
-description: Use when the user wants to create a new vNext Workflow end-to-end. Plans the state/transition graph, scaffolds the workflow JSON + .csx mapping files + .http test file, and chains to view-design / schema-design as needed.
+description: Use when the user wants to create a new vNext Workflow end-to-end. Plans the state/transition graph, scaffolds the workflow JSON + declarative mapping blocks (runtime 0.0.107+; .csx below that or where blocks cannot) + .http test file, and chains to view-design / schema-design as needed.
 ---
 
 # Workflow Scaffold
@@ -40,9 +40,9 @@ Capture:
 - `paths.componentsRoot`
 - `paths.workflows`
 - `domain`
-- `runtimeVersion` (for `.http` test file header)
+- `runtimeVersion` (for the `.http` test file header, and the mapping form: blocks on >= 0.0.107, `.csx` below — `references/concepts/declarative-task-mappings.md` § Version gate)
 
-Target folder: `{componentsRoot}/{paths.workflows}/{workflow-key}/`. Inside it: `{workflow-key}-workflow.json`, `src/` (for `.csx` mappings), and a `.http` test file.
+Target folder: `{componentsRoot}/{paths.workflows}/{workflow-key}/`. Inside it: `{workflow-key}-workflow.json`, `src/` (only for the `.csx` mappings the version gate still calls for), and a `.http` test file.
 
 ### 2. Ask the workflow type
 
@@ -201,9 +201,9 @@ These can be deferred (scaffold the workflow first with placeholder refs, then f
 
 ### 7. Shape task bindings — declarative blocks first, then `.csx`
 
-For each `onEntries` / `onExits` / `onExecutionTasks` entry, first try declarative `input` / `output` blocks (`select`, `into`, `set` with Dynamic Expresso expressions) — `references/concepts/declarative-task-mappings.md` has the shape, variables (`data`, `input`, camelCase `instance`, `now`, `user`, `task`, `config`, `result`), config-field input targets (`$.url`, `$.body.x`, `$.headers.x`), the `API_BASEURL` URL as one expression, and the cases that still need a `.csx` (secrets, loops/helpers, FanOut/Notification/Human). Transitions take an `output` block and `type: S` SubFlow states `input` / `output` blocks in place of `mapping` (same file, § Blocks on transitions and SubFlow states); JSON values take no method calls without a conversion. Requires the first runtime release after 0.0.106 and a vnext-schema with the blocks; on older pins use `.csx`.
+For each `onEntries` / `onExits` / `onExecutionTasks` entry, first try declarative `input` / `output` blocks (`select`, `into`, `set` with Dynamic Expresso expressions) — `references/concepts/declarative-task-mappings.md` has the shape, variables (`data`, `input`, camelCase `instance`, `now`, `user`, `task`, `config`, `result`), config-field input targets (`$.url`, `$.body.x`, `$.headers.x`), the `API_BASEURL` URL as one expression, and the cases that still need a `.csx` (secrets, loops/helpers, FanOut/Notification/Human). Transitions take an `output` block and `type: S` SubFlow states `input` / `output` blocks in place of `mapping` (same file, § Blocks on transitions and SubFlow states); JSON values take no method calls without a conversion. Which form is the default is the version gate in `references/concepts/declarative-task-mappings.md` § Version gate: blocks on `runtimeVersion` >= 0.0.107, `.csx` below.
 
-For each entry that needs a `.csx` input/output mapping:
+Fallback — for each entry that still needs a `.csx` (runtime < 0.0.107, or a case in the stay-`.csx` table):
 
 - Create `src/{PascalCaseClassName}.csx` with a skeleton class.
 - The workflow JSON's `mapping.location` points to `./src/{file}.csx`; the VS Code extension auto-encodes the file into `mapping.code` (base64) on save. **Do not manually base64-encode.**

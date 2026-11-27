@@ -154,8 +154,8 @@ Confirm the exact shape against the schema each time; this is the gist:
   and `config`.
 - **view** — required `type` (integer) and `content`; optional `labels`, `display`.
 - **function** — required `scope` (enum `D`/`F`/`I`) and `task` (object with
-  `order`, `task`, and `mapping` — or, after runtime 0.0.106 with a schema that has them, declarative
-  `input`/`output` blocks instead: `references/concepts/declarative-task-mappings.md`; the same holds for every
+  `order`, `task`, and `mapping` — or declarative `input`/`output` blocks instead, the default on runtime
+  0.0.107+ (version gate: `references/concepts/declarative-task-mappings.md` § Version gate); the same holds for every
   workflow task binding); optional `labels`, `roles`. A rule-based `inputSchema` needs a
   rule-less last entry unless unmatched bodies should get `400 Function:800006` (runtime 0.0.105,
   breaking). Slot, view and schema rules can select by role with `await context.Caller.HasRoleAsync("x")`
@@ -176,7 +176,9 @@ Confirm the exact shape against the schema each time; this is the gist:
 
 ## C# scripts (`.csx`) — the `scriptCode` shape
 
-Workflows transform data, evaluate conditions, and compute schedules with C# scripts
+On `runtimeVersion` >= 0.0.107 the default is a declarative block or an inline Dynamic Expresso
+expression wherever the site takes one (`references/concepts/declarative-task-mappings.md` § Version gate); a `.csx` is the
+fallback there and the only form below 0.0.107. Workflows transform data, evaluate conditions, and compute schedules with C# scripts
 kept in a `src/` folder next to the workflow JSON. Every script reference (`mapping`,
 `rule`, `timer`) uses the same **`scriptCode`** object:
 
