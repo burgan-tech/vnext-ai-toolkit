@@ -154,7 +154,9 @@ Confirm the exact shape against the schema each time; this is the gist:
   and `config`.
 - **view** — required `type` (integer) and `content`; optional `labels`, `display`.
 - **function** — required `scope` (enum `D`/`F`/`I`) and `task` (object with
-  `order`, `task`, `mapping`); optional `labels`, `roles`. A rule-based `inputSchema` needs a
+  `order`, `task`, and `mapping` — or, after runtime 0.0.106 with a schema that has them, declarative
+  `input`/`output` blocks instead: `references/concepts/declarative-task-mappings.md`; the same holds for every
+  workflow task binding); optional `labels`, `roles`. A rule-based `inputSchema` needs a
   rule-less last entry unless unmatched bodies should get `400 Function:800006` (runtime 0.0.105,
   breaking). Slot, view and schema rules can select by role with `await context.Caller.HasRoleAsync("x")`
   (0.0.105, `references/concepts/csx-contracts.md` § Caller roles) — never by parsing `Headers.role`.
